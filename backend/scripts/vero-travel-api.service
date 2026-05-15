@@ -1,0 +1,22 @@
+[Unit]
+Description=Vero Travel Agents Golang API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vero-travel-agents/backend
+EnvironmentFile=/opt/vero-travel-agents/backend/.env
+ExecStart=/opt/vero-travel-agents/backend/vero-travel-api
+Restart=always
+RestartSec=5
+User=www-data
+Group=www-data
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

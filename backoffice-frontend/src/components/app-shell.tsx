@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   Bell,
   Bookmark,
   Bot,
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 
 const navigation = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/operations", label: "AI Operations", icon: Activity },
   { href: "/trips", label: "Current Trips", icon: Compass },
   { href: "/orders", label: "Orders", icon: ReceiptText },
   { href: "/saved", label: "Saved Destinations", icon: Bookmark },
