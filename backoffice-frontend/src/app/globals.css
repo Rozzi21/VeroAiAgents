@@ -25,11 +25,9 @@
 
 body {
   color: #111827;
-  background:
-    radial-gradient(circle at top left, rgba(253, 232, 232, 0.9), transparent 32rem),
-    linear-gradient(135deg, #fff 0%, #f7f7fb 45%, #fff 100%);
+  background: #fff;
   min-height: 100vh;
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
 * {

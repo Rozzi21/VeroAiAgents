@@ -41,7 +41,7 @@ func Load() Config {
 	cfg := Config{
 		AppEnv:           getEnv("APP_ENV", "development"),
 		Port:             getEnv("PORT", "8080"),
-		DatabaseHost:     getEnv("DATABASE_HOST", "postgresql.rozzi.my.id"),
+		DatabaseHost:     getEnv("DATABASE_HOST", "localhost"),
 		DatabasePort:     getEnv("DATABASE_PORT", "5432"),
 		DatabaseUser:     getEnv("DATABASE_USER", "vero_user"),
 		DatabasePassword: getEnv("DATABASE_PASSWORD", ""),

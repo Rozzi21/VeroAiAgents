@@ -1,4 +1,22 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vero-travel-postgres
+    environment:
+      POSTGRES_USER: vero_user
+      POSTGRES_PASSWORD: password_aman
+      POSTGRES_DB: vero_travel
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vero_user -d vero_travel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   vero-travel-api:
     build:
       context: .
@@ -6,11 +24,20 @@ services:
     container_name: vero-travel-api
     env_file:
       - .env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_URL: postgres://vero_user:password_aman@postgres:5432/vero_travel?sslmode=disable
     ports:
       - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
+
+volumes:
+  postgres_data:
