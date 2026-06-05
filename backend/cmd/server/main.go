@@ -57,6 +57,7 @@ func main() {
 		gin.Logger(),
 		middlewares.Recovery(),
 	)
+	router.Static("/uploads", "./uploads")
 	routes.Register(router, handler, serviceContainer)
 
 	server := &http.Server{

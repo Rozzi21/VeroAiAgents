@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -106,6 +109,24 @@ func (h *Handler) Chat(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "AI workflow completed", res)
 }
 
+func (h *Handler) GuestChat(c *gin.Context) {
+	var req dto.ChatRequest
+	if !bind(c, &req) {
+		return
+	}
+	user, err := h.Services.Auth.GuestUser()
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	res, err := h.Services.AI.Chat(user.ID, req)
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "AI workflow completed", res)
+}
+
 func (h *Handler) ChatSessions(c *gin.Context) {
 	sessions, err := h.Services.Repo.ListChatSessions(currentUserID(c))
 	if err != nil {
@@ -129,12 +150,35 @@ func (h *Handler) ChatMessages(c *gin.Context) {
 }
 
 func (h *Handler) ListTrips(c *gin.Context) {
-	trips, err := h.Services.Trips.List()
+	var query dto.TripListQuery
+	_ = c.ShouldBindQuery(&query)
+	trips, err := h.Services.Trips.List(query)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
 	}
 	utils.Success(c, http.StatusOK, "Trips", trips)
+}
+
+func (h *Handler) PublicPackages(c *gin.Context) {
+	var query dto.TripListQuery
+	_ = c.ShouldBindQuery(&query)
+	query.PublishedOnly = true
+	trips, err := h.Services.Trips.List(query)
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusOK, "Packages", trips)
+}
+
+func (h *Handler) GetPackage(c *gin.Context) {
+	trip, err := h.Services.Trips.FindBySlugOrID(c.Param("id"))
+	if err != nil || trip.Status != "published" {
+		utils.NotFound(c, "Package not found")
+		return
+	}
+	utils.Success(c, http.StatusOK, "Package", trip)
 }
 
 func (h *Handler) GetTrip(c *gin.Context) {
@@ -298,6 +342,39 @@ func (h *Handler) Analytics(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "Analytics dashboard", data)
+}
+
+func (h *Handler) UploadTripMedia(c *gin.Context) {
+	file, err := c.FormFile("file")
+	if err != nil {
+		utils.BadRequest(c, "Upload failed", gin.H{"detail": err.Error()})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
+	if !allowed[ext] {
+		utils.BadRequest(c, "Unsupported media type", gin.H{"extension": ext})
+		return
+	}
+
+	dir := filepath.Join("uploads", "trips")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	filename := uuid.NewString() + ext
+	path := filepath.Join(dir, filename)
+	if err := c.SaveUploadedFile(file, path); err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+
+	utils.Success(c, http.StatusCreated, "Media uploaded", dto.UploadResponse{
+		URL:      "/" + filepath.ToSlash(path),
+		Filename: filename,
+		Size:     file.Size,
+	})
 }
 
 func (h *Handler) EventStream(c *gin.Context) {

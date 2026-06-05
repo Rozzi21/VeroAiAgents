@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -16,85 +16,69 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch, assetURL, getToken, TripPackage } from "@/lib/api";
 
-type Category = "international" | "local";
+type Category = "all" | "international" | "local";
 type ViewMode = "grid" | "list";
 type ActivePanel = "trips" | "dashboard";
 type ModalType = "help" | "privacy" | null;
 
-const hasPublishedPackages = false;
-
-const trips = [
-  {
-    title: "Kyoto, Japan",
-    meta: "7 Days - 10 Slots",
-    date: "Oct 12 - Oct 19, 2024",
-    status: "Active",
-    statusColor: "bg-[#be123c]",
-    imageClass: "from-[#102b35] via-[#2f9aad] to-[#a7dee3]",
-    category: "international",
-  },
-  {
-    title: "Amalfi Coast, Italy",
-    meta: "10 Days - 8 Slots",
-    date: "Nov 02 - Nov 12, 2024",
-    status: "Upcoming",
-    statusColor: "bg-[#111827]",
-    imageClass: "from-[#3d8790] via-[#aee6de] to-[#e7fff7]",
-    category: "international",
-  },
-  {
-    title: "Reykjavik, Iceland",
-    meta: "5 Days - 12 Slots",
-    date: "Dec 15 - Dec 20, 2024",
-    status: "Planning",
-    statusColor: "bg-[#0f6b9d]",
-    imageClass: "from-[#062b27] via-[#2f8f91] to-[#dae8de]",
-    category: "international",
-  },
-  {
-    title: "Bali, Indonesia",
-    meta: "3 Days - 20 Slots",
-    date: "Jun 12 - Jun 15, 2024",
-    status: "Active",
-    statusColor: "bg-[#be123c]",
-    imageClass: "from-[#285943] via-[#77b255] to-[#f2e7c9]",
-    category: "local",
-  },
-  {
-    title: "Labuan Bajo",
-    meta: "4 Days - 14 Slots",
-    date: "Jul 04 - Jul 08, 2024",
-    status: "Upcoming",
-    statusColor: "bg-[#111827]",
-    imageClass: "from-[#15324a] via-[#2f8db8] to-[#f7b267]",
-    category: "local",
-  },
-] satisfies Array<{
-  title: string;
-  meta: string;
-  date: string;
-  status: string;
-  statusColor: string;
-  imageClass: string;
-  category: Category;
-}>;
-
 export function CurrentTripsScreen() {
   const [activePanel, setActivePanel] = useState<ActivePanel>("trips");
-  const [category, setCategory] = useState<Category>("international");
+  const [category, setCategory] = useState<Category>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<ModalType>(null);
+  const [packages, setPackages] = useState<TripPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    const params = new URLSearchParams();
+    if (category !== "all") {
+      params.set("category", category);
+    }
+    if (query) {
+      params.set("search", query);
+    }
+    const hasToken = Boolean(getToken());
+    const path = hasToken
+      ? `/api/v1/admin/packages?${params.toString()}`
+      : `/api/v1/packages?${params.toString()}`;
+
+    apiFetch<TripPackage[]>(path, {}, hasToken)
+      .then((data) => {
+        if (!cancelled) {
+          setPackages(data);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPackages([]);
+          setError(err instanceof Error ? err.message : "Gagal memuat paket trip.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [category, query]);
 
   const filteredTrips = useMemo(() => {
-    return trips.filter((trip) => {
-      const matchesCategory = trip.category === category;
+    return packages.filter((trip) => {
+      const matchesCategory = category === "all" || trip.category === category;
       const matchesQuery = trip.title.toLowerCase().includes(query.toLowerCase());
 
       return matchesCategory && matchesQuery;
     });
-  }, [category, query]);
+  }, [category, packages, query]);
 
   return (
     <div className="min-h-screen bg-white text-[#161a23]">
@@ -177,6 +161,18 @@ export function CurrentTripsScreen() {
                 <div className="flex rounded-xl bg-white p-1 shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)] ring-1 ring-[#e4e7f2]">
                   <button
                     type="button"
+                    onClick={() => setCategory("all")}
+                    className={cn(
+                      "h-10 rounded-lg px-5 text-sm font-semibold transition",
+                      category === "all"
+                        ? "bg-[#c1121f] font-bold text-white shadow-[0_12px_24px_-16px_rgba(193,18,31,0.85)]"
+                        : "text-[#535762]"
+                    )}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setCategory("international")}
                     className={cn(
                       "h-10 rounded-lg px-5 text-sm font-semibold transition",
@@ -238,7 +234,11 @@ export function CurrentTripsScreen() {
               </div>
             </div>
 
-            {hasPublishedPackages ? (
+            {loading ? (
+              <div className="mt-12 rounded-2xl border border-[#eceaf2] bg-[#fdfbff] p-8 text-center text-sm font-semibold text-[#777c88]">
+                Memuat paket trip...
+              </div>
+            ) : filteredTrips.length > 0 ? (
               <div
                 className={cn(
                   "mt-12 grid gap-x-9 gap-y-9",
@@ -253,7 +253,7 @@ export function CurrentTripsScreen() {
                 <CreateTripCard />
               </div>
             ) : (
-              <EmptyPackagesState />
+              <EmptyPackagesState error={error} />
             )}
               </>
             )}
@@ -299,40 +299,46 @@ function SidebarItem({
 }
 
 function TripCard({
+  id,
   title,
-  meta,
-  date,
   status,
-  statusColor,
-  imageClass,
+  duration,
+  slots,
+  package_start_date,
+  package_end_date,
+  image_url,
+  media,
   viewMode,
 }: {
+  id: string;
   title: string;
-  meta: string;
-  date: string;
   status: string;
-  statusColor: string;
-  imageClass: string;
+  duration: string;
+  slots: number;
+  package_start_date?: string;
+  package_end_date?: string;
+  image_url?: string;
+  media?: Array<{ url: string }>;
   viewMode: ViewMode;
 }) {
+  const image = assetURL(image_url || media?.[0]?.url);
+  const date = formatDateRange(package_start_date, package_end_date);
   return (
-    <article
+    <Link
+      href={`/trips/${id}`}
       className={cn(
         "overflow-hidden rounded-xl bg-white shadow-[0_30px_70px_-45px_rgba(17,24,39,0.75)]",
         viewMode === "list" && "grid md:grid-cols-[300px_minmax(0,1fr)]"
       )}
     >
       <div
-        className={cn(
-          "relative bg-gradient-to-br",
-          viewMode === "grid" ? "h-[192px]" : "min-h-[220px]",
-          imageClass
-        )}
+        className={cn("relative bg-gradient-to-br from-[#102b35] via-[#2f9aad] to-[#a7dee3]", viewMode === "grid" ? "h-[192px]" : "min-h-[220px]")}
+        style={image ? { backgroundImage: `url(${image})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
       >
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.7),transparent_18rem)] opacity-50" />
         <div className="absolute inset-0 backdrop-blur-[1px]" />
         <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#111827]">
-          <span className={cn("h-2 w-2 rounded-full", statusColor)} />
+          <span className="h-2 w-2 rounded-full bg-[#be123c]" />
           {status}
         </div>
       </div>
@@ -341,7 +347,9 @@ function TripCard({
         <h2 className="whitespace-pre-line text-2xl font-semibold leading-[1.12] tracking-[-0.03em] text-[#171923]">
           {title}
         </h2>
-        <p className="mt-2 text-sm font-medium text-[#8a8f9d]">{meta}</p>
+        <p className="mt-2 text-sm font-medium text-[#8a8f9d]">
+          {duration || "Flexible"} - {slots || 0} Slots
+        </p>
 
         <div className="mt-8 border-t border-[#eef0f4] pt-5">
           <div className="flex items-center gap-3 text-sm font-medium text-[#555b66]">
@@ -350,8 +358,19 @@ function TripCard({
           </div>
         </div>
       </div>
-    </article>
+    </Link>
   );
+}
+
+function formatDateRange(start?: string, end?: string) {
+  if (!start && !end) {
+    return "Flexible schedule";
+  }
+  const format = (value?: string) =>
+    value
+      ? new Intl.DateTimeFormat("en", { month: "short", day: "2-digit", year: "numeric" }).format(new Date(value))
+      : "";
+  return [format(start), format(end)].filter(Boolean).join(" - ");
 }
 
 function CreateTripCard() {
@@ -373,7 +392,7 @@ function CreateTripCard() {
   );
 }
 
-function EmptyPackagesState() {
+function EmptyPackagesState({ error }: { error?: string }) {
   return (
     <div className="mt-12 flex min-h-[360px] items-center justify-center rounded-2xl border-2 border-dashed border-[#e9d9dd] bg-[#fdfbff] px-8 text-center">
       <div>
@@ -384,8 +403,8 @@ function EmptyPackagesState() {
           Belum ada paket trip
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-[#777c88]">
-          Card trip masih disembunyikan. Nanti komponen card akan dipanggil
-          lagi setelah paket berhasil dibuat.
+          {error ||
+            "Belum ada paket trip yang cocok dengan filter saat ini. Buat paket baru atau ubah filter kategori."}
         </p>
         <Link
           href="/trips"

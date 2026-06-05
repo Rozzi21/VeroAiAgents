@@ -10,7 +10,8 @@ type RegisterRequest struct {
 }
 
 type LoginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
+	Email    string `json:"email"`
+	Username string `json:"username"`
 	Password string `json:"password" binding:"required"`
 }
 
@@ -33,12 +34,62 @@ type ChatRequest struct {
 }
 
 type TripRequest struct {
-	Title          string  `json:"title" binding:"required"`
-	Destination    string  `json:"destination" binding:"required"`
-	Overview       string  `json:"overview"`
-	Duration       string  `json:"duration"`
-	EstimatedPrice float64 `json:"estimated_price"`
-	ImageURL       string  `json:"image_url"`
+	Title                string             `json:"title" binding:"required"`
+	Slug                 string             `json:"slug"`
+	Destination          string             `json:"destination"`
+	Location             string             `json:"location"`
+	Category             string             `json:"category"`
+	Status               string             `json:"status"`
+	Overview             string             `json:"overview"`
+	Summary              string             `json:"summary"`
+	Duration             string             `json:"duration"`
+	Slots                int                `json:"slots"`
+	EstimatedPrice       float64            `json:"estimated_price"`
+	BasePrice            float64            `json:"base_price"`
+	DiscountPrice        float64            `json:"discount_price"`
+	ChildPrice           float64            `json:"child_price"`
+	ChildDiscountPrice   float64            `json:"child_discount_price"`
+	DiscountEnabled      bool               `json:"discount_enabled"`
+	ChildDiscountEnabled bool               `json:"child_discount_enabled"`
+	ImageURL             string             `json:"image_url"`
+	Media                []TripMediaRequest `json:"media"`
+	Highlights           []string           `json:"highlights"`
+	AmenitiesIncluded    []string           `json:"amenities_included"`
+	AmenitiesExcluded    []string           `json:"amenities_excluded"`
+	References           []string           `json:"references"`
+	ScheduleType         string             `json:"schedule_type"`
+	PackageStartDate     string             `json:"package_start_date"`
+	PackageEndDate       string             `json:"package_end_date"`
+	PublishStartDate     string             `json:"publish_start_date"`
+	PublishEndDate       string             `json:"publish_end_date"`
+	Itineraries          []ItineraryRequest `json:"itineraries"`
+}
+
+type TripMediaRequest struct {
+	URL     string `json:"url"`
+	Type    string `json:"type"`
+	AltText string `json:"alt_text"`
+}
+
+type ItineraryRequest struct {
+	Day         int    `json:"day"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type TripListQuery struct {
+	Category      string `form:"category"`
+	Status        string `form:"status"`
+	Search        string `form:"search"`
+	PublishedOnly bool   `form:"published_only"`
+	Limit         int    `form:"limit"`
+	Offset        int    `form:"offset"`
+}
+
+type UploadResponse struct {
+	URL      string `json:"url"`
+	Filename string `json:"filename"`
+	Size     int64  `json:"size"`
 }
 
 type BookingRequest struct {

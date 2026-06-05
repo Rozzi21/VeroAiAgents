@@ -1,8 +1,34 @@
 "use client";
 
+import { FormEvent, useState } from "react";
 import { ArrowRight, Eye, LockKeyhole, UserRound } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 export default function LoginPage() {
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setMessage("Signing in...");
+    try {
+      const data = await apiFetch<{
+        access_token: string;
+        user: { role: string };
+      }>("/api/v1/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username, email: username, password }),
+      });
+      localStorage.setItem("backoffice_token", data.access_token);
+      setMessage(`Signed in as ${data.user.role}. Redirecting...`);
+      const redirectPath = new URLSearchParams(window.location.search).get("redirect");
+      window.location.href = redirectPath?.startsWith("/") ? redirectPath : "/";
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Login failed");
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[#faf9ff] px-8 py-7 text-[#161a23]">
       <div className="flex items-center gap-3">
@@ -25,14 +51,16 @@ export default function LoginPage() {
             </p>
           </div>
 
-          <form className="mt-12 space-y-7">
+          <form className="mt-12 space-y-7" onSubmit={handleSubmit}>
             <label className="block">
               <span className="text-sm font-bold text-[#6a5f64]">Username</span>
               <div className="mt-2 flex h-12 items-center gap-3 rounded-lg border border-[#d6cbd0] bg-[#fdfbff] px-4 text-[#8d858b]">
                 <UserRound size={18} />
                 <input
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
                   className="min-w-0 flex-1 bg-transparent text-base font-medium text-[#171923] outline-none placeholder:text-[#6f7480]"
-                  placeholder="Your username"
+                  placeholder="email@travelos.local"
                   type="text"
                 />
               </div>
@@ -43,8 +71,9 @@ export default function LoginPage() {
               <div className="mt-2 flex h-12 items-center gap-3 rounded-lg border border-[#d6cbd0] bg-[#fdfbff] px-4 text-[#8d858b]">
                 <LockKeyhole size={18} />
                 <input
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
                   className="min-w-0 flex-1 bg-transparent text-base font-medium tracking-[0.32em] text-[#171923] outline-none placeholder:tracking-normal placeholder:text-[#6f7480]"
-                  defaultValue="password"
                   type="password"
                 />
                 <button
@@ -64,6 +93,11 @@ export default function LoginPage() {
               Sign In
               <ArrowRight size={17} />
             </button>
+            {message && (
+              <p className="text-center text-sm font-semibold text-[#6f7480]">
+                {message}
+              </p>
+            )}
           </form>
         </div>
       </section>

@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -44,8 +46,8 @@ func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService,
 	s := &Services{Config: cfg, Repo: repo, JWT: jwt, Events: bus}
 	s.Auth = &AuthService{repo: repo, jwt: jwt}
 	s.MCP = &MCPService{repo: repo, bus: bus}
-	openClaw := ai.NewOpenClawClient(cfg.OpenClawAPIKey, cfg.OpenClawBaseURL)
-	s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, openClaw: openClaw}
+	aiClient := ai.NewClient(cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, cfg.AITemperature, cfg.AITimeout)
+	s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, client: aiClient, cfg: cfg}
 	s.Trips = &TripService{repo: repo, bus: bus}
 	s.Bookings = &BookingService{repo: repo, bus: bus}
 	s.Payments = &PaymentService{repo: repo, bus: bus, cfg: cfg}
@@ -76,7 +78,11 @@ func (s *AuthService) Register(req dto.RegisterRequest) (dto.AuthResponse, error
 }
 
 func (s *AuthService) Login(req dto.LoginRequest) (dto.AuthResponse, error) {
-	user, err := s.repo.FindUserByEmail(strings.ToLower(req.Email))
+	email := req.Email
+	if email == "" {
+		email = req.Username
+	}
+	user, err := s.repo.FindUserByEmail(strings.ToLower(email))
 	if err != nil {
 		return dto.AuthResponse{}, errors.New("invalid email or password")
 	}
@@ -100,6 +106,18 @@ func (s *AuthService) Refresh(refreshToken string) (dto.AuthResponse, error) {
 
 func (s *AuthService) Me(userID uuid.UUID) (models.User, error) {
 	return s.repo.FindUserByID(userID)
+}
+
+func (s *AuthService) GuestUser() (models.User, error) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte(uuid.NewString()), bcrypt.DefaultCost)
+	user := models.User{
+		Name:     "Guest Traveler",
+		Email:    "guest@vero.local",
+		Password: string(hash),
+		Role:     models.RoleUser,
+	}
+	err := s.repo.FirstOrCreateUser(&user)
+	return user, err
 }
 
 func (s *AuthService) issue(user models.User) (dto.AuthResponse, error) {
@@ -199,16 +217,18 @@ func (s *MCPService) mock(toolName string, payload map[string]interface{}) ToolR
 }
 
 type AIService struct {
-	repo     *repositories.Repository
-	mcp      *MCPService
-	bus      *events.Bus
-	openClaw *ai.OpenClawClient
+	repo   *repositories.Repository
+	mcp    *MCPService
+	bus    *events.Bus
+	client *ai.Client
+	cfg    config.Config
 }
 
 type ChatResult struct {
-	SessionID uuid.UUID    `json:"session_id"`
-	Message   string       `json:"message"`
-	Workflow  []ToolResult `json:"workflow"`
+	SessionID           uuid.UUID     `json:"session_id"`
+	Message             string        `json:"message"`
+	Workflow            []ToolResult  `json:"workflow"`
+	RecommendedPackages []models.Trip `json:"recommended_packages"`
 }
 
 func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, error) {
@@ -249,7 +269,8 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 	}
 
 	response := "I found a premium autonomous travel plan with destination matches, hotel inventory, budget estimate, itinerary draft, and payment-ready workflow."
-	openClawResponse, err := s.generateWithOpenClaw(req.Prompt, results)
+	packages, _ := s.publishedPackagesForAI()
+	aiResponse, err := s.generateWithAI(sessionID, req.Prompt, results, packages)
 	if err != nil {
 		errorPayload, _ := json.Marshal(map[string]interface{}{
 			"error": err.Error(),
@@ -257,45 +278,178 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		})
 		_ = s.repo.CreateAILog(&models.AILog{
 			SessionID: &sessionID,
-			Workflow:  "openclaw_generation",
+			Workflow:  "ai_generation",
 			Status:    "failed",
 			Response:  string(errorPayload),
 		})
-	} else if openClawResponse.Text != "" {
-		response = openClawResponse.Text
-		payload, _ := json.Marshal(openClawResponse.Metadata)
+	} else if aiResponse.Text != "" {
+		response = aiResponse.Text
+		payload, _ := json.Marshal(aiResponse.Metadata)
 		_ = s.repo.CreateAILog(&models.AILog{
 			SessionID: &sessionID,
-			Workflow:  "openclaw_generation",
+			Workflow:  "ai_generation",
 			Status:    "success",
 			Response:  string(payload),
 		})
-		s.bus.Publish("openclaw_response", map[string]interface{}{
+		s.bus.Publish("ai_response", map[string]interface{}{
 			"session_id": sessionID,
-			"status":     openClawResponse.RawStatus,
+			"status":     aiResponse.RawStatus,
 		})
 	}
 	if err := s.repo.AddChatMessage(&models.ChatMessage{SessionID: sessionID, Role: "assistant", Content: response}); err != nil {
 		return ChatResult{}, err
 	}
+	_ = s.refreshMemorySummary(sessionID)
 	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID, "message": response})
 
-	return ChatResult{SessionID: sessionID, Message: response, Workflow: results}, nil
+	return ChatResult{
+		SessionID:           sessionID,
+		Message:             response,
+		Workflow:            results,
+		RecommendedPackages: selectRecommendedPackages(req.Prompt+" "+response, packages),
+	}, nil
 }
 
-func (s *AIService) generateWithOpenClaw(prompt string, workflow []ToolResult) (ai.CompletionResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
+func (s *AIService) generateWithAI(sessionID uuid.UUID, prompt string, workflow []ToolResult, packages []models.Trip) (ai.CompletionResponse, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.AITimeout)
 	defer cancel()
 
-	return s.openClaw.Generate(ctx, ai.CompletionRequest{
-		Prompt: prompt,
-		Context: map[string]interface{}{
-			"platform":      "Vero Travel Agents",
-			"role":          "autonomous travel orchestration engine",
-			"workflow":      workflow,
-			"response_goal": "Return a polished travel assistant answer with recommended package, reasoning, budget notes, and next action.",
+	messages := []ai.Message{
+		{
+			Role:    "system",
+			Content: "You are Vero Travel, an autonomous travel assistant. Answer in natural Indonesian. Recommend only from the provided published package catalog when packages are relevant. Mention exact package names so the UI can show matching cards. Explain concise reasoning and suggest the next booking step. Do not use Markdown formatting, bold markers, asterisks, headings, or decorative symbols. Use plain text and simple hyphen bullets only when a list is helpful.",
 		},
+	}
+	if catalog := packageCatalogSummary(packages); catalog != "" {
+		messages = append(messages, ai.Message{Role: "system", Content: catalog})
+	}
+	session, err := s.repo.FindChatSession(sessionID)
+	if err == nil && session.MemorySummary != "" {
+		messages = append(messages, ai.Message{Role: "system", Content: "Conversation memory summary: " + session.MemorySummary})
+	}
+	recent, _ := s.repo.ListRecentChatMessages(sessionID, s.cfg.AIRecentMessages)
+	for _, message := range recent {
+		messages = append(messages, ai.Message{Role: message.Role, Content: message.Content})
+	}
+	workflowJSON, _ := json.Marshal(workflow)
+	messages = append(messages, ai.Message{
+		Role:    "system",
+		Content: "Latest travel workflow context: " + string(workflowJSON),
 	})
+	messages = append(messages, ai.Message{Role: "user", Content: prompt})
+
+	return s.client.Generate(ctx, ai.CompletionRequest{
+		Messages: messages,
+	})
+}
+
+func (s *AIService) publishedPackagesForAI() ([]models.Trip, error) {
+	return s.repo.ListTrips(dto.TripListQuery{PublishedOnly: true, Limit: 20})
+}
+
+func packageCatalogSummary(packages []models.Trip) string {
+	if len(packages) == 0 {
+		return "Published package catalog is currently empty."
+	}
+	type packageSummary struct {
+		ID          uuid.UUID `json:"id"`
+		Slug        string    `json:"slug"`
+		Title       string    `json:"title"`
+		Destination string    `json:"destination"`
+		Category    string    `json:"category"`
+		Duration    string    `json:"duration"`
+		Price       float64   `json:"price"`
+		Summary     string    `json:"summary"`
+		Highlights  []string  `json:"highlights"`
+	}
+	summaries := make([]packageSummary, 0, len(packages))
+	for _, trip := range packages {
+		summaries = append(summaries, packageSummary{
+			ID:          trip.ID,
+			Slug:        trip.Slug,
+			Title:       trip.Title,
+			Destination: trip.Destination,
+			Category:    trip.Category,
+			Duration:    trip.Duration,
+			Price:       firstNonZero(trip.BasePrice, trip.EstimatedPrice),
+			Summary:     trip.Summary,
+			Highlights:  trip.Highlights,
+		})
+	}
+	payload, _ := json.Marshal(summaries)
+	return "Current published package catalog from database, automatically refreshed on every chat request: " + string(payload)
+}
+
+func selectRecommendedPackages(text string, packages []models.Trip) []models.Trip {
+	if len(packages) == 0 {
+		return nil
+	}
+	text = strings.ToLower(text)
+	type scoredTrip struct {
+		trip  models.Trip
+		score int
+	}
+	scored := make([]scoredTrip, 0, len(packages))
+	for _, trip := range packages {
+		score := 0
+		for _, token := range []string{trip.Title, trip.Destination, trip.Location, trip.Category, trip.Slug} {
+			token = strings.ToLower(strings.TrimSpace(token))
+			if token != "" && strings.Contains(text, token) {
+				score += 3
+			}
+		}
+		for _, highlight := range trip.Highlights {
+			highlight = strings.ToLower(strings.TrimSpace(highlight))
+			if highlight != "" && strings.Contains(text, highlight) {
+				score++
+			}
+		}
+		scored = append(scored, scoredTrip{trip: trip, score: score})
+	}
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+	recommended := make([]models.Trip, 0, 3)
+	for _, item := range scored {
+		if item.score == 0 && len(recommended) > 0 {
+			break
+		}
+		recommended = append(recommended, item.trip)
+		if len(recommended) == 3 {
+			break
+		}
+	}
+	if len(recommended) == 0 {
+		for i := 0; i < len(packages) && i < 3; i++ {
+			recommended = append(recommended, packages[i])
+		}
+	}
+	return recommended
+}
+
+func (s *AIService) refreshMemorySummary(sessionID uuid.UUID) error {
+	count, err := s.repo.CountChatMessages(sessionID)
+	if err != nil || count < int64(s.cfg.AIMemorySummaryAfter) {
+		return err
+	}
+	session, err := s.repo.FindChatSession(sessionID)
+	if err != nil {
+		return err
+	}
+	messages, err := s.repo.ListChatMessages(sessionID)
+	if err != nil {
+		return err
+	}
+	var parts []string
+	for _, message := range messages {
+		parts = append(parts, message.Role+": "+message.Content)
+	}
+	summary := strings.Join(parts, "\n")
+	if len(summary) > s.cfg.AIMemoryMaxChars {
+		summary = summary[len(summary)-s.cfg.AIMemoryMaxChars:]
+	}
+	session.MemorySummary = summary
+	return s.repo.UpdateChatSession(&session)
 }
 
 func summarizePrompt(prompt string) string {
@@ -310,18 +464,29 @@ type TripService struct {
 	bus  *events.Bus
 }
 
-func (s *TripService) List() ([]models.Trip, error)           { return s.repo.ListTrips() }
+func (s *TripService) List(query dto.TripListQuery) ([]models.Trip, error) {
+	return s.repo.ListTrips(query)
+}
 func (s *TripService) Find(id uuid.UUID) (models.Trip, error) { return s.repo.FindTrip(id) }
+func (s *TripService) FindBySlugOrID(value string) (models.Trip, error) {
+	return s.repo.FindTripBySlugOrID(value)
+}
 func (s *TripService) Create(req dto.TripRequest) (models.Trip, error) {
-	trip := models.Trip{
-		Title:          req.Title,
-		Destination:    req.Destination,
-		Overview:       req.Overview,
-		Duration:       req.Duration,
-		EstimatedPrice: req.EstimatedPrice,
-		ImageURL:       req.ImageURL,
+	trip := buildTripFromRequest(models.Trip{}, req)
+	if trip.Slug == "" {
+		trip.Slug = slugify(trip.Title)
+	}
+	if trip.Status == "published" {
+		now := time.Now()
+		trip.PublishedAt = &now
 	}
 	err := s.repo.CreateTrip(&trip)
+	if err == nil && len(req.Itineraries) > 0 {
+		err = s.repo.ReplaceTripItineraries(trip.ID, buildItineraries(req.Itineraries))
+		if err == nil {
+			trip, _ = s.repo.FindTrip(trip.ID)
+		}
+	}
 	s.bus.Publish("trip_created", trip)
 	return trip, err
 }
@@ -330,16 +495,133 @@ func (s *TripService) Update(id uuid.UUID, req dto.TripRequest) (models.Trip, er
 	if err != nil {
 		return trip, err
 	}
-	trip.Title = req.Title
-	trip.Destination = req.Destination
-	trip.Overview = req.Overview
-	trip.Duration = req.Duration
-	trip.EstimatedPrice = req.EstimatedPrice
-	trip.ImageURL = req.ImageURL
+	trip = buildTripFromRequest(trip, req)
+	if trip.Slug == "" {
+		trip.Slug = slugify(trip.Title)
+	}
+	if trip.Status == "published" && trip.PublishedAt == nil {
+		now := time.Now()
+		trip.PublishedAt = &now
+	}
 	err = s.repo.UpdateTrip(&trip)
+	if err == nil {
+		err = s.repo.ReplaceTripItineraries(trip.ID, buildItineraries(req.Itineraries))
+		if err == nil {
+			trip, _ = s.repo.FindTrip(trip.ID)
+		}
+	}
 	return trip, err
 }
 func (s *TripService) Delete(id uuid.UUID) error { return s.repo.DeleteTrip(id) }
+
+func buildTripFromRequest(trip models.Trip, req dto.TripRequest) models.Trip {
+	trip.Title = req.Title
+	trip.Slug = req.Slug
+	trip.Destination = firstNonEmpty(req.Destination, req.Location)
+	trip.Location = firstNonEmpty(req.Location, req.Destination)
+	trip.Category = normalize(req.Category, "international")
+	trip.Status = normalize(req.Status, "draft")
+	trip.Overview = firstNonEmpty(req.Overview, req.Summary)
+	trip.Summary = firstNonEmpty(req.Summary, req.Overview)
+	trip.Duration = req.Duration
+	trip.Slots = req.Slots
+	trip.EstimatedPrice = firstNonZero(req.EstimatedPrice, req.BasePrice)
+	trip.BasePrice = firstNonZero(req.BasePrice, req.EstimatedPrice)
+	trip.DiscountPrice = req.DiscountPrice
+	trip.ChildPrice = req.ChildPrice
+	trip.ChildDiscount = req.ChildDiscountPrice
+	trip.DiscountEnabled = req.DiscountEnabled
+	trip.ChildDiscountEnabled = req.ChildDiscountEnabled
+	trip.ImageURL = req.ImageURL
+	trip.Media = make([]models.TripMedia, 0, len(req.Media))
+	for _, media := range req.Media {
+		if media.URL == "" {
+			continue
+		}
+		trip.Media = append(trip.Media, models.TripMedia{URL: media.URL, Type: firstNonEmpty(media.Type, "image"), AltText: media.AltText})
+		if trip.ImageURL == "" {
+			trip.ImageURL = media.URL
+		}
+	}
+	trip.Highlights = req.Highlights
+	trip.AmenitiesIncluded = req.AmenitiesIncluded
+	trip.AmenitiesExcluded = req.AmenitiesExcluded
+	trip.References = req.References
+	trip.ScheduleType = firstNonEmpty(req.ScheduleType, "date_range")
+	trip.PackageStartDate = parseDate(req.PackageStartDate)
+	trip.PackageEndDate = parseDate(req.PackageEndDate)
+	trip.PublishStartDate = parseDate(req.PublishStartDate)
+	trip.PublishEndDate = parseDate(req.PublishEndDate)
+	return trip
+}
+
+func buildItineraries(items []dto.ItineraryRequest) []models.Itinerary {
+	itineraries := make([]models.Itinerary, 0, len(items))
+	for index, item := range items {
+		day := item.Day
+		if day <= 0 {
+			day = index + 1
+		}
+		if item.Title == "" && item.Description == "" {
+			continue
+		}
+		itineraries = append(itineraries, models.Itinerary{
+			Day:         day,
+			Title:       firstNonEmpty(item.Title, fmt.Sprintf("Day %d", day)),
+			Description: item.Description,
+		})
+	}
+	return itineraries
+}
+
+func slugify(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	re := regexp.MustCompile(`[^a-z0-9]+`)
+	value = strings.Trim(re.ReplaceAllString(value, "-"), "-")
+	if value == "" {
+		return uuid.NewString()
+	}
+	return value + "-" + uuid.NewString()[:8]
+}
+
+func normalize(value, fallback string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonZero(values ...float64) float64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func parseDate(value string) *time.Time {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return &parsed
+		}
+	}
+	return nil
+}
 
 type BookingService struct {
 	repo *repositories.Repository

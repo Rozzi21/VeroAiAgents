@@ -1,7 +1,10 @@
 package repositories
 
 import (
+	"strings"
+
 	"github.com/google/uuid"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"gorm.io/gorm"
 )
@@ -24,6 +27,10 @@ func (r *Repository) FindUserByEmail(email string) (models.User, error) {
 	return user, err
 }
 
+func (r *Repository) FirstOrCreateUser(user *models.User) error {
+	return r.DB.Where("email = ?", user.Email).FirstOrCreate(user).Error
+}
+
 func (r *Repository) FindUserByID(id uuid.UUID) (models.User, error) {
 	var user models.User
 	err := r.DB.First(&user, "id = ?", id).Error
@@ -32,6 +39,16 @@ func (r *Repository) FindUserByID(id uuid.UUID) (models.User, error) {
 
 func (r *Repository) CreateChatSession(session *models.ChatSession) error {
 	return r.DB.Create(session).Error
+}
+
+func (r *Repository) FindChatSession(id uuid.UUID) (models.ChatSession, error) {
+	var session models.ChatSession
+	err := r.DB.First(&session, "id = ?", id).Error
+	return session, err
+}
+
+func (r *Repository) UpdateChatSession(session *models.ChatSession) error {
+	return r.DB.Save(session).Error
 }
 
 func (r *Repository) ListChatSessions(userID uuid.UUID) ([]models.ChatSession, error) {
@@ -50,13 +67,54 @@ func (r *Repository) ListChatMessages(sessionID uuid.UUID) ([]models.ChatMessage
 	return messages, err
 }
 
+func (r *Repository) ListRecentChatMessages(sessionID uuid.UUID, limit int) ([]models.ChatMessage, error) {
+	var newest []models.ChatMessage
+	if limit <= 0 {
+		limit = 8
+	}
+	if err := r.DB.Where("session_id = ?", sessionID).Order("created_at desc").Limit(limit).Find(&newest).Error; err != nil {
+		return nil, err
+	}
+	messages := make([]models.ChatMessage, len(newest))
+	for i := range newest {
+		messages[len(newest)-1-i] = newest[i]
+	}
+	return messages, nil
+}
+
+func (r *Repository) CountChatMessages(sessionID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.DB.Model(&models.ChatMessage{}).Where("session_id = ?", sessionID).Count(&count).Error
+	return count, err
+}
+
 func (r *Repository) CreateTrip(trip *models.Trip) error {
 	return r.DB.Create(trip).Error
 }
 
-func (r *Repository) ListTrips() ([]models.Trip, error) {
+func (r *Repository) ListTrips(query dto.TripListQuery) ([]models.Trip, error) {
 	var trips []models.Trip
-	err := r.DB.Preload("Itineraries").Order("created_at desc").Find(&trips).Error
+	db := r.DB.Preload("Itineraries").Order("created_at desc")
+	if query.Category != "" {
+		db = db.Where("category = ?", strings.ToLower(query.Category))
+	}
+	if query.Status != "" {
+		db = db.Where("status = ?", strings.ToLower(query.Status))
+	}
+	if query.PublishedOnly {
+		db = db.Where("status = ?", "published")
+	}
+	if query.Search != "" {
+		like := "%" + strings.ToLower(query.Search) + "%"
+		db = db.Where("LOWER(title) LIKE ? OR LOWER(destination) LIKE ? OR LOWER(location) LIKE ?", like, like, like)
+	}
+	if query.Limit > 0 {
+		db = db.Limit(query.Limit)
+	}
+	if query.Offset > 0 {
+		db = db.Offset(query.Offset)
+	}
+	err := db.Find(&trips).Error
 	return trips, err
 }
 
@@ -66,8 +124,33 @@ func (r *Repository) FindTrip(id uuid.UUID) (models.Trip, error) {
 	return trip, err
 }
 
+func (r *Repository) FindTripBySlugOrID(value string) (models.Trip, error) {
+	var trip models.Trip
+	if id, err := uuid.Parse(value); err == nil {
+		err = r.DB.Preload("Itineraries").First(&trip, "id = ?", id).Error
+		return trip, err
+	}
+	err := r.DB.Preload("Itineraries").First(&trip, "slug = ?", value).Error
+	return trip, err
+}
+
 func (r *Repository) UpdateTrip(trip *models.Trip) error {
 	return r.DB.Save(trip).Error
+}
+
+func (r *Repository) ReplaceTripItineraries(tripID uuid.UUID, itineraries []models.Itinerary) error {
+	return r.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("trip_id = ?", tripID).Delete(&models.Itinerary{}).Error; err != nil {
+			return err
+		}
+		if len(itineraries) == 0 {
+			return nil
+		}
+		for i := range itineraries {
+			itineraries[i].TripID = tripID
+		}
+		return tx.Create(&itineraries).Error
+	})
 }
 
 func (r *Repository) DeleteTrip(id uuid.UUID) error {

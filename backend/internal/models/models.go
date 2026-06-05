@@ -41,10 +41,11 @@ type User struct {
 
 type ChatSession struct {
 	BaseModel
-	UserID   uuid.UUID     `json:"user_id" gorm:"type:uuid;index;not null"`
-	User     User          `json:"-" gorm:"foreignKey:UserID"`
-	Title    string        `json:"title" gorm:"size:180;not null"`
-	Messages []ChatMessage `json:"messages,omitempty" gorm:"foreignKey:SessionID"`
+	UserID        uuid.UUID     `json:"user_id" gorm:"type:uuid;index;not null"`
+	User          User          `json:"-" gorm:"foreignKey:UserID"`
+	Title         string        `json:"title" gorm:"size:180;not null"`
+	MemorySummary string        `json:"memory_summary" gorm:"type:text"`
+	Messages      []ChatMessage `json:"messages,omitempty" gorm:"foreignKey:SessionID"`
 }
 
 type ChatMessage struct {
@@ -57,13 +58,42 @@ type ChatMessage struct {
 
 type Trip struct {
 	BaseModel
-	Title          string      `json:"title" gorm:"size:180;not null"`
-	Destination    string      `json:"destination" gorm:"size:180;not null;index"`
-	Overview       string      `json:"overview" gorm:"type:text"`
-	Duration       string      `json:"duration" gorm:"size:80"`
-	EstimatedPrice float64     `json:"estimated_price" gorm:"type:numeric(14,2);not null;default:0"`
-	ImageURL       string      `json:"image_url" gorm:"type:text"`
-	Itineraries    []Itinerary `json:"itineraries,omitempty" gorm:"foreignKey:TripID"`
+	Title                string      `json:"title" gorm:"size:180;not null"`
+	Slug                 string      `json:"slug" gorm:"size:220;uniqueIndex;not null"`
+	Destination          string      `json:"destination" gorm:"size:180;not null;index"`
+	Location             string      `json:"location" gorm:"size:180;index"`
+	Category             string      `json:"category" gorm:"size:40;not null;default:international;index"`
+	Status               string      `json:"status" gorm:"size:40;not null;default:draft;index"`
+	Overview             string      `json:"overview" gorm:"type:text"`
+	Summary              string      `json:"summary" gorm:"type:text"`
+	Duration             string      `json:"duration" gorm:"size:80"`
+	Slots                int         `json:"slots" gorm:"not null;default:0"`
+	EstimatedPrice       float64     `json:"estimated_price" gorm:"type:numeric(14,2);not null;default:0"`
+	BasePrice            float64     `json:"base_price" gorm:"type:numeric(14,2);not null;default:0"`
+	DiscountPrice        float64     `json:"discount_price" gorm:"type:numeric(14,2);not null;default:0"`
+	ChildPrice           float64     `json:"child_price" gorm:"type:numeric(14,2);not null;default:0"`
+	ChildDiscount        float64     `json:"child_discount_price" gorm:"type:numeric(14,2);not null;default:0"`
+	DiscountEnabled      bool        `json:"discount_enabled" gorm:"not null;default:false"`
+	ChildDiscountEnabled bool        `json:"child_discount_enabled" gorm:"not null;default:false"`
+	ImageURL             string      `json:"image_url" gorm:"type:text"`
+	Media                []TripMedia `json:"media" gorm:"serializer:json;type:jsonb"`
+	Highlights           []string    `json:"highlights" gorm:"serializer:json;type:jsonb"`
+	AmenitiesIncluded    []string    `json:"amenities_included" gorm:"serializer:json;type:jsonb"`
+	AmenitiesExcluded    []string    `json:"amenities_excluded" gorm:"serializer:json;type:jsonb"`
+	References           []string    `json:"references" gorm:"serializer:json;type:jsonb"`
+	ScheduleType         string      `json:"schedule_type" gorm:"size:60"`
+	PackageStartDate     *time.Time  `json:"package_start_date,omitempty"`
+	PackageEndDate       *time.Time  `json:"package_end_date,omitempty"`
+	PublishStartDate     *time.Time  `json:"publish_start_date,omitempty"`
+	PublishEndDate       *time.Time  `json:"publish_end_date,omitempty"`
+	PublishedAt          *time.Time  `json:"published_at,omitempty"`
+	Itineraries          []Itinerary `json:"itineraries,omitempty" gorm:"foreignKey:TripID;constraint:OnDelete:CASCADE"`
+}
+
+type TripMedia struct {
+	URL     string `json:"url"`
+	Type    string `json:"type"`
+	AltText string `json:"alt_text,omitempty"`
 }
 
 type Itinerary struct {
