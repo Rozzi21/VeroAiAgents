@@ -53,6 +53,7 @@ func Connect(cfg config.Config) (*Database, error) {
 func (d *Database) AutoMigrate() error {
 	return d.DB.AutoMigrate(
 		&models.User{},
+		&models.AuthSession{},
 		&models.ChatSession{},
 		&models.ChatMessage{},
 		&models.Trip{},

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   CalendarDays,
   Check,
@@ -12,18 +13,43 @@ import {
   LayoutDashboard,
   List,
   LockKeyhole,
+  LogOut,
   Plus,
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiFetch, assetURL, getToken, TripPackage } from "@/lib/api";
+import { apiFetch, assetURL, getToken, logout, TripPackage, TripStatus } from "@/lib/api";
+import { formatIDR, getDiscountMeta } from "@/lib/format";
+import {
+  deleteTripPackage,
+  formatTripStatus,
+  getDeleteErrorMessage,
+  getDeleteSuccessMessage,
+  getStatusChangeErrorMessage,
+  getStatusChangeSuccessMessage,
+  updateTripStatus,
+} from "@/lib/trip";
+import { TripCardContextMenu } from "@/components/trip-card-context-menu";
+import { ConfirmModal } from "@/components/confirm-modal";
+import { ToastNotification, ToastState } from "@/components/toast-notification";
 
 type Category = "all" | "international" | "local";
 type ViewMode = "grid" | "list";
 type ActivePanel = "trips" | "dashboard";
 type ModalType = "help" | "privacy" | null;
 
+type ConfirmAction =
+  | { type: "delete"; trip: TripPackage }
+  | { type: "status"; trip: TripPackage; targetStatus: TripStatus };
+
+type ContextMenuState = {
+  trip: TripPackage;
+  x: number;
+  y: number;
+};
+
 export function CurrentTripsScreen() {
+  const router = useRouter();
   const [activePanel, setActivePanel] = useState<ActivePanel>("trips");
   const [category, setCategory] = useState<Category>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -32,6 +58,10 @@ export function CurrentTripsScreen() {
   const [packages, setPackages] = useState<TripPackage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [pendingTripId, setPendingTripId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +100,105 @@ export function CurrentTripsScreen() {
       cancelled = true;
     };
   }, [category, query]);
+
+  const handleTripContextMenu = useCallback(
+    (event: React.MouseEvent, trip: TripPackage) => {
+      if (!getToken()) {
+        return;
+      }
+      event.preventDefault();
+      const menuWidth = 200;
+      const menuHeight = 220;
+      setContextMenu({
+        trip,
+        x: Math.min(event.clientX, window.innerWidth - menuWidth - 8),
+        y: Math.min(event.clientY, window.innerHeight - menuHeight - 8),
+      });
+    },
+    []
+  );
+
+  const handleEditTrip = useCallback(
+    (trip: TripPackage) => {
+      router.push(`/trips?edit=${trip.id}`);
+    },
+    [router]
+  );
+
+  const requestDeleteTrip = useCallback((trip: TripPackage) => {
+    setConfirmAction({ type: "delete", trip });
+  }, []);
+
+  const requestStatusChange = useCallback(
+    (trip: TripPackage, targetStatus: TripStatus) => {
+      setConfirmAction({ type: "status", trip, targetStatus });
+    },
+    []
+  );
+
+  const executeConfirmedAction = useCallback(async () => {
+    if (!confirmAction) {
+      return;
+    }
+
+    const { trip } = confirmAction;
+    setPendingTripId(trip.id);
+
+    try {
+      if (confirmAction.type === "delete") {
+        await deleteTripPackage(trip.id);
+        setPackages((current) => current.filter((item) => item.id !== trip.id));
+        setToast({ type: "success", text: getDeleteSuccessMessage() });
+      } else {
+        const updated = await updateTripStatus(trip.id, confirmAction.targetStatus);
+        setPackages((current) =>
+          current.map((item) =>
+            item.id === trip.id
+              ? { ...item, ...updated, status: updated.status }
+              : item
+          )
+        );
+        setToast({
+          type: "success",
+          text: getStatusChangeSuccessMessage(confirmAction.targetStatus),
+        });
+      }
+      setConfirmAction(null);
+    } catch (err) {
+      setToast({
+        type: "error",
+        text:
+          confirmAction.type === "delete"
+            ? getDeleteErrorMessage(err)
+            : getStatusChangeErrorMessage(err),
+      });
+    } finally {
+      setPendingTripId(null);
+    }
+  }, [confirmAction]);
+
+  const confirmModalContent = useMemo(() => {
+    if (!confirmAction) {
+      return null;
+    }
+
+    if (confirmAction.type === "delete") {
+      return {
+        title: "Hapus Paket?",
+        description:
+          "Paket yang dihapus tidak dapat dikembalikan. Apakah Anda yakin ingin melanjutkan?",
+        confirmLabel: "Delete",
+        variant: "danger" as const,
+      };
+    }
+
+    return {
+      title: "Ubah Status Paket?",
+      description: `Apakah Anda yakin ingin mengubah status paket ini menjadi ${formatTripStatus(confirmAction.targetStatus)}?`,
+      confirmLabel: "Confirm",
+      variant: "default" as const,
+    };
+  }, [confirmAction]);
 
   const filteredTrips = useMemo(() => {
     return packages.filter((trip) => {
@@ -124,6 +253,14 @@ export function CurrentTripsScreen() {
             label="Privacy"
             subtle
             onClick={() => setModal("privacy")}
+          />
+          <SidebarItem
+            icon={<LogOut size={16} />}
+            label="Logout"
+            subtle
+            onClick={() => {
+              void logout();
+            }}
           />
         </div>
       </aside>
@@ -248,7 +385,13 @@ export function CurrentTripsScreen() {
                 )}
               >
                 {filteredTrips.map((trip) => (
-                  <TripCard key={trip.title} viewMode={viewMode} {...trip} />
+                  <TripCard
+                    key={trip.id}
+                    trip={trip}
+                    viewMode={viewMode}
+                    busy={pendingTripId === trip.id}
+                    onContextMenu={handleTripContextMenu}
+                  />
                 ))}
                 <CreateTripCard />
               </div>
@@ -262,6 +405,34 @@ export function CurrentTripsScreen() {
       </main>
 
       <InfoModal type={modal} onClose={() => setModal(null)} />
+      <ToastNotification toast={toast} onClose={() => setToast(null)} />
+      {confirmModalContent && confirmAction && (
+        <ConfirmModal
+          open
+          title={confirmModalContent.title}
+          description={confirmModalContent.description}
+          confirmLabel={confirmModalContent.confirmLabel}
+          cancelLabel="Cancel"
+          variant={confirmModalContent.variant}
+          loading={pendingTripId === confirmAction.trip.id}
+          onConfirm={executeConfirmedAction}
+          onCancel={() => {
+            if (pendingTripId !== confirmAction.trip.id) {
+              setConfirmAction(null);
+            }
+          }}
+        />
+      )}
+      {contextMenu && (
+        <TripCardContextMenu
+          trip={contextMenu.trip}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+          onEdit={handleEditTrip}
+          onDelete={requestDeleteTrip}
+          onStatusChange={requestStatusChange}
+        />
+      )}
     </div>
   );
 }
@@ -299,67 +470,145 @@ function SidebarItem({
 }
 
 function TripCard({
-  id,
-  title,
-  status,
-  duration,
-  slots,
-  package_start_date,
-  package_end_date,
-  image_url,
-  media,
+  trip,
   viewMode,
+  busy,
+  onContextMenu,
 }: {
-  id: string;
-  title: string;
-  status: string;
-  duration: string;
-  slots: number;
-  package_start_date?: string;
-  package_end_date?: string;
-  image_url?: string;
-  media?: Array<{ url: string }>;
+  trip: TripPackage;
   viewMode: ViewMode;
+  busy?: boolean;
+  onContextMenu: (event: React.MouseEvent, trip: TripPackage) => void;
 }) {
+  const {
+    id,
+    title,
+    status,
+    duration,
+    slots,
+    package_start_date,
+    package_end_date,
+    image_url,
+    media,
+    base_price,
+    estimated_price,
+    discount_price,
+    discount_enabled,
+  } = trip;
   const image = assetURL(image_url || media?.[0]?.url);
   const date = formatDateRange(package_start_date, package_end_date);
+  const price = getDiscountMeta(
+    base_price || estimated_price,
+    discount_price ?? 0,
+    discount_enabled
+  );
+  const statusTone = getStatusTone(status);
+
   return (
-    <Link
-      href={`/trips/${id}`}
+    <article
       className={cn(
-        "overflow-hidden rounded-xl bg-white shadow-[0_30px_70px_-45px_rgba(17,24,39,0.75)]",
+        "overflow-hidden rounded-xl bg-white shadow-[0_30px_70px_-45px_rgba(17,24,39,0.75)] transition",
+        busy && "pointer-events-none opacity-60",
         viewMode === "list" && "grid md:grid-cols-[300px_minmax(0,1fr)]"
       )}
+      onContextMenu={(event) => onContextMenu(event, trip)}
     >
-      <div
-        className={cn("relative bg-gradient-to-br from-[#102b35] via-[#2f9aad] to-[#a7dee3]", viewMode === "grid" ? "h-[192px]" : "min-h-[220px]")}
-        style={image ? { backgroundImage: `url(${image})`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}
+      <Link
+        href={`/trips/${id}`}
+        className={cn("block", viewMode === "list" && "contents")}
       >
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.7),transparent_18rem)] opacity-50" />
-        <div className="absolute inset-0 backdrop-blur-[1px]" />
-        <div className="absolute right-4 top-4 flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em] text-[#111827]">
-          <span className="h-2 w-2 rounded-full bg-[#be123c]" />
-          {status}
-        </div>
-      </div>
-
-      <div className="p-6">
-        <h2 className="whitespace-pre-line text-2xl font-semibold leading-[1.12] tracking-[-0.03em] text-[#171923]">
-          {title}
-        </h2>
-        <p className="mt-2 text-sm font-medium text-[#8a8f9d]">
-          {duration || "Flexible"} - {slots || 0} Slots
-        </p>
-
-        <div className="mt-8 border-t border-[#eef0f4] pt-5">
-          <div className="flex items-center gap-3 text-sm font-medium text-[#555b66]">
-            <CalendarDays size={16} className="text-[#5f6570]" />
-            {date}
+        <div
+          className={cn(
+            "relative bg-gradient-to-br from-[#102b35] via-[#2f9aad] to-[#a7dee3]",
+            viewMode === "grid" ? "h-[192px]" : "min-h-[220px]"
+          )}
+          style={
+            image
+              ? {
+                  backgroundImage: `url(${image})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                }
+              : undefined
+          }
+        >
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_28%_18%,rgba(255,255,255,0.7),transparent_18rem)] opacity-50" />
+          <div className="absolute inset-0 backdrop-blur-[1px]" />
+          <div
+            className={cn(
+              "absolute right-4 top-4 flex items-center gap-2 rounded-full px-3 py-1.5 text-[10px] font-extrabold uppercase tracking-[0.12em]",
+              statusTone.badge
+            )}
+          >
+            <span className={cn("h-2 w-2 rounded-full", statusTone.dot)} />
+            {formatTripStatus(status)}
           </div>
         </div>
-      </div>
-    </Link>
+
+        <div className="p-6">
+          <h2 className="whitespace-pre-line text-2xl font-semibold leading-[1.12] tracking-[-0.03em] text-[#171923]">
+            {title}
+          </h2>
+          <p className="mt-2 text-sm font-medium text-[#8a8f9d]">
+            {duration || "Flexible"} - {slots || 0} Slots
+          </p>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <span className="text-xl font-bold text-[#c1121f]">
+              {formatIDR(price.displayPrice)}
+            </span>
+            {price.hasDiscount && (
+              <>
+                <span className="text-sm font-medium text-[#8a8f9d] line-through">
+                  {formatIDR(price.originalPrice)}
+                </span>
+                <span className="rounded-full bg-[#c1121f] px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em] text-white">
+                  -{price.percent}%
+                </span>
+              </>
+            )}
+          </div>
+
+          <div className="mt-8 border-t border-[#eef0f4] pt-5">
+            <div className="flex items-center gap-3 text-sm font-medium text-[#555b66]">
+              <CalendarDays size={16} className="text-[#5f6570]" />
+              {date}
+            </div>
+          </div>
+        </div>
+      </Link>
+    </article>
   );
+}
+
+function getStatusTone(status: string) {
+  switch (status.toLowerCase()) {
+    case "published":
+      return {
+        badge: "bg-emerald-50/95 text-emerald-800",
+        dot: "bg-emerald-500",
+      };
+    case "pending":
+      return {
+        badge: "bg-amber-50/95 text-amber-800",
+        dot: "bg-amber-500",
+      };
+    case "full":
+      return {
+        badge: "bg-sky-50/95 text-sky-800",
+        dot: "bg-sky-500",
+      };
+    case "completed":
+      return {
+        badge: "bg-violet-50/95 text-violet-800",
+        dot: "bg-violet-500",
+      };
+    default:
+      return {
+        badge: "bg-white/90 text-[#111827]",
+        dot: "bg-[#be123c]",
+      };
+  }
 }
 
 function formatDateRange(start?: string, end?: string) {

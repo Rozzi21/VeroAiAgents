@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/config"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/database"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
@@ -53,12 +56,12 @@ func (h *Handler) Register(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	res, err := h.Services.Auth.Register(req)
+	result, err := h.Services.Auth.Register(req, authRequestMeta(c))
 	if err != nil {
 		utils.BadRequest(c, "Registration failed", gin.H{"detail": err.Error()})
 		return
 	}
-	utils.Success(c, http.StatusCreated, "Registered", res)
+	respondAuthIssue(c, h.Services.Config, http.StatusCreated, "Registered", result)
 }
 
 func (h *Handler) Login(c *gin.Context) {
@@ -66,25 +69,34 @@ func (h *Handler) Login(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	res, err := h.Services.Auth.Login(req)
+	result, err := h.Services.Auth.Login(req, authRequestMeta(c))
 	if err != nil {
 		utils.Unauthorized(c, err.Error())
 		return
 	}
-	utils.Success(c, http.StatusOK, "Logged in", res)
+	respondAuthIssue(c, h.Services.Config, http.StatusOK, "Logged in", result)
 }
 
 func (h *Handler) Refresh(c *gin.Context) {
-	var req dto.RefreshRequest
-	if !bind(c, &req) {
-		return
-	}
-	res, err := h.Services.Auth.Refresh(req.RefreshToken)
+	refreshToken := auth.GetRefreshCookie(c, h.Services.Config)
+	result, err := h.Services.Auth.Refresh(refreshToken, authRequestMeta(c))
 	if err != nil {
-		utils.Unauthorized(c, "Invalid refresh token")
+		message := "Invalid refresh token"
+		if errors.Is(err, services.ErrRefreshTokenRevoked) {
+			message = "Refresh token revoked"
+		}
+		utils.Unauthorized(c, message)
 		return
 	}
-	utils.Success(c, http.StatusOK, "Token refreshed", res)
+	result.Response.User = nil
+	respondAuthIssue(c, h.Services.Config, http.StatusOK, "Token refreshed", result)
+}
+
+func (h *Handler) Logout(c *gin.Context) {
+	refreshToken := auth.GetRefreshCookie(c, h.Services.Config)
+	_ = h.Services.Auth.Logout(refreshToken, authRequestMeta(c))
+	auth.ClearRefreshCookie(c, h.Services.Config)
+	utils.Success(c, http.StatusOK, "Logged out", gin.H{})
 }
 
 func (h *Handler) Me(c *gin.Context) {
@@ -397,6 +409,22 @@ func (h *Handler) EventStream(c *gin.Context) {
 			return true
 		}
 	})
+}
+
+func authRequestMeta(c *gin.Context) services.AuthRequestMeta {
+	requestID, _ := c.Get("request_id")
+	id, _ := requestID.(string)
+	return services.AuthRequestMeta{
+		IP:        c.ClientIP(),
+		UserAgent: c.GetHeader("User-Agent"),
+		RequestID: id,
+	}
+}
+
+func respondAuthIssue(c *gin.Context, cfg config.Config, status int, message string, result services.AuthIssueResult) {
+	maxAge := int(cfg.JWTRefreshTTL.Seconds())
+	auth.SetRefreshCookie(c, cfg, result.RefreshToken, maxAge)
+	utils.Success(c, status, message, result.Response)
 }
 
 func bind(c *gin.Context, target interface{}) bool {

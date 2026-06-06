@@ -82,8 +82,21 @@ func Auth(jwtService *auth.JWTService) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := jwtService.Parse(strings.TrimPrefix(header, "Bearer "))
+		token := strings.TrimPrefix(header, "Bearer ")
+		claims, err := jwtService.ParseWithAudience(token, auth.AudienceAccess)
 		if err != nil {
+			if parsedClaims, parseErr := jwtService.Parse(token); parseErr == nil && auth.IsAudience(parsedClaims, auth.AudienceRefresh) {
+				requestID, _ := c.Get("request_id")
+				id, _ := requestID.(string)
+				auth.LogSecurity(auth.EventRefreshTokenUsedAsAccess, map[string]any{
+					"user_id":    parsedClaims.UserID.String(),
+					"email":      parsedClaims.Email,
+					"jti":        parsedClaims.ID,
+					"ip":         c.ClientIP(),
+					"user_agent": c.GetHeader("User-Agent"),
+					"request_id": id,
+				})
+			}
 			utils.Unauthorized(c, "Invalid or expired token")
 			c.Abort()
 			return

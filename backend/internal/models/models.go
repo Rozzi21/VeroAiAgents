@@ -37,6 +37,16 @@ type User struct {
 	Role         Role          `json:"role" gorm:"size:30;not null;default:user"`
 	ChatSessions []ChatSession `json:"-" gorm:"foreignKey:UserID"`
 	Bookings     []Booking     `json:"-" gorm:"foreignKey:UserID"`
+	AuthSessions []AuthSession `json:"-" gorm:"foreignKey:UserID"`
+}
+
+type AuthSession struct {
+	BaseModel
+	UserID    uuid.UUID  `json:"user_id" gorm:"type:uuid;index;not null"`
+	User      User       `json:"-" gorm:"foreignKey:UserID"`
+	TokenJTI  string     `json:"token_jti" gorm:"size:64;uniqueIndex;not null"`
+	ExpiresAt time.Time  `json:"expires_at" gorm:"index;not null"`
+	RevokedAt *time.Time `json:"revoked_at,omitempty" gorm:"index"`
 }
 
 type ChatSession struct {

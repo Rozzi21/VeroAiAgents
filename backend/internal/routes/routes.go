@@ -25,6 +25,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			authGroup.POST("/register", h.Register)
 			authGroup.POST("/login", h.Login)
 			authGroup.POST("/refresh", h.Refresh)
+			authGroup.POST("/logout", h.Logout)
 			authGroup.GET("/me", middlewares.Auth(s.JWT), h.Me)
 		}
 

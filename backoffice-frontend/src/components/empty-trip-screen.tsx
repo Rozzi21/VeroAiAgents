@@ -16,16 +16,12 @@ import {
   Trash2,
 } from "lucide-react";
 import { apiFetch, assetURL, getToken } from "@/lib/api";
+import { ToastNotification, ToastState } from "@/components/toast-notification";
 
 type ItineraryItem = {
   day: number;
   title: string;
   description: string;
-};
-
-type ToastState = {
-  type: "success" | "error" | "info";
-  text: string;
 };
 
 const initialItineraries: ItineraryItem[] = [
@@ -36,15 +32,18 @@ const initialItineraries: ItineraryItem[] = [
   },
 ];
 
+const INITIAL_AMENITIES = [""];
+const INITIAL_HIGHLIGHTS: string[] = [];
+
 export function EmptyTripScreen() {
   const [category, setCategory] = useState<"local" | "international">("local");
   const [scheduleType, setScheduleType] = useState<"date_range" | "flexible">("date_range");
   const [visibilityEnabled, setVisibilityEnabled] = useState(false);
   const [uploadedMedia, setUploadedMedia] = useState<Array<{ url: string; type: string }>>([]);
-  const [amenitiesIncluded, setAmenitiesIncluded] = useState(["", ""]);
-  const [amenitiesExcluded, setAmenitiesExcluded] = useState([""]);
+  const [amenitiesIncluded, setAmenitiesIncluded] = useState(INITIAL_AMENITIES);
+  const [amenitiesExcluded, setAmenitiesExcluded] = useState(INITIAL_AMENITIES);
   const [itineraries, setItineraries] = useState<ItineraryItem[]>(initialItineraries);
-  const [highlights, setHighlights] = useState(["Cultural Tour", "Local Food"]);
+  const [highlights, setHighlights] = useState(INITIAL_HIGHLIGHTS);
   const [highlightInput, setHighlightInput] = useState("");
   const [durationDays, setDurationDays] = useState("");
   const [durationNights, setDurationNights] = useState("");
@@ -170,10 +169,10 @@ export function EmptyTripScreen() {
     setScheduleType("date_range");
     setVisibilityEnabled(false);
     setUploadedMedia([]);
-    setAmenitiesIncluded(["", ""]);
-    setAmenitiesExcluded([""]);
+    setAmenitiesIncluded(INITIAL_AMENITIES);
+    setAmenitiesExcluded(INITIAL_AMENITIES);
     setItineraries(initialItineraries);
-    setHighlights(["Cultural Tour", "Local Food"]);
+    setHighlights(INITIAL_HIGHLIGHTS);
     setHighlightInput("");
     setDurationDays("");
     setDurationNights("");
@@ -210,6 +209,7 @@ export function EmptyTripScreen() {
         (item.title.trim() && !item.description.trim()) ||
         (!item.title.trim() && item.description.trim())
     );
+    const cleanedHighlights = highlights.map((item) => item.trim()).filter(Boolean);
 
     if (!getToken()) {
       setToast({
@@ -249,7 +249,7 @@ export function EmptyTripScreen() {
       });
       return;
     }
-    if (highlights.length === 0) {
+    if (cleanedHighlights.length === 0) {
       setToast({
         type: "error",
         text: "Tambahkan minimal satu highlight untuk trip ini.",
@@ -280,7 +280,7 @@ export function EmptyTripScreen() {
       overview: summary,
       amenities_included: amenitiesIncluded.map((item) => item.trim()).filter(Boolean),
       amenities_excluded: amenitiesExcluded.map((item) => item.trim()).filter(Boolean),
-      highlights,
+      highlights: cleanedHighlights,
       base_price: basePrice,
       child_price: Number(form.get("child_price") || 0),
       discount_price: Number(form.get("discount_price") || 0),
@@ -329,7 +329,9 @@ export function EmptyTripScreen() {
 
   return (
     <div className="min-h-screen bg-[#fbfaff] text-[#171923]">
-      {toast && <Toast toast={toast} onClose={() => setToast(null)} />}
+      {toast && (
+        <ToastNotification toast={toast} onClose={() => setToast(null)} />
+      )}
       <aside className="fixed inset-y-0 left-0 hidden w-[188px] flex-col bg-[#faf9ff] px-5 py-6 lg:flex">
         <Link href="/" className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#e9272e] text-sm font-black text-white">
@@ -543,7 +545,12 @@ export function EmptyTripScreen() {
             </FormSection>
 
             <FormSection title="Highlights (Sorotan)">
-              <div className="flex flex-wrap gap-2 rounded-lg border border-[#e6dfe5] bg-white p-2">
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[#e6dfe5] bg-white p-2">
+                {highlights.length === 0 && (
+                  <span className="px-2 py-2 text-sm text-[#8a8f9d]">
+                    Belum ada highlight. Ketik lalu tekan Enter.
+                  </span>
+                )}
                 {highlights.map((highlight) => (
                   <button
                     key={highlight}
@@ -1007,39 +1014,6 @@ function AmenityColumn({
         <Plus size={13} />
         Add Item
       </button>
-    </div>
-  );
-}
-
-function Toast({
-  toast,
-  onClose,
-}: {
-  toast: ToastState;
-  onClose: () => void;
-}) {
-  const tone =
-    toast.type === "success"
-      ? "border-emerald-200 bg-emerald-50 text-emerald-800"
-      : toast.type === "error"
-        ? "border-red-200 bg-red-50 text-red-800"
-        : "border-slate-200 bg-white text-slate-700";
-
-  return (
-    <div className="fixed right-6 top-6 z-50 max-w-sm">
-      <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold shadow-xl ${tone}`}>
-        <div className="flex items-start gap-3">
-          <span className="leading-6">{toast.text}</span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="ml-auto text-current opacity-70 hover:opacity-100"
-            aria-label="Close notification"
-          >
-            ×
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

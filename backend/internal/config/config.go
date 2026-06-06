@@ -25,6 +25,9 @@ type Config struct {
 	JWTSecret            string
 	JWTAccessTTL         time.Duration
 	JWTRefreshTTL        time.Duration
+	JWTCookieName        string
+	JWTCookieSecure      bool
+	JWTCookieSameSite    string
 	AIAPIKey             string
 	AIBaseURL            string
 	AIModel              string
@@ -60,6 +63,9 @@ func Load() Config {
 		JWTSecret:            getEnv("JWT_SECRET", "super_secret_vero_travel"),
 		JWTAccessTTL:         time.Duration(accessMinutes) * time.Minute,
 		JWTRefreshTTL:        time.Duration(refreshHours) * time.Hour,
+		JWTCookieName:        getEnv("JWT_COOKIE_NAME", "refresh_token"),
+		JWTCookieSecure:      getBoolEnv("JWT_COOKIE_SECURE", getEnv("APP_ENV", "development") == "production"),
+		JWTCookieSameSite:    getEnv("JWT_COOKIE_SAME_SITE", "Strict"),
 		AIAPIKey:             os.Getenv("AI_API_KEY"),
 		AIBaseURL:            getEnv("AI_BASE_URL", "https://api.openai.com/v1"),
 		AIModel:              getEnv("AI_MODEL", "gpt-4o-mini"),
@@ -115,6 +121,18 @@ func getFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getBoolEnv(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}
