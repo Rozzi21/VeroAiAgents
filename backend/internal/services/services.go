@@ -350,12 +350,13 @@ func (s *MCPService) mock(toolName string, payload map[string]interface{}) ToolR
 		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
 			"days": []string{"Arrival and coastal relaxation", "Culture and food route", "Checkout and transfer"},
 		}}
-	case "create_payment":
-		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"method":      "QRIS",
-			"external_id": "DOKU-" + uuid.NewString(),
-			"expires_in":  "15m",
-		}}
+	// Fitur create_payment dimatikan sementara — mock QRIS tidak dijalankan di workflow chat.
+	// case "create_payment":
+	//	return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+	//		"method":      "QRIS",
+	//		"external_id": "DOKU-" + uuid.NewString(),
+	//		"expires_in":  "15m",
+	//	}}
 	case "send_whatsapp":
 		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
 			"delivered": true,
@@ -405,7 +406,9 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		{"searching_destination", "search_hotels"},
 		{"calculating_budget", "calculate_budget"},
 		{"generating_itinerary", "generate_itinerary"},
-		{"payment_created", "create_payment"},
+		// Fitur create_payment dimatikan sementara agar AI tidak menyebut QRIS/pembayaran
+		// sebelum booking sungguhan dibuat. Aktifkan kembali setelah integrasi payment siap.
+		// {"payment_created", "create_payment"},
 	}
 
 	results := make([]ToolResult, 0, len(steps))
@@ -418,7 +421,7 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		results = append(results, result)
 	}
 
-	response := "I found a premium autonomous travel plan with destination matches, hotel inventory, budget estimate, itinerary draft, and payment-ready workflow."
+	response := "I found a premium autonomous travel plan with destination matches, hotel inventory, budget estimate, and itinerary draft."
 	packages, _ := s.publishedPackagesForAI()
 	aiResponse, err := s.generateWithAI(sessionID, req.Prompt, results, packages)
 	if err != nil {
