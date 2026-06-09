@@ -1,6 +1,13 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
+function resolveApiBase() {
+  if (typeof window !== "undefined") {
+    return "";
+  }
+  return API_BASE_URL;
+}
+
 const ACCESS_TOKEN_KEY = "backoffice_token";
 const USER_ROLE_KEY = "backoffice_user_role";
 const TOKEN_EXPIRES_AT_KEY = "backoffice_token_expires_at";
@@ -153,7 +160,7 @@ function redirectToLogin() {
 
 function mapForbiddenMessage(message: string) {
   if (message === "Insufficient permission") {
-    return "Akses ditolak. Aksi ini membutuhkan role admin.";
+    return "Akses ditolak. Akun Anda tidak memiliki izin untuk aksi ini.";
   }
   return message || "Akses ditolak.";
 }
@@ -165,7 +172,7 @@ async function refreshAccessToken(): Promise<string | null> {
 
   refreshPromise = (async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/auth/refresh`, {
+      const response = await fetch(`${resolveApiBase()}/api/v1/auth/refresh`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -179,6 +186,19 @@ async function refreshAccessToken(): Promise<string | null> {
         payload.data.access_token,
         payload.data.expires_in ?? 3600
       );
+      try {
+        const user = await request<AuthUser>(
+          "/api/v1/auth/me",
+          {},
+          true,
+          payload.data.access_token
+        );
+        if (user.role) {
+          localStorage.setItem(USER_ROLE_KEY, user.role);
+        }
+      } catch {
+        // Token refresh succeeded; role sync is best-effort.
+      }
       return payload.data.access_token;
     } catch {
       return null;
@@ -275,7 +295,7 @@ async function request<T>(
     headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(`${resolveApiBase()}${path}`, {
     ...options,
     headers,
     credentials: "include",
@@ -334,7 +354,7 @@ export async function apiFetch<T>(
 
 export async function logout(options?: { redirect?: boolean }) {
   try {
-    await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
+    await fetch(`${resolveApiBase()}/api/v1/auth/logout`, {
       method: "POST",
       credentials: "include",
       headers: { "Content-Type": "application/json" },

@@ -41,7 +41,6 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			protected.GET("/trips/:id", h.GetTrip)
 			protected.POST("/trips", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.CreateTrip)
 			protected.PUT("/trips/:id", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.UpdateTrip)
-			protected.DELETE("/trips/:id", middlewares.Role(models.RoleAdmin), h.DeleteTrip)
 
 			admin := protected.Group("/admin")
 			admin.Use(middlewares.Role(models.RoleOperator, models.RoleAdmin))
@@ -49,10 +48,12 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 				admin.GET("/packages", h.ListTrips)
 				admin.POST("/packages", h.CreateTrip)
 				admin.PUT("/packages/:id", h.UpdateTrip)
+				admin.DELETE("/packages/:id", h.DeleteTrip)
 				admin.POST("/uploads", h.UploadTripMedia)
 				admin.GET("/dashboard", h.Analytics)
 			}
-			admin.DELETE("/packages/:id", h.DeleteTrip)
+
+			protected.DELETE("/trips/:id", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.DeleteTrip)
 
 			protected.POST("/bookings", h.CreateBooking)
 			protected.GET("/bookings", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.ListBookings)

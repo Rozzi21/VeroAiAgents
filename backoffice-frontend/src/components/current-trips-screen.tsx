@@ -74,12 +74,9 @@ export function CurrentTripsScreen() {
     if (query) {
       params.set("search", query);
     }
-    const hasToken = Boolean(getToken());
-    const path = hasToken
-      ? `/api/v1/admin/packages?${params.toString()}`
-      : `/api/v1/packages?${params.toString()}`;
+    const path = `/api/v1/admin/packages?${params.toString()}`;
 
-    apiFetch<TripPackage[]>(path, {}, hasToken)
+    apiFetch<TripPackage[]>(path, {}, true)
       .then((data) => {
         if (!cancelled) {
           setPackages(data);
