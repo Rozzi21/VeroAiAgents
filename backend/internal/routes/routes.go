@@ -52,7 +52,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 				admin.POST("/uploads", h.UploadTripMedia)
 				admin.GET("/dashboard", h.Analytics)
 			}
-			admin.DELETE("/packages/:id", middlewares.Role(models.RoleAdmin), h.DeleteTrip)
+			admin.DELETE("/packages/:id", h.DeleteTrip)
 
 			protected.POST("/bookings", h.CreateBooking)
 			protected.GET("/bookings", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.ListBookings)

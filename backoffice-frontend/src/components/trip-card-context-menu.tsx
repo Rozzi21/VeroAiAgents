@@ -5,18 +5,37 @@ import { Pencil, Trash2, Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TripPackage, TripStatus } from "@/lib/api";
 
+type MenuActionTone = "edit" | "delete" | "pending" | "published";
+
 type MenuAction = {
   id: string;
   label: string;
   icon: React.ReactNode;
-  tone?: "danger";
+  tone?: MenuActionTone;
   onSelect: () => void;
 };
+
+function getActionClasses(tone?: MenuActionTone) {
+  const base =
+    "flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold text-[#171923] transition [&_svg]:shrink-0";
+
+  switch (tone) {
+    case "edit":
+      return cn(base, "hover:bg-blue-50/95 hover:text-blue-800");
+    case "delete":
+      return cn(base, "hover:bg-[#fdf2f4] hover:text-[#c1121f]");
+    case "pending":
+      return cn(base, "hover:bg-amber-50/95 hover:text-amber-800");
+    case "published":
+      return cn(base, "hover:bg-emerald-50/95 hover:text-emerald-800");
+    default:
+      return cn(base, "hover:bg-[#faf9ff]");
+  }
+}
 
 type TripCardContextMenuProps = {
   trip: TripPackage;
   position: { x: number; y: number };
-  canDelete?: boolean;
   onClose: () => void;
   onEdit: (trip: TripPackage) => void;
   onDelete: (trip: TripPackage) => void;
@@ -25,7 +44,6 @@ type TripCardContextMenuProps = {
 
 function getMenuActions(
   trip: TripPackage,
-  canDelete: boolean,
   handlers: Pick<
     TripCardContextMenuProps,
     "onEdit" | "onDelete" | "onStatusChange"
@@ -36,26 +54,25 @@ function getMenuActions(
     {
       id: "edit",
       label: "Edit",
-      icon: <Pencil size={15} />,
+      icon: <Pencil size={15} strokeWidth={2.25} />,
+      tone: "edit",
       onSelect: () => handlers.onEdit(trip),
     },
-  ];
-
-  if (canDelete) {
-    actions.push({
+    {
       id: "delete",
       label: "Delete",
-      icon: <Trash2 size={15} />,
-      tone: "danger",
+      icon: <Trash2 size={15} strokeWidth={2.25} />,
+      tone: "delete",
       onSelect: () => handlers.onDelete(trip),
-    });
-  }
+    },
+  ];
 
   if (status === "published") {
     actions.push({
       id: "make-pending",
       label: "Make Pending",
-      icon: <EyeOff size={15} />,
+      icon: <EyeOff size={15} strokeWidth={2.25} />,
+      tone: "pending",
       onSelect: () => handlers.onStatusChange(trip, "pending"),
     });
   }
@@ -64,7 +81,8 @@ function getMenuActions(
     actions.push({
       id: "make-published",
       label: "Make Published",
-      icon: <Eye size={15} />,
+      icon: <Eye size={15} strokeWidth={2.25} />,
+      tone: "published",
       onSelect: () => handlers.onStatusChange(trip, "published"),
     });
   }
@@ -75,14 +93,13 @@ function getMenuActions(
 export function TripCardContextMenu({
   trip,
   position,
-  canDelete = false,
   onClose,
   onEdit,
   onDelete,
   onStatusChange,
 }: TripCardContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const actions = getMenuActions(trip, canDelete, {
+  const actions = getMenuActions(trip, {
     onEdit,
     onDelete,
     onStatusChange,
@@ -121,12 +138,7 @@ export function TripCardContextMenu({
           key={action.id}
           type="button"
           role="menuitem"
-          className={cn(
-            "flex w-full items-center gap-3 px-4 py-2.5 text-left text-sm font-semibold transition hover:bg-[#faf9ff]",
-            action.tone === "danger"
-              ? "text-[#c1121f] hover:bg-[#fdf2f4]"
-              : "text-[#353944]"
-          )}
+          className={getActionClasses(action.tone)}
           onClick={() => {
             action.onSelect();
             onClose();

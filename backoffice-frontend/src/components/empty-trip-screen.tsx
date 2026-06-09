@@ -667,6 +667,12 @@ export function EmptyTripScreen() {
 
       <footer className="fixed bottom-0 left-0 right-0 z-30 border-t border-[#eceaf2] bg-white/85 px-6 py-4 shadow-[0_-20px_60px_-48px_rgba(17,24,39,0.8)] backdrop-blur lg:left-[188px]">
         <div className="mx-auto flex max-w-[760px] justify-end gap-3">
+          <Link
+            href="/"
+            className="flex h-11 items-center gap-2 rounded-lg bg-white px-5 text-xs font-bold text-[#6f7480] ring-1 ring-[#e6dfe5] transition hover:bg-[#faf9ff]"
+          >
+            Cancel
+          </Link>
           <button
             form="trip-form"
             type="submit"

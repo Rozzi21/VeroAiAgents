@@ -18,7 +18,7 @@ import {
   Search,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiFetch, assetURL, getToken, getUserRole, isAdminRole, logout, TripPackage, TripStatus } from "@/lib/api";
+import { apiFetch, assetURL, getToken, logout, TripPackage, TripStatus } from "@/lib/api";
 import { formatIDR, getDiscountMeta } from "@/lib/format";
 import {
   deleteTripPackage,
@@ -62,7 +62,6 @@ export function CurrentTripsScreen() {
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [pendingTripId, setPendingTripId] = useState<string | null>(null);
-  const canDeleteTrips = isAdminRole(getUserRole());
 
   useEffect(() => {
     let cancelled = false;
@@ -428,7 +427,6 @@ export function CurrentTripsScreen() {
         <TripCardContextMenu
           trip={contextMenu.trip}
           position={{ x: contextMenu.x, y: contextMenu.y }}
-          canDelete={canDeleteTrips}
           onClose={() => setContextMenu(null)}
           onEdit={handleEditTrip}
           onDelete={requestDeleteTrip}
