@@ -2,7 +2,13 @@
 
 import { FormEvent, useState } from "react";
 import { ArrowRight, Eye, LockKeyhole, UserRound } from "lucide-react";
-import { apiFetch, setAuthTokens } from "@/lib/api";
+import {
+  apiFetch,
+  isBackofficeRole,
+  logout,
+  setAuthSession,
+  startAuthRefreshScheduler,
+} from "@/lib/api";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
@@ -15,14 +21,27 @@ export default function LoginPage() {
     try {
       const data = await apiFetch<{
         access_token: string;
+        expires_in: number;
         user: { role: string };
       }>("/api/v1/auth/login", {
         method: "POST",
         body: JSON.stringify({ username, email: username, password }),
       });
-      setAuthTokens(data.access_token);
+
+      if (!isBackofficeRole(data.user.role)) {
+        await logout({ redirect: false });
+        setMessage(
+          "Akun ini tidak memiliki akses backoffice. Gunakan akun operator atau admin."
+        );
+        return;
+      }
+
+      setAuthSession(data.access_token, data.user.role, data.expires_in);
+      startAuthRefreshScheduler();
       setMessage(`Signed in as ${data.user.role}. Redirecting...`);
-      const redirectPath = new URLSearchParams(window.location.search).get("redirect");
+      const redirectPath = new URLSearchParams(window.location.search).get(
+        "redirect"
+      );
       window.location.href = redirectPath?.startsWith("/") ? redirectPath : "/";
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Login failed");

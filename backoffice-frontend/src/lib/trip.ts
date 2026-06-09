@@ -67,6 +67,9 @@ export function getDeleteSuccessMessage() {
 
 export function getDeleteErrorMessage(error?: unknown) {
   if (error instanceof Error && error.message) {
+    if (error.message === "Insufficient permission") {
+      return "Akses ditolak. Aksi ini membutuhkan role admin.";
+    }
     return error.message;
   }
   return "Gagal menghapus paket.";

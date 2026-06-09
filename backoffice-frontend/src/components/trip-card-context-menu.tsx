@@ -16,6 +16,7 @@ type MenuAction = {
 type TripCardContextMenuProps = {
   trip: TripPackage;
   position: { x: number; y: number };
+  canDelete?: boolean;
   onClose: () => void;
   onEdit: (trip: TripPackage) => void;
   onDelete: (trip: TripPackage) => void;
@@ -24,6 +25,7 @@ type TripCardContextMenuProps = {
 
 function getMenuActions(
   trip: TripPackage,
+  canDelete: boolean,
   handlers: Pick<
     TripCardContextMenuProps,
     "onEdit" | "onDelete" | "onStatusChange"
@@ -37,14 +39,17 @@ function getMenuActions(
       icon: <Pencil size={15} />,
       onSelect: () => handlers.onEdit(trip),
     },
-    {
+  ];
+
+  if (canDelete) {
+    actions.push({
       id: "delete",
       label: "Delete",
       icon: <Trash2 size={15} />,
       tone: "danger",
       onSelect: () => handlers.onDelete(trip),
-    },
-  ];
+    });
+  }
 
   if (status === "published") {
     actions.push({
@@ -70,13 +75,18 @@ function getMenuActions(
 export function TripCardContextMenu({
   trip,
   position,
+  canDelete = false,
   onClose,
   onEdit,
   onDelete,
   onStatusChange,
 }: TripCardContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const actions = getMenuActions(trip, { onEdit, onDelete, onStatusChange });
+  const actions = getMenuActions(trip, canDelete, {
+    onEdit,
+    onDelete,
+    onStatusChange,
+  });
 
   useEffect(() => {
     function handlePointerDown(event: MouseEvent) {

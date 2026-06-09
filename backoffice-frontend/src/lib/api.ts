@@ -2,7 +2,14 @@ export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
 
 const ACCESS_TOKEN_KEY = "backoffice_token";
+const USER_ROLE_KEY = "backoffice_user_role";
+const TOKEN_EXPIRES_AT_KEY = "backoffice_token_expires_at";
 const LEGACY_REFRESH_TOKEN_KEY = "backoffice_refresh_token";
+
+const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+const FALLBACK_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
+
+export type BackofficeRole = "admin" | "operator" | "user" | string;
 
 export type TripPackage = {
   id: string;
@@ -53,9 +60,16 @@ type Envelope<T> = {
 
 type AuthTokens = {
   access_token: string;
+  expires_in?: number;
+};
+
+type AuthUser = {
+  role: BackofficeRole;
 };
 
 let refreshPromise: Promise<string | null> | null = null;
+let refreshSchedulerStarted = false;
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 if (typeof window !== "undefined") {
   localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
@@ -68,17 +82,63 @@ export function getToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
 }
 
-export function setAccessToken(accessToken: string) {
-  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+export function getUserRole(): BackofficeRole {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  return localStorage.getItem(USER_ROLE_KEY) ?? "";
 }
 
-export function setAuthTokens(accessToken: string) {
-  setAccessToken(accessToken);
+export function isBackofficeRole(role: string) {
+  return role === "admin" || role === "operator";
+}
+
+export function isAdminRole(role: string) {
+  return role === "admin";
+}
+
+function getTokenExpiresAt() {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  return Number(localStorage.getItem(TOKEN_EXPIRES_AT_KEY) ?? 0);
+}
+
+function setTokenExpiry(expiresInSeconds?: number) {
+  if (typeof window === "undefined" || !expiresInSeconds) {
+    return;
+  }
+  const expiresAt = Date.now() + expiresInSeconds * 1000;
+  localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(expiresAt));
+}
+
+export function setAccessToken(accessToken: string, expiresInSeconds?: number) {
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  setTokenExpiry(expiresInSeconds);
+  scheduleProactiveRefresh();
+}
+
+export function setAuthSession(
+  accessToken: string,
+  role?: BackofficeRole,
+  expiresInSeconds?: number
+) {
+  setAccessToken(accessToken, expiresInSeconds);
+  if (role) {
+    localStorage.setItem(USER_ROLE_KEY, role);
+  }
+}
+
+export function setAuthTokens(accessToken: string, role?: BackofficeRole) {
+  setAuthSession(accessToken, role);
 }
 
 export function clearAuthTokens() {
   localStorage.removeItem(ACCESS_TOKEN_KEY);
+  localStorage.removeItem(USER_ROLE_KEY);
+  localStorage.removeItem(TOKEN_EXPIRES_AT_KEY);
   localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
+  stopAuthRefreshScheduler();
 }
 
 function redirectToLogin() {
@@ -89,6 +149,13 @@ function redirectToLogin() {
     `${window.location.pathname}${window.location.search}`
   );
   window.location.href = `/login?redirect=${redirect}`;
+}
+
+function mapForbiddenMessage(message: string) {
+  if (message === "Insufficient permission") {
+    return "Akses ditolak. Aksi ini membutuhkan role admin.";
+  }
+  return message || "Akses ditolak.";
 }
 
 async function refreshAccessToken(): Promise<string | null> {
@@ -108,7 +175,10 @@ async function refreshAccessToken(): Promise<string | null> {
         return null;
       }
 
-      setAccessToken(payload.data.access_token);
+      setAccessToken(
+        payload.data.access_token,
+        payload.data.expires_in ?? 3600
+      );
       return payload.data.access_token;
     } catch {
       return null;
@@ -118,6 +188,71 @@ async function refreshAccessToken(): Promise<string | null> {
   })();
 
   return refreshPromise;
+}
+
+function scheduleProactiveRefresh() {
+  if (typeof window === "undefined" || !getToken()) {
+    return;
+  }
+
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+
+  const expiresAt = getTokenExpiresAt();
+  const delay =
+    expiresAt > 0
+      ? Math.max(expiresAt - Date.now() - REFRESH_BUFFER_MS, 30_000)
+      : FALLBACK_REFRESH_INTERVAL_MS;
+
+  refreshTimer = setTimeout(async () => {
+    if (!getToken()) {
+      return;
+    }
+    const newToken = await refreshAccessToken();
+    if (!newToken) {
+      clearAuthTokens();
+      redirectToLogin();
+    }
+  }, delay);
+}
+
+export function startAuthRefreshScheduler() {
+  if (typeof window === "undefined" || refreshSchedulerStarted) {
+    return;
+  }
+  refreshSchedulerStarted = true;
+  scheduleProactiveRefresh();
+
+  const handleVisibility = () => {
+    if (document.visibilityState !== "visible" || !getToken()) {
+      return;
+    }
+    const expiresAt = getTokenExpiresAt();
+    if (expiresAt > 0 && expiresAt - Date.now() <= REFRESH_BUFFER_MS) {
+      void refreshAccessToken().then((token) => {
+        if (!token) {
+          clearAuthTokens();
+          redirectToLogin();
+        }
+      });
+    }
+  };
+
+  document.addEventListener("visibilitychange", handleVisibility);
+}
+
+export function stopAuthRefreshScheduler() {
+  refreshSchedulerStarted = false;
+  if (refreshTimer) {
+    clearTimeout(refreshTimer);
+    refreshTimer = null;
+  }
+}
+
+export async function fetchCurrentUser() {
+  return apiFetch<AuthUser>("/api/v1/auth/me", {}, true);
 }
 
 async function request<T>(
@@ -151,6 +286,10 @@ async function request<T>(
     const authError = new Error(payload.message || "Unauthorized");
     authError.name = "AuthError";
     throw authError;
+  }
+
+  if (response.status === 403) {
+    throw new Error(mapForbiddenMessage(payload.message));
   }
 
   if (!response.ok || !payload.success) {
@@ -193,7 +332,7 @@ export async function apiFetch<T>(
   }
 }
 
-export async function logout() {
+export async function logout(options?: { redirect?: boolean }) {
   try {
     await fetch(`${API_BASE_URL}/api/v1/auth/logout`, {
       method: "POST",
@@ -202,7 +341,9 @@ export async function logout() {
     });
   } finally {
     clearAuthTokens();
-    redirectToLogin();
+    if (options?.redirect !== false) {
+      redirectToLogin();
+    }
   }
 }
 

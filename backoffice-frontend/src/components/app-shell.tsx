@@ -2,7 +2,15 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { getToken } from "@/lib/api";
+import {
+  clearAuthTokens,
+  fetchCurrentUser,
+  getToken,
+  isBackofficeRole,
+  logout,
+  setAuthSession,
+  startAuthRefreshScheduler,
+} from "@/lib/api";
 
 const publicRoutes = ["/login"];
 
@@ -12,20 +20,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    const isPublicRoute = publicRoutes.includes(pathname);
-    const hasToken = Boolean(getToken());
+    let cancelled = false;
 
-    if (!hasToken && !isPublicRoute) {
-      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-      return;
+    async function checkAuth() {
+      const isPublicRoute = publicRoutes.includes(pathname);
+      const hasToken = Boolean(getToken());
+
+      if (!hasToken && !isPublicRoute) {
+        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+        return;
+      }
+
+      if (hasToken && pathname === "/login") {
+        router.replace("/");
+        return;
+      }
+
+      if (hasToken && !isPublicRoute) {
+        try {
+          const user = await fetchCurrentUser();
+          if (cancelled) {
+            return;
+          }
+
+          if (!isBackofficeRole(user.role)) {
+            await logout({ redirect: false });
+            router.replace("/login?reason=no-access");
+            return;
+          }
+
+          setAuthSession(getToken(), user.role);
+          startAuthRefreshScheduler();
+        } catch {
+          if (cancelled) {
+            return;
+          }
+          clearAuthTokens();
+          router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+          return;
+        }
+      }
+
+      if (!cancelled) {
+        setCheckingAuth(false);
+      }
     }
 
-    if (hasToken && pathname === "/login") {
-      router.replace("/");
-      return;
-    }
+    setCheckingAuth(true);
+    void checkAuth();
 
-    setCheckingAuth(false);
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   if (checkingAuth) {
