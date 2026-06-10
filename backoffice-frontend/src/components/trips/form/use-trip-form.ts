@@ -50,10 +50,10 @@ function applyControlledState(
     setHighlights: (value: string[]) => void;
     setDurationDays: (value: string) => void;
     setDurationNights: (value: string) => void;
-    setAdultSlotsEnabled: (value: boolean) => void;
-    setChildSlotsEnabled: (value: boolean) => void;
-    setAdultSlots: (value: string) => void;
-    setChildSlots: (value: string) => void;
+    setAdultPaxEnabled: (value: boolean) => void;
+    setChildPaxEnabled: (value: boolean) => void;
+    setAdultPax: (value: string) => void;
+    setChildPax: (value: string) => void;
   }
 ) {
   setters.setCategory(controlled.category);
@@ -66,10 +66,10 @@ function applyControlledState(
   setters.setHighlights(controlled.highlights);
   setters.setDurationDays(controlled.durationDays);
   setters.setDurationNights(controlled.durationNights);
-  setters.setAdultSlotsEnabled(controlled.adultSlotsEnabled);
-  setters.setChildSlotsEnabled(controlled.childSlotsEnabled);
-  setters.setAdultSlots(controlled.adultSlots);
-  setters.setChildSlots(controlled.childSlots);
+  setters.setAdultPaxEnabled(controlled.adultPaxEnabled);
+  setters.setChildPaxEnabled(controlled.childPaxEnabled);
+  setters.setAdultPax(controlled.adultPax);
+  setters.setChildPax(controlled.childPax);
 }
 
 export function useTripForm() {
@@ -88,10 +88,10 @@ export function useTripForm() {
   const [highlightInput, setHighlightInput] = useState("");
   const [durationDays, setDurationDays] = useState("");
   const [durationNights, setDurationNights] = useState("");
-  const [adultSlotsEnabled, setAdultSlotsEnabled] = useState(false);
-  const [childSlotsEnabled, setChildSlotsEnabled] = useState(false);
-  const [adultSlots, setAdultSlots] = useState("");
-  const [childSlots, setChildSlots] = useState("");
+  const [adultPaxEnabled, setAdultPaxEnabled] = useState(false);
+  const [childPaxEnabled, setChildPaxEnabled] = useState(false);
+  const [adultPax, setAdultPax] = useState("");
+  const [childPax, setChildPax] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadingTrip, setLoadingTrip] = useState(Boolean(editId));
@@ -123,10 +123,10 @@ export function useTripForm() {
     setHighlightInput("");
     setDurationDays("");
     setDurationNights("");
-    setAdultSlotsEnabled(false);
-    setChildSlotsEnabled(false);
-    setAdultSlots("");
-    setChildSlots("");
+    setAdultPaxEnabled(false);
+    setChildPaxEnabled(false);
+    setAdultPax("");
+    setChildPax("");
   }
 
   useEffect(() => {
@@ -162,10 +162,10 @@ export function useTripForm() {
           setHighlights,
           setDurationDays,
           setDurationNights,
-          setAdultSlotsEnabled,
-          setChildSlotsEnabled,
-          setAdultSlots,
-          setChildSlots,
+          setAdultPaxEnabled,
+          setChildPaxEnabled,
+          setAdultPax,
+          setChildPax,
         });
         setStaticDefaults(mapped.defaults);
         setLoadedTrip(trip);
@@ -313,9 +313,8 @@ export function useTripForm() {
     const publishEndDate = visibilityEnabled
       ? String(form.get("publish_end") || "").trim()
       : "";
-    const adultSlotCount = adultSlotsEnabled ? Number(adultSlots || 0) : 0;
-    const childSlotCount = childSlotsEnabled ? Number(childSlots || 0) : 0;
-    const totalSlots = adultSlotCount + childSlotCount;
+    const adultPaxCount = adultPaxEnabled ? Number(adultPax || 0) : 0;
+    const childPaxCount = childPaxEnabled ? Number(childPax || 0) : 0;
     const incompleteItinerary = itineraries.some(
       (item) =>
         (item.title.trim() && !item.description.trim()) ||
@@ -338,12 +337,12 @@ export function useTripForm() {
       return;
     }
     if (
-      (adultSlotsEnabled && adultSlotCount <= 0) ||
-      (childSlotsEnabled && childSlotCount <= 0)
+      (adultPaxEnabled && adultPaxCount <= 0) ||
+      (childPaxEnabled && childPaxCount <= 0)
     ) {
       setToast({
         type: "error",
-        text: "Jumlah slots wajib lebih dari 0 untuk tipe slots yang diaktifkan.",
+        text: "Jumlah pax wajib lebih dari 0 untuk tipe pax yang diaktifkan.",
       });
       return;
     }
@@ -383,7 +382,8 @@ export function useTripForm() {
       location,
       destination: location,
       duration,
-      slots: totalSlots,
+      adult_pax: adultPaxCount,
+      child_pax: childPaxCount,
       category,
       status: submitStatus.current,
       media: uploadedMedia,
@@ -489,14 +489,14 @@ export function useTripForm() {
       setDurationDays,
       durationNights,
       setDurationNights,
-      adultSlotsEnabled,
-      setAdultSlotsEnabled,
-      childSlotsEnabled,
-      setChildSlotsEnabled,
-      adultSlots,
-      setAdultSlots,
-      childSlots,
-      setChildSlots,
+      adultPaxEnabled,
+      setAdultPaxEnabled,
+      childPaxEnabled,
+      setChildPaxEnabled,
+      adultPax,
+      setAdultPax,
+      childPax,
+      setChildPax,
     },
     media: {
       uploadedMedia,

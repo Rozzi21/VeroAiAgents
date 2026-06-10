@@ -677,7 +677,8 @@ func buildTripFromRequest(trip models.Trip, req dto.TripRequest) models.Trip {
 	trip.Overview = firstNonEmpty(req.Overview, req.Summary)
 	trip.Summary = firstNonEmpty(req.Summary, req.Overview)
 	trip.Duration = req.Duration
-	trip.Slots = req.Slots
+	trip.AdultPax = req.AdultPax
+	trip.ChildPax = req.ChildPax
 	trip.EstimatedPrice = firstNonZero(req.EstimatedPrice, req.BasePrice)
 	trip.BasePrice = firstNonZero(req.BasePrice, req.EstimatedPrice)
 	trip.DiscountPrice = req.DiscountPrice

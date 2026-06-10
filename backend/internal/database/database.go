@@ -51,7 +51,7 @@ func Connect(cfg config.Config) (*Database, error) {
 }
 
 func (d *Database) AutoMigrate() error {
-	return d.DB.AutoMigrate(
+	if err := d.DB.AutoMigrate(
 		&models.User{},
 		&models.AuthSession{},
 		&models.ChatSession{},
@@ -62,7 +62,23 @@ func (d *Database) AutoMigrate() error {
 		&models.Payment{},
 		&models.AILog{},
 		&models.ToolCall{},
-	)
+	); err != nil {
+		return err
+	}
+
+	return d.migrateLegacySlots()
+}
+
+func (d *Database) migrateLegacySlots() error {
+	if !d.DB.Migrator().HasColumn("trips", "slots") {
+		return nil
+	}
+
+	return d.DB.Exec(`
+		UPDATE trips
+		SET adult_pax = slots
+		WHERE slots > 0 AND adult_pax = 0 AND child_pax = 0
+	`).Error
 }
 
 func (d *Database) Health(ctx context.Context) error {

@@ -43,7 +43,8 @@ type TripRequest struct {
 	Overview             string             `json:"overview"`
 	Summary              string             `json:"summary"`
 	Duration             string             `json:"duration"`
-	Slots                int                `json:"slots"`
+	AdultPax             int                `json:"adult_pax"`
+	ChildPax             int                `json:"child_pax"`
 	EstimatedPrice       float64            `json:"estimated_price"`
 	BasePrice            float64            `json:"base_price"`
 	DiscountPrice        float64            `json:"discount_price"`

@@ -17,14 +17,14 @@ export function BasicInfoSection({ basicInfo, title = "", location = "" }: Props
     setDurationDays,
     durationNights,
     setDurationNights,
-    adultSlotsEnabled,
-    setAdultSlotsEnabled,
-    childSlotsEnabled,
-    setChildSlotsEnabled,
-    adultSlots,
-    setAdultSlots,
-    childSlots,
-    setChildSlots,
+    adultPaxEnabled,
+    setAdultPaxEnabled,
+    childPaxEnabled,
+    setChildPaxEnabled,
+    adultPax,
+    setAdultPax,
+    childPax,
+    setChildPax,
   } = basicInfo;
 
   return (
@@ -38,37 +38,37 @@ export function BasicInfoSection({ basicInfo, title = "", location = "" }: Props
         onNightsChange={setDurationNights}
       />
       <div className="rounded-xl border border-[#eadfe5] bg-white p-4">
-        <Label>Package Slots (Optional)</Label>
+        <Label>Package Pax (Optional)</Label>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
           <SlotToggle
-            label="Enable slots adults"
-            enabled={adultSlotsEnabled}
-            value={adultSlots}
-            placeholder="Adult slots"
+            label="Enable adult pax"
+            enabled={adultPaxEnabled}
+            value={adultPax}
+            placeholder="Adult pax"
             onEnabledChange={(checked) => {
-              setAdultSlotsEnabled(checked);
+              setAdultPaxEnabled(checked);
               if (!checked) {
-                setAdultSlots("");
+                setAdultPax("");
               }
             }}
-            onValueChange={setAdultSlots}
+            onValueChange={setAdultPax}
           />
           <SlotToggle
-            label="Enable slots child"
-            enabled={childSlotsEnabled}
-            value={childSlots}
-            placeholder="Child slots"
+            label="Enable child pax"
+            enabled={childPaxEnabled}
+            value={childPax}
+            placeholder="Child pax"
             onEnabledChange={(checked) => {
-              setChildSlotsEnabled(checked);
+              setChildPaxEnabled(checked);
               if (!checked) {
-                setChildSlots("");
+                setChildPax("");
               }
             }}
-            onValueChange={setChildSlots}
+            onValueChange={setChildPax}
           />
         </div>
         <p className="mt-3 text-[11px] font-medium text-[#8b909a]">
-          Jika disabled, slot tidak akan dihitung. Total slots disimpan sebagai kapasitas paket.
+          Jika disabled, pax tidak akan dihitung. Adult dan child pax disimpan terpisah.
         </p>
       </div>
 

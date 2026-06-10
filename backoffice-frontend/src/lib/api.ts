@@ -29,7 +29,8 @@ export type TripPackage = {
   summary: string;
   overview: string;
   duration: string;
-  slots: number;
+  adult_pax: number;
+  child_pax: number;
   image_url: string;
   media?: Array<{ url: string; type: string; alt_text?: string }>;
   highlights?: string[];

@@ -36,10 +36,10 @@ export type TripFormControlledState = {
   highlights: string[];
   durationDays: string;
   durationNights: string;
-  adultSlotsEnabled: boolean;
-  childSlotsEnabled: boolean;
-  adultSlots: string;
-  childSlots: string;
+  adultPaxEnabled: boolean;
+  childPaxEnabled: boolean;
+  adultPax: string;
+  childPax: string;
 };
 
 export function parseDuration(duration: string): { days: string; nights: string } {
@@ -94,7 +94,8 @@ export function mapTripToForm(trip: TripPackage): {
   const { days, nights } = parseDuration(trip.duration);
   const publishStart = formatDateForInput(trip.publish_start_date);
   const publishEnd = formatDateForInput(trip.publish_end_date);
-  const hasSlots = trip.slots > 0;
+  const adultPax = trip.adult_pax ?? 0;
+  const childPax = trip.child_pax ?? 0;
 
   return {
     controlled: {
@@ -111,10 +112,10 @@ export function mapTripToForm(trip: TripPackage): {
       highlights: trip.highlights ?? [],
       durationDays: days,
       durationNights: nights,
-      adultSlotsEnabled: hasSlots,
-      childSlotsEnabled: false,
-      adultSlots: hasSlots ? String(trip.slots) : "",
-      childSlots: "",
+      adultPaxEnabled: adultPax > 0,
+      childPaxEnabled: childPax > 0,
+      adultPax: adultPax > 0 ? String(adultPax) : "",
+      childPax: childPax > 0 ? String(childPax) : "",
     },
     defaults: {
       title: trip.title,

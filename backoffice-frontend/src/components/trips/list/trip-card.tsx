@@ -5,6 +5,7 @@ import { assetURL, TripPackage } from "@/lib/api";
 import { formatIDR, getDiscountMeta } from "@/lib/format";
 import { formatTripStatus } from "@/lib/trip";
 import { formatDateRange } from "../shared/format-date-range";
+import { formatTripPax } from "../shared/format-trip-pax";
 import { getStatusTone } from "../shared/trip-status-tone";
 import { ViewMode } from "./types";
 
@@ -26,7 +27,8 @@ export function TripCard({
     title,
     status,
     duration,
-    slots,
+    adult_pax,
+    child_pax,
     package_start_date,
     package_end_date,
     image_url,
@@ -91,7 +93,7 @@ export function TripCard({
             {title}
           </h2>
           <p className="mt-2 text-sm font-medium text-[#8a8f9d]">
-            {duration || "Flexible"} - {slots || 0} Slots
+            {duration || "Flexible"} - {formatTripPax(adult_pax, child_pax)}
           </p>
 
           <div className="mt-4 flex flex-wrap items-center gap-2">

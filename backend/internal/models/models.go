@@ -77,7 +77,8 @@ type Trip struct {
 	Overview             string      `json:"overview" gorm:"type:text"`
 	Summary              string      `json:"summary" gorm:"type:text"`
 	Duration             string      `json:"duration" gorm:"size:80"`
-	Slots                int         `json:"slots" gorm:"not null;default:0"`
+	AdultPax             int         `json:"adult_pax" gorm:"not null;default:0"`
+	ChildPax             int         `json:"child_pax" gorm:"not null;default:0"`
 	EstimatedPrice       float64     `json:"estimated_price" gorm:"type:numeric(14,2);not null;default:0"`
 	BasePrice            float64     `json:"base_price" gorm:"type:numeric(14,2);not null;default:0"`
 	DiscountPrice        float64     `json:"discount_price" gorm:"type:numeric(14,2);not null;default:0"`
