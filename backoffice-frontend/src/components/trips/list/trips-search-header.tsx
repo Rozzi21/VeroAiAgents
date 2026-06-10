@@ -14,7 +14,7 @@ export function TripsSearchHeader({ query, onQueryChange }: TripsSearchHeaderPro
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-[#606473]"
-          placeholder="CariTrips"
+          placeholder="Cari trips"
         />
       </label>
     </header>

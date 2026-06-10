@@ -28,13 +28,13 @@ export function TripsListScreen() {
 
       <main className="lg:pl-[288px]">
         <div className="mx-auto min-h-screen max-w-[1180px] px-6 py-5 md:px-10 lg:px-14">
-          <TripsSearchHeader query={list.query} onQueryChange={list.setQuery} />
-
-          <section className="mt-12">
+          <section className={list.activePanel === "dashboard" ? "mt-12" : undefined}>
             {list.activePanel === "dashboard" ? (
               <OnDevelopmentPanel />
             ) : (
               <>
+                <TripsSearchHeader query={list.query} onQueryChange={list.setQuery} />
+
                 <TripsToolbar
                   category={list.category}
                   viewMode={list.viewMode}
