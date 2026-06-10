@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { ToastNotification } from "@/components/toast-notification";
+import { InfoModal } from "../list/info-modal";
+import { ModalType } from "../list/types";
+import { BackofficeSidebar } from "../shared/backoffice-sidebar";
 import { useTripForm } from "./use-trip-form";
-import { TripFormSidebar } from "./trip-form-sidebar";
 import { TripFormFooter } from "./trip-form-footer";
 import { BasicInfoSection } from "./sections/basic-info-section";
 import { MediaSection } from "./sections/media-section";
@@ -18,6 +21,7 @@ import { ReferenceSection } from "./sections/reference-section";
 export function TripFormScreen() {
   const form = useTripForm();
   const defaults = form.staticDefaults;
+  const [modal, setModal] = useState<ModalType>(null);
 
   if (form.loadingTrip) {
     return (
@@ -46,9 +50,10 @@ export function TripFormScreen() {
       {form.toast && (
         <ToastNotification toast={form.toast} onClose={() => form.setToast(null)} />
       )}
-      <TripFormSidebar />
+      <InfoModal type={modal} onClose={() => setModal(null)} />
+      <BackofficeSidebar mode="form" onModalOpen={setModal} />
 
-      <main className="pb-28 lg:pl-[188px]">
+      <main className="pb-28 lg:pl-[288px]">
         <div className="mx-auto max-w-[760px] px-6 py-10">
           <header>
             <h1 className="text-3xl font-extrabold tracking-[-0.04em]">

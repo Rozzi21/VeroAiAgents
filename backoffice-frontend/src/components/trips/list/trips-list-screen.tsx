@@ -5,7 +5,7 @@ import { ConfirmModal } from "@/components/confirm-modal";
 import { TripCardContextMenu } from "@/components/trip-card-context-menu";
 import { ToastNotification } from "@/components/toast-notification";
 import { useTripsList } from "./use-trips-list";
-import { TripsSidebar } from "./trips-sidebar";
+import { BackofficeSidebar } from "../shared/backoffice-sidebar";
 import { TripsSearchHeader } from "./trips-search-header";
 import { TripsToolbar } from "./trips-toolbar";
 import { TripCard } from "./trip-card";
@@ -19,7 +19,8 @@ export function TripsListScreen() {
 
   return (
     <div className="min-h-screen bg-white text-[#161a23]">
-      <TripsSidebar
+      <BackofficeSidebar
+        mode="list"
         activePanel={list.activePanel}
         onPanelChange={list.setActivePanel}
         onModalOpen={list.setModal}

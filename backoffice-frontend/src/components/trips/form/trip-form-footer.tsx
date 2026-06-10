@@ -20,7 +20,7 @@ export function TripFormFooter({
   const primaryLabel = isEditMode ? "Save Trip" : "Publish Trip";
   const primarySavingLabel = isEditMode ? "Saving..." : "Publishing...";
   return (
-    <footer className="fixed bottom-0 left-0 right-0 z-30 border-t border-[#eceaf2] bg-white/85 px-6 py-4 shadow-[0_-20px_60px_-48px_rgba(17,24,39,0.8)] backdrop-blur lg:left-[188px]">
+    <footer className="fixed bottom-0 left-0 right-0 z-30 border-t border-[#eceaf2] bg-white/85 px-6 py-4 shadow-[0_-20px_60px_-48px_rgba(17,24,39,0.8)] backdrop-blur lg:left-[288px]">
       <div className="mx-auto flex max-w-[760px] justify-end gap-3">
         <Link
           href="/"
