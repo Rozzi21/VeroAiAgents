@@ -37,6 +37,21 @@ export function buildTripUpdatePayload(
   };
 }
 
+export function buildTripFormSubmitPayload(
+  body: Record<string, unknown>,
+  existing?: TripPackage
+): Record<string, unknown> {
+  if (!existing) {
+    return body;
+  }
+
+  return {
+    ...body,
+    slug: existing.slug,
+    estimated_price: existing.estimated_price,
+  };
+}
+
 export async function fetchTripDetail(tripId: string) {
   return apiFetch<TripPackage>(`/api/v1/trips/${tripId}`, {}, true);
 }

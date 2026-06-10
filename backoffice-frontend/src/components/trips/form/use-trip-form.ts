@@ -1,9 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { apiFetch, getToken } from "@/lib/api";
+import { useRouter, useSearchParams } from "next/navigation";
+import { apiFetch, getToken, TripPackage } from "@/lib/api";
+import { buildTripFormSubmitPayload, fetchTripDetail } from "@/lib/trip";
 import { ToastState } from "@/components/toast-notification";
+import {
+  mapTripToForm,
+  TripFormStaticDefaults,
+} from "./map-trip-to-form";
 import {
   INITIAL_AMENITIES,
   INITIAL_HIGHLIGHTS,
@@ -15,8 +20,63 @@ import {
   UploadedMedia,
 } from "./types";
 
+const EMPTY_DEFAULTS: TripFormStaticDefaults = {
+  title: "",
+  location: "",
+  summary: "",
+  base_price: "",
+  child_price: "",
+  discount_price: "",
+  child_discount_price: "",
+  discount_enabled: false,
+  child_discount_enabled: false,
+  package_start: "",
+  package_end: "",
+  publish_start: "",
+  publish_end: "",
+  reference: "",
+};
+
+function applyControlledState(
+  controlled: ReturnType<typeof mapTripToForm>["controlled"],
+  setters: {
+    setCategory: (value: TripCategory) => void;
+    setScheduleType: (value: ScheduleType) => void;
+    setVisibilityEnabled: (value: boolean) => void;
+    setUploadedMedia: (value: UploadedMedia[]) => void;
+    setAmenitiesIncluded: (value: string[]) => void;
+    setAmenitiesExcluded: (value: string[]) => void;
+    setItineraries: (value: ItineraryItem[]) => void;
+    setHighlights: (value: string[]) => void;
+    setDurationDays: (value: string) => void;
+    setDurationNights: (value: string) => void;
+    setAdultSlotsEnabled: (value: boolean) => void;
+    setChildSlotsEnabled: (value: boolean) => void;
+    setAdultSlots: (value: string) => void;
+    setChildSlots: (value: string) => void;
+  }
+) {
+  setters.setCategory(controlled.category);
+  setters.setScheduleType(controlled.scheduleType);
+  setters.setVisibilityEnabled(controlled.visibilityEnabled);
+  setters.setUploadedMedia(controlled.uploadedMedia);
+  setters.setAmenitiesIncluded(controlled.amenitiesIncluded);
+  setters.setAmenitiesExcluded(controlled.amenitiesExcluded);
+  setters.setItineraries(controlled.itineraries);
+  setters.setHighlights(controlled.highlights);
+  setters.setDurationDays(controlled.durationDays);
+  setters.setDurationNights(controlled.durationNights);
+  setters.setAdultSlotsEnabled(controlled.adultSlotsEnabled);
+  setters.setChildSlotsEnabled(controlled.childSlotsEnabled);
+  setters.setAdultSlots(controlled.adultSlots);
+  setters.setChildSlots(controlled.childSlots);
+}
+
 export function useTripForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
+
   const [category, setCategory] = useState<TripCategory>("local");
   const [scheduleType, setScheduleType] = useState<ScheduleType>("date_range");
   const [visibilityEnabled, setVisibilityEnabled] = useState(false);
@@ -34,6 +94,12 @@ export function useTripForm() {
   const [childSlots, setChildSlots] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadingTrip, setLoadingTrip] = useState(Boolean(editId));
+  const [loadError, setLoadError] = useState("");
+  const [loadedTrip, setLoadedTrip] = useState<TripPackage | null>(null);
+  const [staticDefaults, setStaticDefaults] =
+    useState<TripFormStaticDefaults>(EMPTY_DEFAULTS);
+  const [formKey, setFormKey] = useState(editId ?? "new");
   const submitStatus = useRef<SubmitStatus>("draft");
 
   useEffect(() => {
@@ -44,6 +110,82 @@ export function useTripForm() {
       });
     }
   }, []);
+
+  function resetDynamicFields() {
+    setCategory("local");
+    setScheduleType("date_range");
+    setVisibilityEnabled(false);
+    setUploadedMedia([]);
+    setAmenitiesIncluded(INITIAL_AMENITIES);
+    setAmenitiesExcluded(INITIAL_AMENITIES);
+    setItineraries(INITIAL_ITINERARIES);
+    setHighlights(INITIAL_HIGHLIGHTS);
+    setHighlightInput("");
+    setDurationDays("");
+    setDurationNights("");
+    setAdultSlotsEnabled(false);
+    setChildSlotsEnabled(false);
+    setAdultSlots("");
+    setChildSlots("");
+  }
+
+  useEffect(() => {
+    if (!editId) {
+      setLoadingTrip(false);
+      setLoadError("");
+      setLoadedTrip(null);
+      setStaticDefaults(EMPTY_DEFAULTS);
+      setFormKey("new");
+      resetDynamicFields();
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingTrip(true);
+    setLoadError("");
+    setLoadedTrip(null);
+
+    fetchTripDetail(editId)
+      .then((trip) => {
+        if (cancelled) {
+          return;
+        }
+        const mapped = mapTripToForm(trip);
+        applyControlledState(mapped.controlled, {
+          setCategory,
+          setScheduleType,
+          setVisibilityEnabled,
+          setUploadedMedia,
+          setAmenitiesIncluded,
+          setAmenitiesExcluded,
+          setItineraries,
+          setHighlights,
+          setDurationDays,
+          setDurationNights,
+          setAdultSlotsEnabled,
+          setChildSlotsEnabled,
+          setAdultSlots,
+          setChildSlots,
+        });
+        setStaticDefaults(mapped.defaults);
+        setLoadedTrip(trip);
+        setFormKey(editId);
+        setLoadingTrip(false);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setLoadError(
+          error instanceof Error ? error.message : "Gagal memuat data trip."
+        );
+        setLoadingTrip(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editId]);
 
   async function handleUpload(file?: File) {
     if (!file) {
@@ -149,24 +291,6 @@ export function useTripForm() {
 
   function removeHighlight(highlight: string) {
     setHighlights((items) => items.filter((item) => item !== highlight));
-  }
-
-  function resetDynamicFields() {
-    setCategory("local");
-    setScheduleType("date_range");
-    setVisibilityEnabled(false);
-    setUploadedMedia([]);
-    setAmenitiesIncluded(INITIAL_AMENITIES);
-    setAmenitiesExcluded(INITIAL_AMENITIES);
-    setItineraries(INITIAL_ITINERARIES);
-    setHighlights(INITIAL_HIGHLIGHTS);
-    setHighlightInput("");
-    setDurationDays("");
-    setDurationNights("");
-    setAdultSlotsEnabled(false);
-    setChildSlotsEnabled(false);
-    setAdultSlots("");
-    setChildSlots("");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -290,20 +414,40 @@ export function useTripForm() {
         .filter((item) => item.title || item.description),
     };
 
+    const isEdit = Boolean(editId && loadedTrip);
+    const payload = buildTripFormSubmitPayload(body, loadedTrip ?? undefined);
+
     try {
-      await apiFetch(
-        "/api/v1/admin/packages",
-        { method: "POST", body: JSON.stringify(body) },
-        true
-      );
+      if (isEdit) {
+        await apiFetch(
+          `/api/v1/admin/packages/${editId}`,
+          { method: "PUT", body: JSON.stringify(payload) },
+          true
+        );
+      } else {
+        await apiFetch(
+          "/api/v1/admin/packages",
+          { method: "POST", body: JSON.stringify(payload) },
+          true
+        );
+      }
+
       const statusLabel =
         submitStatus.current === "published" ? "published" : "draft";
       setToast({
         type: "success",
-        text: `Trip berhasil ditambahkan sebagai ${statusLabel}.`,
+        text: isEdit
+          ? `Trip berhasil diperbarui sebagai ${statusLabel}.`
+          : `Trip berhasil ditambahkan sebagai ${statusLabel}.`,
       });
-      formElement.reset();
-      resetDynamicFields();
+
+      if (!isEdit) {
+        formElement.reset();
+        resetDynamicFields();
+        setStaticDefaults(EMPTY_DEFAULTS);
+        setFormKey("new");
+      }
+
       setTimeout(() => {
         router.push("/");
       }, 1200);
@@ -329,6 +473,11 @@ export function useTripForm() {
     toast,
     setToast,
     saving,
+    loadingTrip,
+    loadError,
+    isEditMode: Boolean(editId),
+    formKey,
+    staticDefaults,
     submitStatus,
     handleSubmit,
     setDraftSubmit,

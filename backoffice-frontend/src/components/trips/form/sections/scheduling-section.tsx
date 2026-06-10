@@ -1,11 +1,22 @@
 import { FormSection } from "../ui/form-section";
 import { Label } from "../ui/label";
 import { DateRange } from "../ui/date-range";
+import { TripFormStaticDefaults } from "../map-trip-to-form";
 import { UseTripFormReturn } from "../use-trip-form";
 
-type Props = Pick<UseTripFormReturn, "scheduling">;
+type Props = Pick<UseTripFormReturn, "scheduling"> &
+  Pick<
+    TripFormStaticDefaults,
+    "package_start" | "package_end" | "publish_start" | "publish_end"
+  >;
 
-export function SchedulingSection({ scheduling }: Props) {
+export function SchedulingSection({
+  scheduling,
+  package_start = "",
+  package_end = "",
+  publish_start = "",
+  publish_end = "",
+}: Props) {
   const { scheduleType, setScheduleType, visibilityEnabled, setVisibilityEnabled } =
     scheduling;
 
@@ -36,6 +47,8 @@ export function SchedulingSection({ scheduling }: Props) {
             title="Package Dates"
             startName="package_start"
             endName="package_end"
+            startDefault={package_start}
+            endDefault={package_end}
           />
         )}
 
@@ -58,6 +71,8 @@ export function SchedulingSection({ scheduling }: Props) {
                 title="Visibility Schedule (When to publish)"
                 startName="publish_start"
                 endName="publish_end"
+                startDefault={publish_start}
+                endDefault={publish_end}
               />
             </div>
           )}

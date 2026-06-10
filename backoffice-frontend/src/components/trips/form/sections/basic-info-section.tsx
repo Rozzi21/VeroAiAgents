@@ -3,11 +3,13 @@ import { Field } from "../ui/field";
 import { Label } from "../ui/label";
 import { DurationPicker } from "../ui/duration-picker";
 import { SlotToggle } from "../ui/slot-toggle";
+import { TripFormStaticDefaults } from "../map-trip-to-form";
 import { UseTripFormReturn } from "../use-trip-form";
 
-type Props = Pick<UseTripFormReturn, "basicInfo">;
+type Props = Pick<UseTripFormReturn, "basicInfo"> &
+  Pick<TripFormStaticDefaults, "title" | "location">;
 
-export function BasicInfoSection({ basicInfo }: Props) {
+export function BasicInfoSection({ basicInfo, title = "", location = "" }: Props) {
   const {
     category,
     setCategory,
@@ -27,8 +29,8 @@ export function BasicInfoSection({ basicInfo }: Props) {
 
   return (
     <FormSection title="Basic Info">
-      <Field name="title" label="Trip Name" placeholder="e.g. Kyoto Autumn Immersion" />
-      <Field name="location" label="Location" placeholder="City, Region, or Country" />
+      <Field name="title" label="Trip Name" placeholder="e.g. Kyoto Autumn Immersion" defaultValue={title} />
+      <Field name="location" label="Location" placeholder="City, Region, or Country" defaultValue={location} />
       <DurationPicker
         days={durationDays}
         nights={durationNights}

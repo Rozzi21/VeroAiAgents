@@ -4,10 +4,14 @@ export function DateRange({
   title,
   startName,
   endName,
+  startDefault,
+  endDefault,
 }: {
   title: string;
   startName: string;
   endName: string;
+  startDefault?: string;
+  endDefault?: string;
 }) {
   return (
     <div>
@@ -16,12 +20,14 @@ export function DateRange({
         <input
           name={startName}
           type="date"
+          defaultValue={startDefault}
           className="h-10 min-w-0 rounded-md border border-[#e6dfe5] bg-white px-3 text-xs outline-none"
         />
         <span className="text-xs text-[#8b909a]">to</span>
         <input
           name={endName}
           type="date"
+          defaultValue={endDefault}
           className="h-10 min-w-0 rounded-md border border-[#e6dfe5] bg-white px-3 text-xs outline-none"
         />
       </div>
