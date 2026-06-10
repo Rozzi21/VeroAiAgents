@@ -99,6 +99,7 @@ export function TripFormScreen() {
 
       <TripFormFooter
         saving={form.saving}
+        isEditMode={form.isEditMode}
         submitStatus={form.submitStatus}
         onDraftClick={form.setDraftSubmit}
         onPublishClick={form.setPublishedSubmit}
