@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import {
   clearAuthTokens,
@@ -14,6 +14,8 @@ import {
 
 const publicRoutes = ["/login"];
 
+type AuthState = "loading" | "authenticated" | "unauthenticated";
+
 function isPublicRoute(pathname: string) {
   return publicRoutes.includes(pathname);
 }
@@ -21,70 +23,75 @@ function isPublicRoute(pathname: string) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  const [authorized, setAuthorized] = useState(false);
+  const routerRef = useRef(router);
+  routerRef.current = router;
+
+  const [authState, setAuthState] = useState<AuthState>("loading");
 
   useEffect(() => {
-    let cancelled = false;
+    let active = true;
 
-    async function checkAuth() {
-      setCheckingAuth(true);
-      setAuthorized(false);
-
-      const publicRoute = isPublicRoute(pathname);
+    async function verifySession() {
       const hasToken = Boolean(getToken());
 
       if (!hasToken) {
-        if (!publicRoute) {
-          router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
-        } else if (!cancelled) {
-          setAuthorized(true);
-          setCheckingAuth(false);
+        if (active) {
+          setAuthState("unauthenticated");
         }
-        return;
-      }
-
-      if (pathname === "/login") {
-        router.replace("/");
         return;
       }
 
       try {
         const user = await fetchCurrentUser();
-        if (cancelled) {
+        if (!active) {
           return;
         }
 
         if (!isBackofficeRole(user.role)) {
           await logout({ redirect: false });
-          router.replace("/login?reason=no-access");
+          setAuthState("unauthenticated");
           return;
         }
 
         setAuthSession(getToken(), user.role);
         startAuthRefreshScheduler();
-
-        if (!cancelled) {
-          setAuthorized(true);
-          setCheckingAuth(false);
-        }
+        setAuthState("authenticated");
       } catch {
-        if (cancelled) {
+        if (!active) {
           return;
         }
         clearAuthTokens();
-        router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+        setAuthState("unauthenticated");
       }
     }
 
-    void checkAuth();
+    void verifySession();
 
     return () => {
-      cancelled = true;
+      active = false;
     };
-  }, [pathname, router]);
+  }, []);
 
-  if (checkingAuth) {
+  useEffect(() => {
+    if (authState === "loading") {
+      return;
+    }
+
+    const publicRoute = isPublicRoute(pathname);
+
+    if (authState === "unauthenticated" && !publicRoute) {
+      routerRef.current.replace(
+        `/login?redirect=${encodeURIComponent(pathname)}`
+      );
+      return;
+    }
+
+    if (authState === "authenticated" && pathname === "/login") {
+      routerRef.current.replace("/");
+    }
+  }, [authState, pathname]);
+
+  if (authState === "loading") {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#faf9ff] text-sm font-bold text-[#6f7480]">
         Memeriksa akses...
@@ -92,7 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!authorized) {
+  if (authState === "unauthenticated" && !isPublicRoute(pathname)) {
     return null;
   }
 
