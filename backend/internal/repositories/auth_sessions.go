@@ -40,6 +40,16 @@ func (r *Repository) RevokeSessionByJTI(tokenJTI string) error {
 		Update("revoked_at", now).Error
 }
 
+// RevokeAllActiveSessionsByUser revokes every active (non-revoked) session for a
+// user. Used as a defensive measure when refresh token reuse is detected, which
+// is a strong indicator of token theft: invalidating all sessions forces a fresh
+// login across every device.
+func (r *Repository) RevokeAllActiveSessionsByUser(userID uuid.UUID) error {
+	return r.DB.Model(&models.AuthSession{}).
+		Where("user_id = ? AND revoked_at IS NULL", userID).
+		Update("revoked_at", time.Now()).Error
+}
+
 func (r *Repository) IsSessionRevoked(tokenJTI string) (bool, error) {
 	var session models.AuthSession
 	err := r.DB.Where("token_jti = ?", tokenJTI).First(&session).Error

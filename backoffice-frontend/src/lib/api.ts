@@ -15,6 +15,12 @@ const LEGACY_REFRESH_TOKEN_KEY = "backoffice_refresh_token";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const FALLBACK_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
+// Default access token lifetime fallback (seconds). Kept in sync with the
+// backend default JWT_ACCESS_TTL_MINUTES (15 minutes) so the proactive refresh
+// schedule stays accurate even if the server omits expires_in.
+const DEFAULT_ACCESS_TTL_SECONDS = 900;
+// Name of the cross-tab coordination channel for auth refresh.
+const AUTH_CHANNEL_NAME = "vero_auth";
 
 export type BackofficeRole = "admin" | "operator" | "user" | string;
 
@@ -78,6 +84,63 @@ type AuthUser = {
 let refreshPromise: Promise<string | null> | null = null;
 let refreshSchedulerStarted = false;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+let visibilityHandler: (() => void) | null = null;
+let authChannel: BroadcastChannel | null = null;
+
+type AuthBroadcast = {
+  type: "token_refreshed";
+  access_token: string;
+  expires_at: number;
+};
+
+// adoptBroadcastToken applies a token that another tab just refreshed, without
+// calling the refresh endpoint again. This avoids a race where multiple tabs
+// each rotate the refresh token and invalidate each other.
+function adoptBroadcastToken(accessToken: string, expiresAt: number) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+  if (expiresAt > 0) {
+    localStorage.setItem(TOKEN_EXPIRES_AT_KEY, String(expiresAt));
+  }
+  scheduleProactiveRefresh();
+}
+
+function getAuthChannel(): BroadcastChannel | null {
+  if (
+    typeof window === "undefined" ||
+    typeof BroadcastChannel === "undefined"
+  ) {
+    return null;
+  }
+  if (!authChannel) {
+    authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
+    authChannel.onmessage = (event: MessageEvent<AuthBroadcast>) => {
+      const data = event.data;
+      if (!data || data.type !== "token_refreshed" || !data.access_token) {
+        return;
+      }
+      adoptBroadcastToken(data.access_token, data.expires_at);
+    };
+  }
+  return authChannel;
+}
+
+// broadcastTokenRefreshed notifies other tabs that this tab just rotated the
+// refresh token, so they can adopt the new access token instead of calling the
+// refresh endpoint themselves (which would invalidate this tab's session).
+function broadcastTokenRefreshed(accessToken: string) {
+  const channel = getAuthChannel();
+  if (!channel) {
+    return;
+  }
+  channel.postMessage({
+    type: "token_refreshed",
+    access_token: accessToken,
+    expires_at: getTokenExpiresAt(),
+  } satisfies AuthBroadcast);
+}
 
 if (typeof window !== "undefined") {
   localStorage.removeItem(LEGACY_REFRESH_TOKEN_KEY);
@@ -185,8 +248,9 @@ async function refreshAccessToken(): Promise<string | null> {
 
       setAccessToken(
         payload.data.access_token,
-        payload.data.expires_in ?? 3600
+        payload.data.expires_in ?? DEFAULT_ACCESS_TTL_SECONDS
       );
+      broadcastTokenRefreshed(payload.data.access_token);
       try {
         const user = await request<AuthUser>(
           "/api/v1/auth/me",
@@ -245,8 +309,11 @@ export function startAuthRefreshScheduler() {
   }
   refreshSchedulerStarted = true;
   scheduleProactiveRefresh();
+  // Initialize the cross-tab channel eagerly so this tab starts receiving
+  // token_refreshed broadcasts from other tabs immediately.
+  getAuthChannel();
 
-  const handleVisibility = () => {
+  visibilityHandler = () => {
     if (document.visibilityState !== "visible" || !getToken()) {
       return;
     }
@@ -261,7 +328,7 @@ export function startAuthRefreshScheduler() {
     }
   };
 
-  document.addEventListener("visibilitychange", handleVisibility);
+  document.addEventListener("visibilitychange", visibilityHandler);
 }
 
 export function stopAuthRefreshScheduler() {
@@ -269,6 +336,10 @@ export function stopAuthRefreshScheduler() {
   if (refreshTimer) {
     clearTimeout(refreshTimer);
     refreshTimer = null;
+  }
+  if (visibilityHandler && typeof document !== "undefined") {
+    document.removeEventListener("visibilitychange", visibilityHandler);
+    visibilityHandler = null;
   }
 }
 

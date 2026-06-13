@@ -11,14 +11,21 @@ import (
 const refreshCookiePath = "/api/v1/auth"
 
 func SetRefreshCookie(c *gin.Context, cfg config.Config, token string, maxAgeSeconds int) {
-	c.SetSameSite(parseSameSite(cfg.JWTCookieSameSite))
+	sameSite := parseSameSite(cfg.JWTCookieSameSite)
+	c.SetSameSite(sameSite)
+	// Browsers reject SameSite=None cookies unless they are also marked Secure,
+	// so force Secure in that case even if JWT_COOKIE_SECURE was left false.
+	secure := cfg.JWTCookieSecure
+	if sameSite == http.SameSiteNoneMode {
+		secure = true
+	}
 	c.SetCookie(
 		cfg.JWTCookieName,
 		token,
 		maxAgeSeconds,
 		refreshCookiePath,
 		"",
-		cfg.JWTCookieSecure,
+		secure,
 		true,
 	)
 }

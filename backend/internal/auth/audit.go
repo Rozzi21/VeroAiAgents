@@ -13,6 +13,7 @@ const (
 	EventLogout                   = "logout"
 	EventRefreshTokenUsedAsAccess = "refresh_token_used_as_access"
 	EventAccessTokenUsedOnRefresh = "access_token_used_on_refresh"
+	EventRefreshTokenReuseDetected = "refresh_token_reuse_detected"
 )
 
 func LogSecurity(event string, fields map[string]any) {

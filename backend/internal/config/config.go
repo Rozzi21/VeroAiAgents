@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+// defaultJWTSecret is the development fallback secret. It must never be used in
+// production; Config.Validate enforces this.
+const defaultJWTSecret = "super_secret_vero_travel"
 
 type Config struct {
 	AppEnv string
@@ -46,7 +51,7 @@ type Config struct {
 func Load() Config {
 	_ = godotenv.Load()
 
-	accessMinutes := getInt("JWT_ACCESS_TTL_MINUTES", 60)
+	accessMinutes := getInt("JWT_ACCESS_TTL_MINUTES", 15)
 	refreshHours := getInt("JWT_REFRESH_TTL_HOURS", 720)
 	aiTimeoutSeconds := getInt("AI_TIMEOUT_SECONDS", 35)
 
@@ -60,7 +65,7 @@ func Load() Config {
 		DatabaseName:         getEnv("DATABASE_NAME", "vero_travel"),
 		DatabaseSSLMode:      getEnv("DATABASE_SSLMODE", "disable"),
 		DatabaseURL:          os.Getenv("DATABASE_URL"),
-		JWTSecret:            getEnv("JWT_SECRET", "super_secret_vero_travel"),
+		JWTSecret:            getEnv("JWT_SECRET", defaultJWTSecret),
 		JWTAccessTTL:         time.Duration(accessMinutes) * time.Minute,
 		JWTRefreshTTL:        time.Duration(refreshHours) * time.Hour,
 		JWTCookieName:        getEnv("JWT_COOKIE_NAME", "refresh_token"),
@@ -94,6 +99,18 @@ func Load() Config {
 	}
 
 	return cfg
+}
+
+// Validate enforces production-safety invariants. In production the JWT secret
+// must be explicitly set to a non-default, non-empty value; otherwise tokens
+// could be forged using the well-known development secret.
+func (c Config) Validate() error {
+	if c.AppEnv == "production" {
+		if c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret {
+			return errors.New("JWT_SECRET must be set to a strong, non-default value when APP_ENV=production")
+		}
+	}
+	return nil
 }
 
 func getEnv(key, fallback string) string {

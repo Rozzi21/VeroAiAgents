@@ -185,7 +185,19 @@ func (s *AuthService) Refresh(refreshToken string, meta AuthRequestMeta) (AuthIs
 		}))
 		return AuthIssueResult{}, ErrRefreshTokenRevoked
 	}
-	if session.RevokedAt != nil || session.ExpiresAt.Before(time.Now()) {
+	if session.RevokedAt != nil {
+		// A refresh token that was already rotated (revoked) is being used again.
+		// This is a strong indicator of token theft, so we defensively revoke every
+		// active session for this user, forcing a fresh login on all devices.
+		_ = s.repo.RevokeAllActiveSessionsByUser(claims.UserID)
+		auth.LogSecurity(auth.EventRefreshTokenReuseDetected, s.auditFields(meta, map[string]any{
+			"user_id": claims.UserID.String(),
+			"email":   claims.Email,
+			"jti":     claims.ID,
+		}))
+		return AuthIssueResult{}, ErrRefreshTokenRevoked
+	}
+	if session.ExpiresAt.Before(time.Now()) {
 		auth.LogSecurity(auth.EventRefreshTokenRevoked, s.auditFields(meta, map[string]any{
 			"user_id": claims.UserID.String(),
 			"email":   claims.Email,

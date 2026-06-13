@@ -12,7 +12,7 @@ API Golang berorientasi produksi untuk platform travel otonom berbasis AI. Backe
 - PostgreSQL 16 via GORM: connection pooling, retry koneksi, auto migration
 - JWT access/refresh terpisah by audience, password bcrypt, otorisasi berbasis peran (user/operator/admin)
 - Refresh token disimpan sebagai session di DB (bisa di-revoke) dan dikirim via cookie HttpOnly
-- Audit log keamanan (login, refresh, logout, deteksi penyalahgunaan token)
+- Audit log keamanan (login, refresh, logout, deteksi penyalahgunaan token); deteksi reuse refresh token (token yang sudah dirotasi dipakai lagi) otomatis mencabut SEMUA sesi aktif user sebagai proteksi pencurian token
 - Orkestrasi chat AI otonom dengan tool MCP (saat ini mock) + memory ringkasan percakapan
 - Adapter AI OpenAI-compatible (mis. OpenClaw) untuk respons akhir, dengan fallback lokal
 - Event realtime SSE untuk workflow AI, pembayaran, booking, dan log operator
@@ -85,12 +85,12 @@ API berjalan di `http://localhost:8080`.
 | `DATABASE_NAME` | `vero_travel` | Nama database |
 | `DATABASE_SSLMODE` | `disable` | Mode SSL koneksi DB |
 | `DATABASE_URL` | _(kosong)_ | DSN penuh; jika kosong, dirakit dari field di atas |
-| `JWT_SECRET` | `super_secret_vero_travel` | Secret JWT — wajib diganti di production |
-| `JWT_ACCESS_TTL_MINUTES` | `60` | Masa hidup access token |
+| `JWT_SECRET` | `super_secret_vero_travel` | Secret JWT — wajib diganti di production. Saat `APP_ENV=production`, backend menolak start jika nilai ini kosong atau masih default (lihat `Config.Validate()`). |
+| `JWT_ACCESS_TTL_MINUTES` | `15` | Masa hidup access token (pendek demi keamanan; refresh otomatis menangani perpanjangan) |
 | `JWT_REFRESH_TTL_HOURS` | `720` | Masa hidup refresh token (30 hari) |
 | `JWT_COOKIE_NAME` | `refresh_token` | Nama cookie refresh HttpOnly |
 | `JWT_COOKIE_SECURE` | `APP_ENV==production` | Cookie hanya via HTTPS |
-| `JWT_COOKIE_SAME_SITE` | `Strict` | Kebijakan SameSite cookie |
+| `JWT_COOKIE_SAME_SITE` | `Strict` | Kebijakan SameSite cookie. Jika diisi `None` (mis. backoffice & API beda domain), backend otomatis memaksa cookie `Secure` (wajib HTTPS) karena browser menolak `SameSite=None` tanpa Secure. |
 | `AI_API_KEY` | _(kosong)_ | Kunci provider AI; kosong → fallback lokal |
 | `AI_BASE_URL` | `https://api.openai.com/v1` | Base URL provider OpenAI-compatible |
 | `AI_MODEL` | `gpt-4o-mini` | Model AI |
