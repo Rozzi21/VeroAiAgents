@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Vero TravelOS — Backoffice Frontend
 
-## Getting Started
+Dashboard operator/admin untuk mengelola katalog paket trip ("TravelOS"). Operator login, lalu membuat, mengubah, mempublikasikan, dan menghapus paket trip berikut media gambarnya.
 
-First, run the development server:
+- Framework: Next.js 14 (App Router) + React 18 + TypeScript
+- Styling: TailwindCSS, animasi framer-motion, ikon lucide-react
+- Port dev: `http://localhost:3000`
+
+## Fitur Aktif
+
+Yang benar-benar tersambung ke backend adalah **auth + manajemen paket (CRUD) + upload media**.
+
+| Fitur | Endpoint | Lokasi |
+|---|---|---|
+| Login admin/operator | `POST /api/v1/auth/login` | `src/app/login/page.tsx` |
+| Refresh access token (proaktif + retry 401) | `POST /api/v1/auth/refresh` | `src/lib/api.ts` |
+| Sinkronisasi user/role | `GET /api/v1/auth/me` | `src/lib/api.ts` |
+| Logout | `POST /api/v1/auth/logout` | `src/lib/api.ts` |
+| List paket (filter kategori + search) | `GET /api/v1/admin/packages?category=&search=` | `src/components/trips/list/use-trips-list.ts` |
+| Buat paket | `POST /api/v1/admin/packages` | `src/components/trips/form/use-trip-form.ts` |
+| Update paket / ubah status | `PUT /api/v1/admin/packages/:id` | `src/components/trips/form/use-trip-form.ts`, `src/lib/trip.ts` |
+| Hapus paket | `DELETE /api/v1/admin/packages/:id` | `src/lib/trip.ts` |
+| Detail trip (prefill form edit) | `GET /api/v1/trips/:id` | `src/lib/trip.ts` |
+| Upload media gambar (maks 5, FormData) | `POST /api/v1/admin/uploads` | `src/components/trips/form/use-trip-form.ts` |
+
+### Auth & Sesi
+
+- Login memverifikasi peran backoffice (`isBackofficeRole`) lewat `auth/me`.
+- Access token di-refresh proaktif (~5 menit sebelum kedaluwarsa) lewat scheduler, plus retry otomatis saat menerima 401 di `apiFetch`.
+- Refresh token berada di cookie HttpOnly (request memakai `credentials: include`).
+
+### Form Paket
+
+Form trip berseksi: `basic-info`, `pricing`, `itinerary`, `amenities`, `media`, `scheduling`, dll (lihat `src/components/trips/form/sections/`). Mendukung draft/published dan upload beberapa gambar.
+
+## Yang Belum Aktif (placeholder / mock)
+
+Agar dokumentasi jujur:
+
+- **Dashboard = "On Development".** Panel dashboard menampilkan layar "sedang dalam pengembangan" (`on-development-panel.tsx`) dan tidak memanggil endpoint analytics/dashboard.
+- **Route `/orders`, `/settings`, `/trips/[id]`** hanya me-render layar daftar trip (`CurrentTripsScreen`), belum punya implementasi sendiri.
+- **Data mock tak terpakai** di `src/lib/data.ts` (`travelCards`, `orders`, `payments`, `workflowSteps`) — tidak dirender di komponen mana pun.
+- **Tidak ada UI pembayaran aktif** dan **tidak ada pengambilan bookings** dari backend. Ini selaras dengan backend yang sengaja menonaktifkan `create_payment` di workflow chat.
+- Endpoint `bookings`, `logs`, dan `analytics/dashboard` **belum dipanggil** dari backoffice.
+
+## Konfigurasi & Proxy API
+
+- Permintaan client memakai path relatif `/api/...`. `next.config.mjs` mem-proxy `/api/:path*` ke `http://localhost:8080/api/:path*`.
+- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8080`) dipakai untuk membangun URL aset dan pemanggilan sisi server.
+
+Pastikan backend berjalan di `http://localhost:8080`, dan tersedia akun dengan peran `operator` atau `admin`.
+
+## Menjalankan
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Buka `http://localhost:3000` lalu login di `/login`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Skrip lain:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run build   # build produksi
+npm run start   # jalankan hasil build
+npm run lint    # ESLint
+```

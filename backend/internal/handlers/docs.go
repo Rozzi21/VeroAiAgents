@@ -10,49 +10,100 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"openapi": "3.1.0",
 		"info": gin.H{
-			"title":       "Vero Travel Agents API",
-			"version":     "1.0.0",
-			"description": "AI-native autonomous travel orchestration API with chat, MCP tools, bookings, payments, analytics, and realtime SSE events.",
+			"title":   "Vero Travel Agents API",
+			"version": "1.0.0",
+			"description": "AI-native autonomous travel orchestration API. " +
+				"Provides guest AI chat, public package catalog, JWT auth with refresh cookie, " +
+				"trip/package management, bookings, payments (DOKU webhook), MCP tool + AI logs, " +
+				"analytics, and realtime SSE events. " +
+				"Note: the create_payment MCP tool is intentionally disabled in the chat workflow, " +
+				"so the AI never surfaces QRIS/payment before a real booking exists.",
 		},
 		"servers": []gin.H{{"url": "http://localhost:8080", "description": "Local development"}},
+		"tags": []gin.H{
+			{"name": "Health", "description": "Service and database health"},
+			{"name": "Auth", "description": "Registration, login, refresh, logout, profile"},
+			{"name": "Chat", "description": "Guest AI chat workflow and chat history"},
+			{"name": "Packages", "description": "Public published package catalog"},
+			{"name": "Trips", "description": "Authenticated trip read + operator/admin management"},
+			{"name": "Admin", "description": "Operator/admin package management, uploads, dashboard"},
+			{"name": "Bookings", "description": "Booking creation and retrieval"},
+			{"name": "Payments", "description": "Payment intent creation and DOKU webhook"},
+			{"name": "Logs", "description": "AI workflow logs and MCP tool calls"},
+			{"name": "Analytics", "description": "Operator/admin analytics dashboard"},
+			{"name": "Realtime", "description": "Server-Sent Events stream"},
+		},
 		"components": gin.H{
 			"securitySchemes": gin.H{
 				"BearerAuth": gin.H{
 					"type":         "http",
 					"scheme":       "bearer",
 					"bearerFormat": "JWT",
+					"description":  "Access token from /api/v1/auth/login or /api/v1/auth/refresh. The refresh token is delivered separately as an HttpOnly cookie.",
 				},
 			},
 		},
-		"security": []gin.H{{"BearerAuth": []string{}}},
 		"paths": gin.H{
-			"/health":                    gin.H{"get": operation("Health check", false)},
-			"/health/database":           gin.H{"get": operation("Database health check", false)},
-			"/api/v1/auth/register":      gin.H{"post": operation("Register user", false)},
-			"/api/v1/auth/login":         gin.H{"post": operation("Login user", false)},
-			"/api/v1/auth/refresh":       gin.H{"post": operation("Refresh JWT token via HttpOnly cookie", false)},
-			"/api/v1/auth/logout":        gin.H{"post": operation("Logout and revoke refresh session", false)},
-			"/api/v1/auth/me":            gin.H{"get": operation("Current user profile", true)},
-			"/api/v1/chat":               gin.H{"post": operation("Run autonomous AI chat workflow", true)},
-			"/api/v1/chat/sessions":      gin.H{"get": operation("List chat sessions", true)},
-			"/api/v1/chat/{id}/messages": gin.H{"get": operation("List chat messages", true)},
+			// Health
+			"/health":          gin.H{"get": op("Health", "Health check", false)},
+			"/health/database": gin.H{"get": op("Health", "Database health check", false)},
+
+			// Auth
+			"/api/v1/auth/register": gin.H{"post": op("Auth", "Register user and issue tokens", false)},
+			"/api/v1/auth/login":    gin.H{"post": op("Auth", "Login with email/username and password", false)},
+			"/api/v1/auth/refresh":  gin.H{"post": op("Auth", "Refresh access token via HttpOnly refresh cookie", false)},
+			"/api/v1/auth/logout":   gin.H{"post": op("Auth", "Logout and revoke refresh session", false)},
+			"/api/v1/auth/me":       gin.H{"get": op("Auth", "Current authenticated user profile", true)},
+
+			// Public packages (no auth) — consumed by the customer frontend
+			"/api/v1/packages":      gin.H{"get": op("Packages", "List published packages (public)", false)},
+			"/api/v1/packages/{id}": gin.H{"get": op("Packages", "Get a published package by id or slug (public)", false)},
+
+			// Guest AI chat (no auth) — consumed by the customer frontend
+			"/api/v1/chat": gin.H{"post": op("Chat", "Run the autonomous AI chat workflow as guest", false)},
+
+			// Authenticated chat history
+			"/api/v1/chat/sessions":      gin.H{"get": op("Chat", "List chat sessions for current user", true)},
+			"/api/v1/chat/{id}/messages": gin.H{"get": op("Chat", "List messages of a chat session", true)},
+
+			// Realtime
 			"/api/v1/events/stream": gin.H{"get": gin.H{
-				"summary":     "Server-Sent Events stream",
-				"description": "Streams ai_thinking, searching_destination, calculating_budget, generating_itinerary, payment_created, booking_confirmed, workflow_completed, payment updates, and operator logs.",
-				"security":    []gin.H{{"BearerAuth": []string{}}},
-				"responses":   okResponse("text/event-stream"),
+				"tags":    []string{"Realtime"},
+				"summary": "Server-Sent Events stream",
+				"description": "Streams workflow events: ai_thinking, searching_destination, calculating_budget, " +
+					"generating_itinerary, ai_response, workflow_completed, plus mcp_tool_executed, trip_created, " +
+					"booking_created, payment_created, payment_updated, booking_confirmed, and periodic heartbeat. " +
+					"Note: payment_created/booking_confirmed originate from the booking+payment APIs, not from the chat workflow.",
+				"security":  []gin.H{{"BearerAuth": []string{}}},
+				"responses": okResponse("text/event-stream"),
 			}},
-			"/api/v1/trips":               gin.H{"get": operation("List trips", true), "post": operation("Create trip", true)},
-			"/api/v1/trips/{id}":          gin.H{"get": operation("Get trip", true), "put": operation("Update trip", true), "delete": operation("Delete trip", true)},
-			"/api/v1/bookings":            gin.H{"post": operation("Create booking", true), "get": operation("List bookings", true)},
-			"/api/v1/bookings/{id}":       gin.H{"get": operation("Get booking", true)},
-			"/api/v1/payments/create":     gin.H{"post": operation("Create QRIS or Virtual Account payment", true)},
-			"/api/v1/payments/webhook":    gin.H{"post": operation("DOKU payment webhook", false)},
-			"/api/v1/payments/{id}":       gin.H{"get": operation("Get payment", true)},
-			"/api/v1/logs":                gin.H{"get": operation("List AI logs", true)},
-			"/api/v1/logs/workflows":      gin.H{"get": operation("List workflow logs", true)},
-			"/api/v1/logs/tool-calls":     gin.H{"get": operation("List MCP tool calls", true)},
-			"/api/v1/analytics/dashboard": gin.H{"get": operation("Admin analytics dashboard", true)},
+
+			// Trips (authenticated read; operator/admin write)
+			"/api/v1/trips":      gin.H{"get": op("Trips", "List trips", true), "post": op("Trips", "Create trip (operator/admin)", true)},
+			"/api/v1/trips/{id}": gin.H{"get": op("Trips", "Get trip by id", true), "put": op("Trips", "Update trip (operator/admin)", true), "delete": op("Trips", "Delete trip (operator/admin)", true)},
+
+			// Admin package management — consumed by the backoffice frontend
+			"/api/v1/admin/packages":      gin.H{"get": op("Admin", "List packages (operator/admin)", true), "post": op("Admin", "Create package (operator/admin)", true)},
+			"/api/v1/admin/packages/{id}": gin.H{"put": op("Admin", "Update package (operator/admin)", true), "delete": op("Admin", "Delete package (operator/admin)", true)},
+			"/api/v1/admin/uploads":       gin.H{"post": op("Admin", "Upload trip media image (operator/admin)", true)},
+			"/api/v1/admin/dashboard":     gin.H{"get": op("Admin", "Analytics dashboard (operator/admin)", true)},
+
+			// Bookings
+			"/api/v1/bookings":      gin.H{"post": op("Bookings", "Create booking", true), "get": op("Bookings", "List bookings (operator/admin)", true)},
+			"/api/v1/bookings/{id}": gin.H{"get": op("Bookings", "Get booking by id", true)},
+
+			// Payments
+			"/api/v1/payments/create":  gin.H{"post": op("Payments", "Create QRIS or Virtual Account payment intent", true)},
+			"/api/v1/payments/webhook": gin.H{"post": op("Payments", "DOKU payment webhook (HMAC-SHA256 verified)", false)},
+			"/api/v1/payments/{id}":    gin.H{"get": op("Payments", "Get payment by id", true)},
+
+			// Logs (operator/admin)
+			"/api/v1/logs":            gin.H{"get": op("Logs", "List AI logs (operator/admin)", true)},
+			"/api/v1/logs/workflows":  gin.H{"get": op("Logs", "List workflow logs (operator/admin)", true)},
+			"/api/v1/logs/tool-calls": gin.H{"get": op("Logs", "List MCP tool calls (operator/admin)", true)},
+
+			// Analytics (operator/admin)
+			"/api/v1/analytics/dashboard": gin.H{"get": op("Analytics", "Analytics dashboard (operator/admin)", true)},
 		},
 	})
 }
@@ -74,15 +125,16 @@ func (h *Handler) ScalarDocs(c *gin.Context) {
 </html>`)
 }
 
-func operation(summary string, secured bool) gin.H {
-	op := gin.H{
+func op(tag, summary string, secured bool) gin.H {
+	operation := gin.H{
+		"tags":      []string{tag},
 		"summary":   summary,
 		"responses": okResponse("application/json"),
 	}
 	if secured {
-		op["security"] = []gin.H{{"BearerAuth": []string{}}}
+		operation["security"] = []gin.H{{"BearerAuth": []string{}}}
 	}
-	return op
+	return operation
 }
 
 func okResponse(contentType string) gin.H {
