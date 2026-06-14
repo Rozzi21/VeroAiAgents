@@ -108,6 +108,7 @@ VeroAiTravelAgents/
 - **Tool MCP masih simulasi/mock** (`services.go` method `mock`).
 - **Frontend customer**: hanya 2 endpoint aktif (chat + detail paket), tanpa auth.
 - **Backoffice**: auth + CRUD paket + upload media aktif; dashboard/orders/settings masih placeholder.
+- **Dependencies frontend**: kedua app Next.js memakai `lucide-react` ^1.18; `framer-motion` sudah dihapus (tidak pernah dipakai). Animasi chat = client-side murni.
 - **Secret di `.env.example`** adalah nilai dev; `Config.Validate()` menolak secret default saat `APP_ENV=production`.
 
 Detail lengkap tiap poin ada di `known-issues.md`.

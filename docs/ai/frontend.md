@@ -32,7 +32,7 @@ Antarmuka chat AI untuk tamu. Tidak ada login, tidak ada auth. Efektif hanya dua
 | File | Fungsi |
 |---|---|
 | `frontend/src/lib/api.ts` | `apiFetch()` envelope-aware, `assetURL()`, tipe `TripPackage`. Base URL kosong di browser (proxy), `NEXT_PUBLIC_API_BASE_URL` di server |
-| `frontend/src/lib/format.ts` | Format harga/teks |
+| `frontend/src/lib/format.ts` | Format harga (`formatIDR`, `getDiscountMeta`, `getTripAdultPrice`/`getTripChildPrice`). `formatIDR` memformat angka termasuk `0` sebagai Rp 0; `"TBD"` hanya untuk `null`/`undefined`/`NaN` |
 | `frontend/src/lib/format-trip-pax.ts` | Format jumlah pax (dewasa/anak) |
 | `frontend/src/lib/utils.ts` | Util umum (mis. `cn()` untuk className) |
 
@@ -102,7 +102,7 @@ Struktur komponen `trips/`:
 |---|---|
 | `backoffice-frontend/src/lib/api.ts` | INTI auth: token storage, refresh proaktif + retry 401, BroadcastChannel antar-tab, `apiFetch()` dengan flag `auth`. Lihat [backend.md](backend.md) bagian auth flow detail |
 | `backoffice-frontend/src/lib/trip.ts` | Operasi paket: detail (`GET /trips/:id`), update status (`PUT`), delete (`DELETE`) |
-| `backoffice-frontend/src/lib/format.ts` | Format harga/teks |
+| `backoffice-frontend/src/lib/format.ts` | Format harga (`formatIDR`, `getDiscountMeta`). Perilaku `formatIDR` sama dengan customer frontend: angka `0` → Rp 0; `"TBD"` hanya untuk `null`/`undefined`/`NaN` |
 | `backoffice-frontend/src/lib/data.ts` | MOCK data (`travelCards`, `orders`, `payments`, `workflowSteps`) — TIDAK terpakai di komponen manapun |
 | `backoffice-frontend/src/lib/utils.ts` | Util umum |
 
@@ -136,6 +136,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 | Envelope-aware fetch | `apiFetch()` membaca `{ success, message, data }`, melempar `Error(message)` saat gagal |
 | Tipe `TripPackage` | Didefinisikan terpisah di tiap `lib/api.ts` (TIDAK di-share antar app) |
 | Asset URL | `assetURL()` membangun URL gambar absolut ke backend |
-| Styling | TailwindCSS + `clsx`/`tailwind-merge` (`cn()`), animasi `framer-motion`, ikon `lucide-react` |
+| Styling | TailwindCSS + `clsx`/`tailwind-merge` (`cn()`), ikon `lucide-react` |
+| Dependencies npm | `clsx`, `lucide-react` (^1.18), `next`, `react`, `react-dom`, `tailwind-merge` — **tanpa** library animasi eksternal; animasi chat (`TypingText`) murni CSS/React state |
 
-PENTING untuk AI: kedua app adalah codebase TERPISAH. Tidak ada kode yang di-share. Perubahan tipe `TripPackage` di satu app tidak memengaruhi yang lain.
+PENTING untuk AI: kedua app adalah codebase TERPISAH. Tidak ada kode yang di-share. Perubahan tipe `TripPackage` di satu app tidak memengaruhi yang lain. `lib/format.ts` juga duplikat per app — jika mengubah `formatIDR`, perbarui **keduanya** agar perilaku harga konsisten.

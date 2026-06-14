@@ -154,7 +154,7 @@ Aturan ketergantungan (penting, lihat [coding-rules.md](coding-rules.md)):
 - **DTO + binding validation** — `internal/dto` memvalidasi input via tag `binding`.
 - **Token rotation + audience separation** — JWT access vs refresh dipisah by audience claim.
 
-Pola frontend (kedua app): **custom hook untuk data/logic** (`use-trip-form.ts`, `use-trips-list.ts`), **single API client** (`lib/api.ts`) dengan envelope-aware fetch, dan **proxy rewrite** `/api/*` ke backend.
+Pola frontend (kedua app): **custom hook untuk data/logic** (`use-trip-form.ts`, `use-trips-list.ts`), **single API client** (`lib/api.ts`) dengan envelope-aware fetch, **proxy rewrite** `/api/*` ke backend, dan **dependency npm minimal** (`clsx`, `lucide-react`, `tailwind-merge` + Next/React — tanpa library animasi eksternal).
 
 ## 6. Keputusan Arsitektur Penting
 

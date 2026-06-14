@@ -130,7 +130,8 @@ Lokasi: [`frontend/`](../../frontend). App Router, hanya memakai 2 endpoint back
 - Tujuan: helper.
 - File penting:
   - [`frontend/src/lib/api.ts`](../../frontend/src/lib/api.ts) — `apiFetch` envelope-aware, `assetURL`, tipe `TripPackage`.
-  - [`frontend/src/lib/format.ts`](../../frontend/src/lib/format.ts), `format-trip-pax.ts`, `utils.ts` — formatting.
+  - [`frontend/src/lib/format.ts`](../../frontend/src/lib/format.ts) — `formatIDR` (0 → Rp 0; TBD hanya null/undefined/NaN), `getDiscountMeta`, `getTripAdultPrice`/`getTripChildPrice`.
+  - `format-trip-pax.ts`, `utils.ts` — formatting pax dan util umum.
 
 ---
 
@@ -158,6 +159,7 @@ Lokasi: [`backoffice-frontend/`](../../backoffice-frontend). App Router, dengan 
 - File penting:
   - [`backoffice-frontend/src/lib/api.ts`](../../backoffice-frontend/src/lib/api.ts) — inti auth: token storage, refresh proaktif, retry 401, koordinasi antar-tab (BroadcastChannel), logout.
   - [`backoffice-frontend/src/lib/trip.ts`](../../backoffice-frontend/src/lib/trip.ts) — operasi trip (detail, update status, delete).
+  - [`backoffice-frontend/src/lib/format.ts`](../../backoffice-frontend/src/lib/format.ts) — `formatIDR`, `getDiscountMeta` (perilaku sama dengan customer frontend).
   - [`backoffice-frontend/src/lib/data.ts`](../../backoffice-frontend/src/lib/data.ts) — mock data (TIDAK terpakai aktif).
 
 ---

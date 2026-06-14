@@ -3,7 +3,7 @@
 Dashboard operator/admin untuk mengelola katalog paket trip ("TravelOS"). Operator login, lalu membuat, mengubah, mempublikasikan, dan menghapus paket trip berikut media gambarnya.
 
 - Framework: Next.js 14 (App Router) + React 18 + TypeScript
-- Styling: TailwindCSS, animasi framer-motion, ikon lucide-react
+- Styling: TailwindCSS, ikon lucide-react
 - Port dev: `http://localhost:3000`
 
 ## Fitur Aktif

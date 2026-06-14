@@ -107,6 +107,13 @@ Knowledge base hanya berguna jika tetap akurat. Setelah menyelesaikan pekerjaan:
 8. Saat memperbarui dokumentasi, jaga gaya yang sudah ada: jelaskan fungsi dan
    hubungan antar bagian, sertakan path file penting, jangan sekadar menyalin tree.
 
+Setelah menyelesaikan task:
+
+1. Evaluasi apakah perubahan mempengaruhi docs/ai.
+2. Jika ya, update file dokumentasi yang relevan.
+3. Berikan ringkasan perubahan dokumentasi.
+4. Jangan menganggap task selesai sebelum dokumentasi diperbarui.
+
 Perlakukan update dokumentasi sebagai bagian dari definition-of-done, bukan
 langkah opsional.
 

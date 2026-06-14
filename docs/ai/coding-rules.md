@@ -106,7 +106,20 @@ Backoffice mengekstrak logika kompleks ke hook (`use-trip-form.ts`, `use-trips-l
 
 ### 2.6 Styling
 
-TailwindCSS utility classes. Helper `cn()`/`clsx` + `tailwind-merge` di `lib/utils.ts` untuk menggabung class kondisional. JANGAN tulis CSS file terpisah.
+TailwindCSS utility classes. Helper `cn()`/`clsx` + `tailwind-merge` di `lib/utils.ts` untuk menggabung class kondisional. Ikon via `lucide-react`. JANGAN tulis CSS file terpisah.
+
+### 2.7 Dependencies npm (Frontend)
+
+Jangan tambahkan dependency npm ke `frontend/` atau `backoffice-frontend/` kecuali benar-benar di-import di kode. Stack saat ini: `clsx`, `lucide-react`, `next`, `react`, `react-dom`, `tailwind-merge`. Library animasi eksternal (mis. `framer-motion`) tidak dipakai — animasi chat memakai state React + CSS.
+
+### 2.8 Format Harga (`formatIDR`)
+
+Kedua app punya salinan `lib/format.ts` terpisah (tidak di-share). Konvensi:
+- Angka valid termasuk `0` → diformat `Intl` IDR (`Rp0`, `Rp 1.000.000`, dll).
+- Hanya `null`, `undefined`, atau `NaN` → tampilkan `"TBD"`.
+- JANGAN gunakan truthiness (`if (!amount)`) — itu salah menangani harga nol.
+
+Saat mengubah logika harga, perbarui **kedua** `frontend/src/lib/format.ts` dan `backoffice-frontend/src/lib/format.ts`.
 
 ---
 
