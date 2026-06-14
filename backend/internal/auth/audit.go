@@ -5,14 +5,14 @@ import (
 )
 
 const (
-	EventLoginSuccess             = "login_success"
-	EventLoginFailed              = "login_failed"
-	EventRefreshSuccess           = "refresh_success"
-	EventRefreshFailed            = "refresh_failed"
-	EventRefreshTokenRevoked      = "refresh_token_revoked"
-	EventLogout                   = "logout"
-	EventRefreshTokenUsedAsAccess = "refresh_token_used_as_access"
-	EventAccessTokenUsedOnRefresh = "access_token_used_on_refresh"
+	EventLoginSuccess              = "login_success"
+	EventLoginFailed               = "login_failed"
+	EventRefreshSuccess            = "refresh_success"
+	EventRefreshFailed             = "refresh_failed"
+	EventRefreshTokenRevoked       = "refresh_token_revoked"
+	EventLogout                    = "logout"
+	EventRefreshTokenUsedAsAccess  = "refresh_token_used_as_access"
+	EventAccessTokenUsedOnRefresh  = "access_token_used_on_refresh"
 	EventRefreshTokenReuseDetected = "refresh_token_reuse_detected"
 )
 

@@ -1,0 +1,117 @@
+# Vero AI Travel Agents - Cursor Rules
+
+Monorepo platform travel berbasis AI: backend Go (Gin + GORM + PostgreSQL),
+customer frontend (Next.js), dan backoffice/TravelOS frontend (Next.js).
+
+Knowledge base permanen ada di `docs/ai/`. Itu adalah sumber kebenaran utama.
+Jangan memindai seluruh repository jika dokumentasi sudah menjawab pertanyaanmu.
+
+---
+
+## Alur Kerja Wajib (ikuti urutan ini)
+
+1. BACA `docs/ai/README.md` TERLEBIH DAHULU sebelum melakukan apa pun. File itu
+   menjelaskan urutan baca dan peta seluruh knowledge base.
+2. Pahami dokumentasi yang relevan SEBELUM membaca source code. Prioritaskan
+   memahami `docs/ai/` daripada langsung membuka implementasi.
+3. Identifikasi file yang relevan dengan task dari dokumentasi (gunakan path file
+   yang tercantum di tiap dokumen) SEBELUM membaca/mengedit source code.
+4. Baru baca source code spesifik yang sudah diidentifikasi. JANGAN scan seluruh
+   repository kecuali benar-benar diperlukan (mis. dokumentasi tidak memuat
+   jawaban, atau kamu sedang melakukan investigasi lintas-module yang luas).
+
+---
+
+## Peta Knowledge Base (`docs/ai/`)
+
+Baca file yang sesuai dengan jenis task-mu. Jangan baca semuanya kalau tidak perlu.
+
+- `docs/ai/README.md` - titik masuk, urutan baca untuk agent baru. SELALU dulu.
+- `docs/ai/project-map.md` - peta navigasi, struktur folder, entry point, file inti.
+- `docs/ai/architecture.md` - arsitektur sistem, alur data, design pattern, keputusan arsitektur.
+- `docs/ai/modules.md` - daftar module, tujuan, hubungan antar-module.
+- `docs/ai/api.md` - semua endpoint, middleware, flow auth (JWT access/refresh).
+- `docs/ai/database.md` - skema, entity, relasi, ORM (GORM), migrasi, repository.
+- `docs/ai/frontend.md` - kedua app Next.js: halaman, routing, state, shared components.
+- `docs/ai/backend.md` - service layer, business logic, realtime/SSE, integrasi eksternal.
+- `docs/ai/deployment.md` - environment variables, proses deploy, infrastruktur, service pihak ketiga.
+- `docs/ai/known-issues.md` - technical debt, keterbatasan, bug diketahui. CEK SEBELUM mengubah kode.
+- `docs/ai/coding-rules.md` - konvensi, pola wajib, pola terlarang, best practice project.
+
+### Pemetaan task -> dokumen yang harus dibaca
+
+- Mengubah/menambah endpoint -> `api.md` + `backend.md` + `coding-rules.md`
+- Mengubah skema/data/query -> `database.md` + `backend.md`
+- Kerja di UI customer atau backoffice -> `frontend.md` + `api.md`
+- Logika AI/chat/MCP -> `backend.md` + `architecture.md`
+- Auth/JWT/session -> `api.md` + `backend.md` + `known-issues.md`
+- Deploy/env/config -> `deployment.md`
+- Refactor lintas-module -> `architecture.md` + `modules.md`
+
+---
+
+## Struktur Project (ringkas)
+
+- `backend/` - API Go. Entry point: `backend/cmd/server/main.go`.
+  - `internal/config/` - load env -> struct Config (+ `Validate()` guard produksi).
+  - `internal/database/` - koneksi GORM, retry, AutoMigrate, health.
+  - `internal/models/` - skema GORM (semua di `models.go`).
+  - `internal/repositories/` - akses data (CRUD).
+  - `internal/services/` - SEMUA business logic terpusat di `services.go`.
+  - `internal/handlers/` - HTTP handler + `docs.go` (OpenAPI/Scalar).
+  - `internal/routes/` - registrasi rute + middleware per-grup.
+  - `internal/middlewares/` - RequestID, SecureHeaders, CORS, RateLimit, Auth, Role.
+  - `internal/auth/` - JWTService, cookie refresh, audit log.
+  - `internal/ai/` - klien AI OpenAI-compatible + fallback lokal.
+  - `internal/mcp/` - katalog tool MCP (punya field `Enabled`).
+  - `internal/events/` - event bus in-memory untuk SSE.
+  - `internal/utils/` - envelope respons standar.
+  - `internal/dto/` - request/response + validasi binding.
+- `frontend/` - customer chat AI (Next.js App Router). Inti: `src/components/chat/ChatInterface.tsx`, `src/lib/api.ts`.
+- `backoffice-frontend/` - TravelOS admin/operator (Next.js). Auth/refresh: `src/lib/api.ts`. Form trip: `src/components/trips/form/`.
+- `docs/ai/` - knowledge base (sumber kebenaran).
+
+---
+
+## Konvensi Project (lihat `docs/ai/coding-rules.md` untuk lengkap)
+
+- Semua respons API memakai envelope seragam `{ success, message, data, error }`
+  via `backend/internal/utils/response.go`. JANGAN kembalikan JSON mentah.
+- Layered architecture: Handler -> Service -> Repository -> GORM. Jangan akses DB
+  langsung dari handler.
+- Dependency injection manual lewat `services.New()` dan `handlers.New()`.
+- Business logic baru masuk ke service yang sesuai di `services.go`.
+- Realtime memakai event bus (`events.Bus`) + SSE. Publish event lewat `bus.Publish(...)`.
+- JWT: access vs refresh dipisah by audience. Access TTL 15 menit. Refresh token
+  disimpan sebagai session DB (revocable), dikirim via cookie HttpOnly. Ada reuse
+  detection yang me-revoke semua sesi.
+- Frontend memanggil backend lewat path relatif `/api/...` (proxy rewrite Next.js).
+- `create_payment` (MCP) SENGAJA dinonaktifkan di workflow chat. Jangan aktifkan
+  tanpa instruksi eksplisit.
+- Jalankan verifikasi setelah perubahan: backend `go build ./...` + `gofmt`;
+  frontend/backoffice `tsc --noEmit`.
+
+---
+
+## Pemeliharaan Dokumentasi (WAJIB)
+
+Knowledge base hanya berguna jika tetap akurat. Setelah menyelesaikan pekerjaan:
+
+5. Jika menemukan/melakukan PERUBAHAN ARSITEKTUR, update dokumen terkait
+   (`architecture.md`, `modules.md`, dan dokumen domain yang relevan).
+6. Jika MEMBUAT FITUR BARU, update `docs/ai/` yang relevan (mis. endpoint baru ->
+   `api.md`; tabel baru -> `database.md`; halaman baru -> `frontend.md`).
+7. Jika menemukan KNOWLEDGE PENTING untuk agent berikutnya (gotcha, keputusan,
+   technical debt baru), tambahkan ke dokumen yang sesuai (`known-issues.md`,
+   `coding-rules.md`, atau dokumen domain).
+8. Saat memperbarui dokumentasi, jaga gaya yang sudah ada: jelaskan fungsi dan
+   hubungan antar bagian, sertakan path file penting, jangan sekadar menyalin tree.
+
+Perlakukan update dokumentasi sebagai bagian dari definition-of-done, bukan
+langkah opsional.
+
+---
+
+## Bahasa
+
+Tulis respons dan dokumentasi dalam Bahasa Indonesia, konsisten dengan isi `docs/ai/`.
