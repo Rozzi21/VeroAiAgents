@@ -103,6 +103,7 @@ Legenda: 🔓 publik · 🔒 butuh access token · 👮 butuh role operator/admi
 
 Request penting:
 - `register`: `{name, email, password(min 8), role?}` (DTO `RegisterRequest`).
+  - ⚠️ **Celah keamanan aktif (SEC-1):** endpoint publik ini saat ini **menghormati** field `role`, sehingga siapa pun bisa mendaftar sebagai `admin`/`operator`. Ini privilege escalation kritis — lihat `known-issues.md` bagian A. Field `role` seharusnya diabaikan pada jalur register publik.
 - `login`: `{email|username, password}` (DTO `LoginRequest`).
 - `refresh`/`logout`: tanpa body; refresh token dibaca dari cookie HttpOnly.
 - Response auth: `{access_token, token_type:"Bearer", expires_in, user}` (user di-omit pada refresh).
@@ -156,6 +157,11 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 | POST | `/api/v1/payments/create` | 🔒 | Buat payment intent (QRIS/VA) |
 | GET | `/api/v1/payments/:id` | 🔒 | Detail payment |
 | POST | `/api/v1/payments/webhook` | 🔓 | Webhook DOKU (verifikasi HMAC-SHA256) |
+
+> ⚠️ **Catatan keamanan (lihat `known-issues.md` bagian A):**
+> - `GET /bookings/:id` & `GET /payments/:id` **tidak** memeriksa kepemilikan (IDOR, SEC-2).
+> - `total_price` booking & `amount` payment diambil mentah dari client tanpa validasi server (tampering, SEC-3).
+> - `webhook` menerima status tanpa signature bila `DOKU_SECRET` kosong (SEC-4).
 
 - `booking` request: `{trip_id, total_price}` (DTO `BookingRequest`).
 - `payment create` request: `{booking_id, payment_method(oneof QRIS|VA|VIRTUAL_ACCOUNT), amount}` (DTO `PaymentCreateRequest`).

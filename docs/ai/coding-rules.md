@@ -66,6 +66,9 @@ Handler memakai helper `bind(c, &req)` yang otomatis membalas `BadRequest` bila 
 - Token JWT dipisah by audience (`access` vs `refresh`) - lihat `backend/internal/auth/jwt.go`.
 - Event keamanan dicatat lewat `auth.LogSecurity()` (`backend/internal/auth/audit.go`), bukan `log.Print` biasa.
 - Secret/kredensial selalu dari env (`os.Getenv`), JANGAN hardcode. `Config.Validate()` menolak secret default di production.
+- **JANGAN pernah menerima `role` (atau field privilege lain) dari body request pada endpoint publik.** Role hanya boleh ditetapkan server-side atau lewat endpoint terproteksi `Role(admin)`. Lihat SEC-1 di `known-issues.md`.
+- **Endpoint yang mengembalikan resource milik user (booking, payment, chat) WAJIB cek kepemilikan** (`resource.UserID == currentUserID(c)`) kecuali pemanggil operator/admin. Hindari IDOR (SEC-2).
+- **Nilai uang/harga JANGAN dipercaya dari client.** Hitung `total_price`/`amount` di server dari data paket; body client hanya referensi (SEC-3).
 
 ### 1.7 Penamaan & Format
 

@@ -1,5 +1,7 @@
 services:
+  # Opsional: Postgres bawaan Docker. Nonaktif secara default — dev memakai Postgres lokal :5432.
   postgres:
+    profiles: ["docker-db"]
     image: postgres:16-alpine
     container_name: vero-travel-postgres
     environment:
@@ -22,16 +24,9 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: vero-travel-api
+    network_mode: host
     env_file:
       - .env
-    environment:
-      DATABASE_HOST: postgres
-      DATABASE_URL: postgres://vero_user:password_aman@postgres:5432/vero_travel?sslmode=disable
-    ports:
-      - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]

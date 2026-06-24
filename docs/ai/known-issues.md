@@ -4,26 +4,183 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
+> Audit terakhir: 25 Jun 2026 (analisis keamanan + optimasi lintas-komponen). Bagian "Celah Keamanan" di bawah adalah hasil audit tersebut dan **belum diperbaiki** kecuali ditandai sebaliknya.
+
 ---
 
-## 1. MCP Tools Masih Mock (Bukan Integrasi Nyata)
+## A. Celah Keamanan (Prioritas Audit 25 Jun 2026)
 
-**Lokasi:** `backend/internal/services/services.go` -> `MCPService.mock()`
+### SEC-1. 🔴 KRITIS — Privilege Escalation lewat `/auth/register`
+
+**Lokasi:** `backend/internal/services/services.go` → `AuthService.Register()`, `backend/internal/dto/dto.go` → `RegisterRequest`, route publik di `backend/internal/routes/routes.go` (`authGroup.POST("/register")`).
+
+Endpoint register bersifat **publik** dan menghormati field `role` dari body request:
+
+```go
+role := models.RoleUser
+if req.Role == string(models.RoleOperator) || req.Role == string(models.RoleAdmin) {
+    role = models.Role(req.Role)
+}
+```
+
+Artinya siapa pun bisa membuat akun **admin/operator** tanpa otorisasi:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"x","email":"x@x.com","password":"12345678","role":"admin"}'
+# → akun langsung berperan admin (terverifikasi saat audit)
+```
+
+**Dampak:** kontrol akses backoffice (CRUD paket, dashboard, logs, daftar booking) bisa diambil alih total oleh penyerang anonim.
+
+**Perbaikan yang disarankan:** abaikan field `role` pada register publik (paksa `RoleUser`). Pembuatan operator/admin harus lewat endpoint terproteksi `Role(admin)` atau seeding manual. Hapus juga `Role` dari `RegisterRequest` atau tandai jelas hanya dipakai jalur admin.
+
+---
+
+### SEC-2. 🟠 TINGGI — IDOR pada `GET /bookings/:id` dan `GET /payments/:id`
+
+**Lokasi:** `backend/internal/routes/routes.go` (`protected.GET("/bookings/:id")`, `protected.GET("/payments/:id")`), `BookingService.Find()` / `PaymentService.Find()` di `services.go`.
+
+Kedua endpoint hanya butuh `Auth` (token valid) tanpa cek kepemilikan. `Find(id)` mengambil record by ID saja:
+
+```go
+func (s *BookingService) Find(id uuid.UUID) (models.Booking, error) { return s.repo.FindBooking(id) }
+```
+
+**Dampak:** user terotentikasi mana pun bisa membaca booking/payment milik user lain hanya dengan menebak/mengetahui UUID (Insecure Direct Object Reference). Termasuk detail harga dan `ExternalID` pembayaran.
+
+**Perbaikan yang disarankan:** filter by `user_id` dari context untuk role non-operator/admin (mis. `FindBookingForUser(id, userID)`), atau verifikasi `booking.UserID == currentUserID(c)` di service.
+
+---
+
+### SEC-3. 🟠 TINGGI — Tampering Harga Booking & Jumlah Pembayaran
+
+**Lokasi:** `backend/internal/dto/dto.go` (`BookingRequest.TotalPrice`, `PaymentCreateRequest.Amount`), `BookingService.Create()` / `PaymentService.Create()`.
+
+`TotalPrice` booking dan `Amount` payment diambil **mentah dari client** lalu disimpan apa adanya — tidak divalidasi terhadap harga paket (`Trip.BasePrice`) atau total booking:
+
+```go
+booking := models.Booking{ ... TotalPrice: req.TotalPrice, ... }   // client-controlled
+payment := models.Payment{ ... Amount: req.Amount, ... }            // client-controlled
+```
+
+**Dampak:** penyerang bisa membuat booking/payment dengan nominal sembarang (mis. `total_price: 1`). Alur revenue tidak bisa dipercaya.
+
+**Perbaikan yang disarankan:** hitung harga di server dari `Trip` + jumlah pax saat membuat booking; untuk payment, ambil `Amount` dari `Booking.TotalPrice`, jangan dari body.
+
+---
+
+### SEC-4. 🟠 TINGGI — Webhook Pembayaran Bisa Dipalsukan Saat `DOKU_SECRET` Kosong
+
+**Lokasi:** `backend/internal/services/services.go` → `PaymentService.Webhook()`, route publik `api.POST("/payments/webhook")`.
+
+Verifikasi signature hanya berjalan bila `DOKU_SECRET` **dan** `req.Signature` terisi:
+
+```go
+if s.cfg.DOKUSecret != "" && req.Signature != "" && !s.verifySignature(...) {
+    return ..., errors.New("invalid payment signature")
+}
+```
+
+Bila `DOKU_SECRET` kosong (default dev) atau penyerang mengirim body tanpa `signature`, status pembayaran langsung diterima. Tidak ada validasi nominal maupun proteksi replay.
+
+**Dampak:** siapa pun yang tahu/menebak `external_id` (format `DOKU-<uuid>`) bisa menandai pembayaran `paid`/`settlement` → memicu `booking_confirmed` + trigger N8N. Penipuan pembayaran.
+
+**Perbaikan yang disarankan:** wajibkan `DOKU_SECRET` di production via `Config.Validate()`, tolak webhook tanpa signature valid, validasi `amount` cocok dengan payment, dan tambah idempotency/replay guard (mis. tolak transisi status mundur).
+
+---
+
+### SEC-5. 🟡 SEDANG — Upload Media: Tanpa Batas Ukuran & MIME Hanya dari Ekstensi
+
+**Lokasi:** `backend/internal/handlers/handlers.go` → `UploadTripMedia()`, `backend/cmd/server/main.go` (tidak set `router.MaxMultipartMemory`).
+
+Validasi tipe file hanya berdasarkan **ekstensi nama file** (`filepath.Ext`), bukan sniffing magic bytes. Tidak ada batas ukuran per-file eksplisit, dan `MaxMultipartMemory` dibiarkan default Gin (32 MB di memori).
+
+**Dampak:** file berbahaya bisa diberi ekstensi `.png`; upload besar berulang bisa menekan memori/disk (DoS ringan). File disajikan publik via `router.Static("/uploads", ...)`.
+
+**Perbaikan yang disarankan:** batasi ukuran (`c.Request.Body = http.MaxBytesReader(...)` atau cek `file.Size`), verifikasi content-type via `http.DetectContentType` pada beberapa byte pertama, dan pertimbangkan menyajikan upload dengan `Content-Disposition`/`X-Content-Type-Options`.
+
+---
+
+### SEC-6. 🟡 SEDANG — Recovery Middleware Mengekspos Detail Panic
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `Recovery()`
+
+```go
+utils.Error(c, http.StatusInternalServerError, "Unexpected server error", gin.H{
+    "panic": recovered,
+})
+```
+
+Detail panic (pesan, kadang path/baris) dikirim ke client. **Information disclosure** — penyerang mendapat insight internal.
+
+**Perbaikan yang disarankan:** log panic + stack ke server log, balas pesan generik tanpa detail ke client.
+
+---
+
+### SEC-7. 🟡 SEDANG — Rate Limiter Global (Bukan Per-IP/Client)
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `RateLimit()`
+
+```go
+limiter := rate.NewLimiter(rate.Every(time.Second), 20)
+```
+
+Satu `Limiter` dibagi **seluruh client** (20 req/detik kumulatif). Satu client bisa menghabiskan kuota semua user; sebaliknya, tidak melindungi endpoint sensitif (login/register) dari brute force per-IP.
+
+**Perbaikan yang disarankan:** `sync.Map` of `*rate.Limiter` per-IP/per-user; limiter lebih ketat khusus `/auth/*`.
+
+---
+
+### SEC-8. 🟡 SEDANG — CORS Origins Hardcoded ke `localhost`
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `CORS()`
+
+```go
+AllowOrigins: []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
+```
+
+Tidak ada domain production; `AllowCredentials=true`. Deploy production = frontend ter-block CORS tanpa ubah kode.
+
+**Perbaikan yang disarankan:** baca dari env `CORS_ALLOWED_ORIGINS`.
+
+---
+
+### SEC-9. 🟡 SEDANG — AI Client: Response Body Tidak Dibatasi Ukurannya
+
+**Lokasi:** `backend/internal/ai/ai_client.go` → `Generate()`
+
+```go
+json.NewDecoder(res.Body).Decode(&raw)
+```
+
+Tanpa `io.LimitReader`/`http.MaxBytesReader`. Provider yang membalas body sangat besar (HTML error, stream macet) bisa menghabiskan memori.
+
+**Perbaikan yang disarankan:** bungkus `res.Body` dengan `io.LimitReader(res.Body, maxBytes)` sebelum decode.
+
+---
+
+## B. Placeholder & Integrasi Belum Selesai
+
+### 1. MCP Tools Masih Mock (Bukan Integrasi Nyata)
+
+**Lokasi:** `backend/internal/services/services.go` → `MCPService.mock()`
 
 Semua tool MCP mengembalikan data dummy hardcoded, bukan hasil pencarian/komputasi nyata:
 
-- `search_destination` -> selalu `["Tokyo", "Kyoto", "Osaka", "Bali"]`
-- `search_hotels` -> selalu `["Aman Kyoto", "Hoshinoya Tokyo", "Bali Ocean Villa"]`
-- `calculate_budget` -> selalu `5400 USD`
-- `generate_itinerary` -> 3 hari statis
+- `search_destination` → selalu `["Tokyo", "Kyoto", "Osaka", "Bali"]`
+- `search_hotels` → selalu `["Aman Kyoto", "Hoshinoya Tokyo", "Bali Ocean Villa"]`
+- `calculate_budget` → selalu `5400 USD`
+- `generate_itinerary` → 3 hari statis
 
 **Dampak:** Workflow chat terlihat "pintar" tapi konteks tool tidak mencerminkan input user. Yang benar-benar dinamis hanyalah respons LLM akhir (`generateWithAI`) dan pemilihan paket dari katalog DB (`selectRecommendedPackages`).
 
-**Yang perlu dilakukan:** Ganti `mock()` dengan implementasi nyata (panggil API destinasi/hotel, hitung budget dari data paket). Pertahankan signature `Execute()` agar logging/retry tetap jalan.
+**Yang perlu dilakukan:** Ganti `mock()` dengan implementasi nyata. Pertahankan signature `Execute()` agar logging/retry tetap jalan.
 
 ---
 
-## 2. `create_payment` Sengaja Dinonaktifkan
+### 2. `create_payment` Sengaja Dinonaktifkan
 
 **Lokasi:** `backend/internal/services/services.go` (workflow steps), `backend/internal/mcp/tools.go` (`Enabled: false`)
 
@@ -33,233 +190,158 @@ Ini **keputusan desain, bukan bug**. Tool `create_payment` dikeluarkan dari pipe
 
 ---
 
-## 3. Tidak Ada Automated Test
+### 3. Tidak Ada Automated Test
 
 **Lokasi:** seluruh repo
 
 Tidak ada `*_test.go` maupun test JS/TS. Verifikasi saat ini hanya `go build`, `gofmt`, dan `tsc --noEmit`.
 
 **Area paling berisiko tanpa test (prioritas bila menambah test):**
-1. `AuthService.Refresh()` — rotasi token, reuse detection, revoke-all.
-2. `PaymentService.Webhook()` — verifikasi HMAC signature.
+1. `AuthService.Register()`/`Login()`/`Refresh()` — rotasi token, reuse detection, revoke-all, **dan regresi SEC-1**.
+2. `PaymentService.Webhook()` — verifikasi HMAC signature (lihat SEC-4).
 3. `AIService.Chat()` — orkestrasi workflow + fallback.
 
 ---
 
-## 4. Booking & Payment: Backend Siap, Frontend Belum
+### 4. Booking & Payment: Backend Siap, Frontend Belum
 
 **Lokasi:** `frontend/src/app/trip/[id]/page.tsx`
 
-Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, dan webhook DOKU yang berfungsi. Namun:
+Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, dan webhook DOKU. Namun:
 
-- Tombol "Book This Trip" dan "Add to Plan" di customer frontend **tidak punya handler** — tidak memanggil API.
+- Tombol "Book This Trip" dan "Add to Plan" di customer frontend **tidak punya handler** (terverifikasi masih placeholder).
 - Teks "Secure AI-powered checkout" hanya hiasan.
 - Tidak ada UI checkout/QRIS di mana pun.
 
-**Dampak:** Booking hanya bisa dibuat lewat API langsung (mis. Postman), bukan dari UI. Alur revenue belum tersambung end-to-end.
+**Dampak:** Booking hanya bisa dibuat lewat API langsung. Alur revenue belum tersambung end-to-end. (Catatan: bila nanti disambung, perbaiki dulu SEC-2 & SEC-3.)
 
 ---
 
-## 5. Backoffice: Banyak Halaman Placeholder
+### 5. Backoffice: Banyak Halaman Placeholder
 
 **Lokasi:** `backoffice-frontend/src/app/`
 
-- **Dashboard** (`on-development-panel.tsx`) -> layar "On Development", tidak memanggil `analytics/dashboard`.
-- **`/orders`, `/settings`, `/trips/[id]`** -> semuanya me-render `CurrentTripsScreen` (layar list trip yang sama), belum punya implementasi sendiri.
+- **Dashboard** (`on-development-panel.tsx`) → layar "On Development", tidak memanggil `analytics/dashboard`.
+- **`/orders`, `/settings`, `/trips/[id]`** → semuanya me-render `CurrentTripsScreen` (list trip yang sama).
 - **Mock data** di `backoffice-frontend/src/lib/data.ts` (`travelCards`, `orders`, `payments`, `workflowSteps`) **tidak dipakai** komponen mana pun.
 
 **Yang benar-benar jalan di backoffice:** auth + CRUD paket + upload media. Selain itu placeholder.
 
 ---
 
-## 6. Endpoint Backend yang Belum Dikonsumsi Frontend
+### 6. Endpoint Backend yang Belum Dikonsumsi Frontend
 
-Backend mengekspos endpoint yang belum dipakai UI mana pun:
-
-- `GET /api/v1/events/stream` (SSE) — **tidak ada** EventSource di kedua frontend. Padahal seluruh mekanisme event bus + publish dibangun untuk ini.
+- `GET /api/v1/events/stream` (SSE) — **tidak ada** EventSource di kedua frontend.
 - `GET /api/v1/analytics/dashboard` — tidak dipanggil backoffice.
 - `GET /api/v1/logs`, `/logs/workflows`, `/logs/tool-calls` — tidak dipanggil.
 - `GET /api/v1/bookings`, `/bookings/:id` — tidak dipanggil.
-- `GET /api/v1/chat/sessions`, `/chat/:id/messages` — tidak dipanggil (customer chat menyimpan session_id hanya di state React).
+- `GET /api/v1/chat/sessions`, `/chat/:id/messages` — tidak dipanggil.
 
-**Dampak:** Effort SSE realtime saat ini "terbuang" dari sisi UX karena tidak ada konsumen. Peluang besar: sambungkan SSE ke customer chat untuk progress workflow realtime.
+**Dampak:** Effort SSE realtime saat ini "terbuang" dari sisi UX. Peluang: sambungkan SSE ke customer chat untuk progress workflow realtime.
 
 ---
 
-## 7. Event Bus In-Memory: Tidak Tahan Restart & Tidak Multi-Instance
+## C. Arsitektur & Skalabilitas
+
+### 7. Event Bus In-Memory: Tidak Tahan Restart & Tidak Multi-Instance
 
 **Lokasi:** `backend/internal/events/bus.go`
 
-Event bus memakai map channel in-memory:
 - Event **hilang saat restart** (tidak ada persistensi).
-- **Tidak bisa multi-instance** — kalau backend di-scale horizontal, klien SSE di instance A tidak menerima event dari instance B.
-- Publish **non-blocking** (`select { case ch <- event: default: }`) — jika channel buffer (32) penuh, event **di-drop diam-diam**.
+- **Tidak bisa multi-instance** — klien SSE di instance A tidak menerima event dari instance B.
+- Publish **non-blocking** — jika buffer (32) penuh, event **di-drop diam-diam**.
 
-**Yang perlu dilakukan bila scale:** ganti ke Redis Pub/Sub atau message broker. Untuk sekarang (single instance) cukup.
-
----
-
-## 8. Guest Chat: Satu User "Guest Traveler" Dibagi Semua Tamu
-
-**Lokasi:** `backend/internal/services/services.go` -> `AuthService.GuestUser()`
-
-`GuestUser()` memakai `FirstOrCreateUser` dengan email tetap `guest@vero.local`. Artinya **semua tamu berbagi satu record user**. ChatSession dibedakan per session_id, tapi semua dimiliki user guest yang sama.
-
-**Dampak:** `GET /api/v1/chat/sessions` untuk guest akan mengembalikan sesi semua tamu bila endpoint itu nanti dipakai. Privasi/isolasi antar-tamu belum ada.
+**Yang perlu dilakukan bila scale:** ganti ke Redis Pub/Sub atau message broker. Untuk single instance cukup.
 
 ---
 
-## 9. Konfigurasi Secret di `.env.example` adalah Nilai Dev
+### 8. Guest Chat: Satu User "Guest Traveler" Dibagi Semua Tamu
+
+**Lokasi:** `backend/internal/services/services.go` → `AuthService.GuestUser()`
+
+`GuestUser()` memakai `FirstOrCreateUser` dengan email tetap `guest@vero.local`. **Semua tamu berbagi satu record user**. ChatSession dibedakan per session_id, tapi semua dimiliki user guest yang sama.
+
+**Dampak:** `GET /api/v1/chat/sessions` untuk guest akan mengembalikan sesi semua tamu bila dipakai. Privasi antar-tamu belum ada.
+
+---
+
+### 9. Konfigurasi Secret di `.env.example` adalah Nilai Dev
 
 **Lokasi:** `backend/.env.example`
 
-`DATABASE_PASSWORD=password_aman`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev. Sejak hardening, `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default — tapi `DATABASE_PASSWORD` default **tidak** divalidasi.
+`DATABASE_PASSWORD=password_aman`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev. `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default — tapi `DATABASE_PASSWORD` dan `DOKU_SECRET` **tidak** divalidasi (lihat SEC-4).
 
-**Catatan:** `.env` aktual milik developer berisi AI key nyata (provider sumopod, model qwen). Jangan commit `.env`.
+**Catatan:** `.env` aktual developer berisi AI key nyata. Jangan commit `.env`.
 
 ---
 
-## 10. AI Memory Summary: Masih Truncation (Bukan LLM Summarization)
+### 10. AI Memory Summary: Masih Truncation (Bukan LLM Summarization)
 
-**Lokasi:** `backend/internal/services/services.go` -> `refreshMemorySummary()`
+**Lokasi:** `backend/internal/services/services.go` → `refreshMemorySummary()`
 
-Ringkasan memory bukan hasil summarization LLM — hanya **potong string** mentah ambil `AI_MEMORY_MAX_CHARS` (1800) karakter terakhir dari gabungan pesan. Konteks lama bisa terpotong di tengah kalimat.
+Ringkasan memory bukan hasil summarization LLM — hanya **potong string** ambil `AI_MEMORY_MAX_CHARS` (1800) karakter terakhir. Konteks lama bisa terpotong di tengah kalimat.
 
-**Sudah dioptimasi:** method ini sekarang memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi `AIMemoryMaxChars / 200` pesan) alih-alih memuat SEMUA pesan sesi. Ini menghindari loading ribuan row pada sesi panjang. Namun, pendekatan truncation-nya sendiri belum diganti.
+**Sudah dioptimasi:** memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi `AIMemoryMaxChars / 200`) alih-alih memuat SEMUA pesan sesi.
 
 **Yang bisa ditingkatkan:** panggil LLM untuk meringkas, bukan slice string.
 
 ---
 
-## 11. `services.go` Monolitik (~940 baris)
+## D. Kualitas Kode & Optimasi
+
+### 11. `services.go` Monolitik (~970 baris)
 
 **Lokasi:** `backend/internal/services/services.go`
 
-Semua service (Auth, MCP, AI, Trip, Booking, Payment, Log, Analytics) ada di satu file. Sudah cukup besar dan akan makin sulit dirawat.
+Semua service (Auth, MCP, AI, Trip, Booking, Payment, Log, Analytics) ada di satu file (~971 baris dan terus tumbuh).
 
 **Saran refactor (low-risk):** pecah per domain jadi `auth_service.go`, `ai_service.go`, `payment_service.go`, dst dalam package `services` yang sama. Tidak mengubah API, hanya memindah kode.
 
 ---
 
-## 12. ✅ Pagination di List Endpoint (RESOLVED)
+### 12. Duplikasi Prompt User di Konteks LLM
 
-**Lokasi:** `backend/internal/repositories/repositories.go`, `backend/internal/dto/dto.go`
+**Lokasi:** `backend/internal/services/services.go` → `AIService.Chat()` + `generateWithAI()`
 
-**Sebelumnya:** `ListBookings`, `ListAILogs`, `ListToolCalls` mengembalikan semua row tanpa batas.
+Pesan user disimpan ke DB **sebelum** `generateWithAI()`, lalu di dalam `generateWithAI()` `ListRecentChatMessages()` sudah memuat pesan terakhir (termasuk pesan user tadi) — namun prompt yang sama **ditambahkan lagi** sebagai message `user` di akhir array. Akibatnya prompt terkirim dua kali ke LLM.
 
-**Sekarang:** ketiga method menerima `dto.ListQuery` (`Limit`/`Offset`) yang dinormalisasi via `Normalize()` — default 50, maks 200. Handler memanggil `ShouldBindQuery` + `Normalize()` sebelum meneruskan ke repo. `TripListQuery` punya `Limit`/`Offset` sendiri (belum memakai `Normalize()`, backward-compatible).
-
-**Catatan:** belum ada total count di response, jadi frontend belum bisa menghitung jumlah halaman total. Bila perlu, tambahkan method `Count*()` di repo dan field `total` di envelope.
+**Perbaikan yang disarankan:** jangan append prompt manual bila sudah termuat di `recent`, atau exclude pesan terakhir dari `recent`.
 
 ---
 
-## 13. ✅ Async Logging MCP: Fire-and-Forget (RESOLVED)
+### 13. Uang Disimpan sebagai `float64`
 
-**Lokasi:** `backend/internal/services/services.go` -> `MCPService.Execute()`
+**Lokasi:** `backend/internal/models/models.go` (`BasePrice`, `TotalPrice`, `Amount`, dll bertipe `float64`; kolom DB `numeric(14,2)`).
 
-**Masalah sebelumnya:** goroutine fire-and-forget mengabaikan semua error DB — log tool call dan AI log bisa hilang diam-diam.
+Aritmetika `float64` rawan galat presisi untuk nominal uang. DB sudah `numeric`, tapi nilai di Go tetap float.
 
-**Sekarang:** goroutine tetap async (tidak memblokir chat), tetapi:
-1. Error di-**log via audit log** (`auth.LogSecurity`) dengan event `tool_call_persist_failed` / `ai_log_persist_failed` sehingga operator bisa mendeteksi kegagalan persistensi.
-2. **Single retry** dengan delay 500ms untuk menangani transient DB issue.
-
-**Catatan:** ini bukan solusi sempurna — tetap bukan replacement untuk proper test dan persistent queue. Tapi log tidak lagi hilang "diam-diam" tanpa jejak audit.
+**Perbaikan yang disarankan:** pertimbangkan integer (satuan terkecil/sen) atau tipe decimal saat ada kalkulasi harga server-side (relevan dengan SEC-3).
 
 ---
 
-## 14. Rate Limiter Global (Bukan Per-IP/Client)
+### 14. Backoffice: Error Handling Mengasumsi Response Selalu JSON
 
-**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `RateLimit()`
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `request()` & `refreshAccessToken()`
 
-```go
-limiter := rate.NewLimiter(rate.Every(time.Second), 20)
-```
-
-Satu `Limiter` dibagi **seluruh client**. Artinya 20 req/detik adalah batas **kumulatif** — satu client bisa menghabiskan kuota semua user. Seharusnya per-IP atau per-user menggunakan `sync.Map` of `*rate.Limiter`.
-
-**Dampak di production:** traffic wajar dari beberapa user concurrent bisa memicu `429 Too Many Requests` secara tidak adil.
-
----
-
-## 15. CORS Origins Hardcoded ke `localhost`
-
-**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `CORS()`
-
-```go
-AllowOrigins: []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
-```
-
-Origin hanya `localhost` — **tidak ada production domain**. Backend tidak bisa menerima request dari domain production manapun tanpa mengubah kode. Seharusnya dibaca dari environment variable (mis. `CORS_ALLOWED_ORIGINS`).
-
-**Dampak:** deploy production tanpa mengubah kode ini = frontend tidak bisa memanggil API (CORS blocked).
-
----
-
-## 16. Recovery Middleware Mengekspos Detail Panic
-
-**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `Recovery()`
-
-```go
-utils.Error(c, http.StatusInternalServerError, "Unexpected server error", gin.H{
-    "panic": recovered,
-})
-```
-
-Detail panic (stack trace, nama file, baris kode) dikirim ke client dalam response JSON. Ini **information disclosure** — attacker mendapat insight internal aplikasi.
-
-**Yang perlu dilakukan:** log panic ke server log, kirim generic message ke client tanpa detail.
-
----
-
-## 17. AI Client: Response Body Tidak Dibatasi Ukurannya
-
-**Lokasi:** `backend/internal/ai/ai_client.go` -> `Generate()`
-
-```go
-json.NewDecoder(res.Body).Decode(&raw)
-```
-
-Seluruh response body di-decode tanpa `http.MaxBytesReader` atau limit lain. Jika AI provider mengembalikan response sangat besar (error page HTML, streaming stuck), ini bisa menghabiskan memory.
-
-**Saran:** gunakan `io.LimitReader(res.Body, maxBytes)` sebelum decode, atau set `http.Client` timeout yang lebih ketat.
-
----
-
-## 18. `services.go` Sudah ~971 Baris (Lebih Besar dari Catatan #11)
-
-**Lokasi:** `backend/internal/services/services.go`
-
-Update dari #11: file sekarang **971 baris** (sebelumnya dicatat ~940). Pertumbuhan terus-menerus. Prioritas refactor tetap rendah tapi akan makin mahal bila ditunda.
-
----
-
-## 19. Backoffice: Error Handling Mengasumsi Response Selalu JSON
-
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` -> `request()`
-
-```go
+```ts
 const payload = (await response.json()) as Envelope<T>;
 ```
 
-Semua response dipaksa parse sebagai JSON. Jika backend mengembalikan HTML error page (nginx 502, timeout proxy), `response.json()` akan throw `SyntaxError` yang tidak ter-handle dengan baik — user melihat error teknis bukan pesan yang bermakna.
+Response dipaksa parse JSON tanpa try-catch. Jika backend membalas HTML (nginx 502, proxy timeout), `response.json()` throw `SyntaxError` yang tidak ramah user.
 
-**Saran:** cek `Content-Type` header sebelum parse, atau wrap dalam try-catch yang menghasilkan pesan user-friendly.
+> Catatan: customer frontend (`frontend/src/lib/api.ts`) **sudah** membungkus `response.json()` dalam try-catch — pola ini tinggal diterapkan ke backoffice.
+
+**Saran:** cek `Content-Type` sebelum parse, atau bungkus try-catch → pesan user-friendly.
 
 ---
 
-## 20. Backoffice: Refresh Token Promise Shared Tanpa Timeout
+### 15. Backoffice: Refresh Token Promise Shared Tanpa Timeout
 
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` -> `refreshAccessToken()`
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `refreshAccessToken()`
 
-```go
-if (refreshPromise) {
-    return refreshPromise;
-}
-```
+`refreshPromise` di-share antar pemanggil, tapi `fetch` refresh tidak punya timeout. Jika endpoint refresh hang (backend mati), promise tidak pernah resolve dan semua request yang menunggu ikut hang.
 
-Jika refresh endpoint hang (mis. backend mati), `refreshPromise` tidak pernah resolve. Semua request berikutnya yang menunggu promise ini juga hang tanpa batas waktu.
-
-**Saran:** tambahkan timeout (mis. 10 detik) yang me-reject promise jika refresh belum selesai.
+**Saran:** tambahkan `AbortController` + timeout (mis. 10 detik) yang me-reject promise.
 
 ---
 
@@ -267,20 +349,25 @@ Jika refresh endpoint hang (mis. backend mati), `refreshPromise` tidak pernah re
 
 | Prioritas | Item | Alasan |
 |---|---|---|
-| **Tinggi** | #3 Test untuk auth/payment/AI | Tidak ada safety net untuk kode keamanan-sensitif |
-| **Tinggi** | #4 Sambungkan booking UI | Alur revenue belum jalan dari UI |
-| **Tinggi** | #15 CORS hardcoded localhost | Deploy production terblokir tanpa ubah kode |
-| **Tinggi** | #16 Recovery middleware info disclosure | Panic detail dikirim ke client |
-| Sedang | #6+#1 Sambungkan SSE + tool MCP nyata | Effort besar yang belum berbuah UX |
-| Sedang | #8 Isolasi guest user | Privasi antar-tamu |
-| Sedang | #14 Rate limiter global | Traffic multi-user terbatasi secara tidak adil |
-| Sedang | #17 AI response body tanpa limit | Potensi memory exhaustion |
-| Sedang | #20 Refresh promise tanpa timeout | UI bisa hang tanpa batas |
-| Sedang | #19 Backoffice error handling asumsi JSON | Error teknis bocor ke user |
-| Rendah | #11/#18 Pecah services.go (971 baris) | Maintainability |
-| Rendah | #10 LLM summarization untuk memory | Masih truncation string |
-| ✅ Selesai | #12 Pagination list endpoint | Sudah diimplementasi |
-| ✅ Selesai | #13 Async logging MCP + retry | Sudah ada audit log + single retry |
+| 🔴 **Kritis** | SEC-1 Privilege escalation `/auth/register` | Anonim bisa jadi admin — terverifikasi live |
+| 🟠 **Tinggi** | SEC-2 IDOR booking/payment | Akses data lintas-user |
+| 🟠 **Tinggi** | SEC-3 Tampering harga/amount | Revenue tidak tepercaya |
+| 🟠 **Tinggi** | SEC-4 Webhook dipalsukan | Penipuan status pembayaran |
+| 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif |
+| 🟡 Sedang | SEC-5 Upload tanpa batas + MIME ekstensi | DoS ringan / file menyesatkan |
+| 🟡 Sedang | SEC-6 Recovery info disclosure | Detail panic bocor |
+| 🟡 Sedang | SEC-7 Rate limiter global | Brute force & abuse tak adil |
+| 🟡 Sedang | SEC-8 CORS hardcoded | Deploy production terblokir |
+| 🟡 Sedang | SEC-9 AI body tanpa limit | Potensi memory exhaustion |
+| 🟡 Sedang | #4 Sambungkan booking UI | Alur revenue belum jalan dari UI |
+| 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
+| 🟡 Sedang | #14/#15 Backoffice api.ts (JSON & timeout) | Error/hang tidak tertangani |
+| Rendah | #11 Pecah services.go | Maintainability |
+| Rendah | #12 Duplikasi prompt LLM | Token boros |
+| Rendah | #13 Uang float64 | Presisi |
+| Rendah | #10 LLM summarization memory | Masih truncation string |
+
+> Catatan: item lama #12 (pagination list endpoint) dan #13 (async logging MCP + retry) sudah **selesai diperbaiki** dan dihapus dari daftar ini per audit 25 Jun 2026. Implementasinya: `dto.ListQuery.Normalize()` (default 50, maks 200) dan audit log + single retry di `MCPService.Execute()`.
 
 ---
 

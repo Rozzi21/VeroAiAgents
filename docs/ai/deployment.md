@@ -80,14 +80,22 @@ go run ./cmd/server        # atau: go build -o vero-travel-api ./cmd/server
 ```
 
 ### Backend (Docker)
-`backend/Dockerfile` adalah multi-stage build (CGO_ENABLED=0, binary statis). `backend/docker-compose.yml` menjalankan PostgreSQL 16-alpine + API:
+`backend/Dockerfile` adalah multi-stage build (CGO_ENABLED=0, binary statis). `backend/docker-compose.yml` menjalankan API saja; **default dev memakai PostgreSQL lokal di host `:5432`** (via `host.docker.internal`):
 
 ```bash
 cd backend
 docker compose up --build
 ```
 
-Compose meng-override `DATABASE_HOST=postgres` dan `DATABASE_URL` ke service `postgres`. Keduanya punya healthcheck; API menunggu Postgres healthy.
+Pastikan Postgres lokal sudah jalan di `:5432` dan kredensial di `.env` cocok. API container memakai `network_mode: host` (Linux) sehingga `localhost:5432` di `.env` langsung terbaca — Postgres lokal yang hanya bind `127.0.0.1` tetap bisa diakses.
+
+Jika ingin Postgres bawaan Docker (port host `:5433`), jalankan dengan profile:
+
+```bash
+docker compose --profile docker-db up --build
+```
+
+Lalu override env API ke service `postgres` (lihat komentar di `docker-compose.yml`).
 
 ### Backend (server / systemd)
 Panduan lengkap di `backend/docs/server-deploy.md`:
