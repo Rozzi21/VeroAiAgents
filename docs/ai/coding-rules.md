@@ -141,7 +141,7 @@ Bila menonaktifkan fitur sementara, JANGAN hapus kodenya. Beri komentar alasan +
 
 ### 3.3 Graceful Degradation
 
-Integrasi eksternal harus punya fallback. Contoh: klien AI (`ai/openclaw.go`) mengembalikan respons lokal bila `AI_API_KEY` kosong atau provider gagal, sehingga demo tetap jalan. Tiru pola ini untuk integrasi baru.
+Integrasi eksternal harus punya fallback. Contoh: klien AI (`ai/ai_client.go`) mengembalikan respons lokal bila `AI_API_KEY` kosong atau provider gagal, sehingga demo tetap jalan. Tiru pola ini untuk integrasi baru.
 
 ---
 

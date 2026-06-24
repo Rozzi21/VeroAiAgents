@@ -42,7 +42,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `JWT_COOKIE_SECURE` | `APP_ENV==production` | Cookie hanya via HTTPS |
 | `JWT_COOKIE_SAME_SITE` | `Strict` | `Lax`/`None`/`Strict`. `None` otomatis memaksa `Secure=true` |
 
-### AI (OpenAI-compatible / OpenClaw)
+### AI (OpenAI-compatible)
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `AI_API_KEY` | _(kosong)_ | Kosong → fallback lokal (demo tetap jalan) |
@@ -61,7 +61,6 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `DOKU_SECRET` | _(kosong)_ | Secret untuk verifikasi signature webhook HMAC-SHA256 |
 | `N8N_WEBHOOK` | _(kosong)_ | URL webhook N8N untuk otomasi pasca-pembayaran |
 
-> Catatan: `OPENCLAW_API_KEY` / `OPENCLAW_BASE_URL` masih dibaca di `config.go` (`OpenClawAPIKey`, `OpenClawBaseURL`) dan dipakai di panduan deploy lama, tetapi klien AI aktual (`ai.NewClient`) memakai `AI_*`. Untuk mengarahkan ke OpenClaw, isi `AI_BASE_URL` ke endpoint OpenClaw.
 
 ### Environment Variables (Frontend)
 Kedua Next.js app memakai satu variabel publik opsional:
@@ -122,7 +121,7 @@ flowchart LR
     PG[(PostgreSQL 16 :5432)]
     UP[/uploads volume/]
   end
-  EXT_AI[AI Provider / OpenClaw]
+  EXT_AI[AI Provider (OpenAI-compatible)]
   EXT_DOKU[DOKU Payment]
   EXT_N8N[N8N Automation]
 
@@ -143,7 +142,7 @@ flowchart LR
 | Service | Peran | Titik integrasi |
 |---|---|---|
 | **PostgreSQL 16** | Database utama | `database/database.go` |
-| **AI Provider (OpenAI-compatible / OpenClaw)** | Generasi respons chat AI | `ai/openclaw.go`, `services.go` `generateWithAI()` |
+| **AI Provider (OpenAI-compatible)** | Generasi respons chat AI | `ai/ai_client.go`, `services.go` `generateWithAI()` |
 | **DOKU** | Payment gateway (QRIS/VA) | `services.go` `PaymentService.Webhook()` + verifikasi HMAC |
 | **N8N** | Otomasi workflow pasca-pembayaran | `services.go` `triggerN8N()` |
 

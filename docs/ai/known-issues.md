@@ -119,11 +119,13 @@ Event bus memakai map channel in-memory:
 
 ---
 
-## 10. AI Memory Summary: Truncation Kasar
+## 10. AI Memory Summary: Masih Truncation (Bukan LLM Summarization)
 
 **Lokasi:** `backend/internal/services/services.go` -> `refreshMemorySummary()`
 
-Ringkasan memory bukan hasil summarization LLM — hanya **potong string** mentah ambil `AI_MEMORY_MAX_CHARS` (1800) karakter terakhir dari gabungan semua pesan. Konteks lama bisa terpotong di tengah kalimat.
+Ringkasan memory bukan hasil summarization LLM — hanya **potong string** mentah ambil `AI_MEMORY_MAX_CHARS` (1800) karakter terakhir dari gabungan pesan. Konteks lama bisa terpotong di tengah kalimat.
+
+**Sudah dioptimasi:** method ini sekarang memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi `AIMemoryMaxChars / 200` pesan) alih-alih memuat SEMUA pesan sesi. Ini menghindari loading ribuan row pada sesi panjang. Namun, pendekatan truncation-nya sendiri belum diganti.
 
 **Yang bisa ditingkatkan:** panggil LLM untuk meringkas, bukan slice string.
 
@@ -139,11 +141,125 @@ Semua service (Auth, MCP, AI, Trip, Booking, Payment, Log, Analytics) ada di sat
 
 ---
 
-## 12. Tidak Ada Pagination Nyata di List Endpoint
+## 12. ✅ Pagination di List Endpoint (RESOLVED)
 
-**Lokasi:** `backend/internal/repositories/repositories.go` -> `ListTrips`, `ListBookings`, dll
+**Lokasi:** `backend/internal/repositories/repositories.go`, `backend/internal/dto/dto.go`
 
-`TripListQuery` punya `Limit`/`Offset` tapi `ListBookings`, `ListAILogs`, `ListToolCalls` mengembalikan semua row tanpa batas. Akan jadi masalah saat data tumbuh.
+**Sebelumnya:** `ListBookings`, `ListAILogs`, `ListToolCalls` mengembalikan semua row tanpa batas.
+
+**Sekarang:** ketiga method menerima `dto.ListQuery` (`Limit`/`Offset`) yang dinormalisasi via `Normalize()` — default 50, maks 200. Handler memanggil `ShouldBindQuery` + `Normalize()` sebelum meneruskan ke repo. `TripListQuery` punya `Limit`/`Offset` sendiri (belum memakai `Normalize()`, backward-compatible).
+
+**Catatan:** belum ada total count di response, jadi frontend belum bisa menghitung jumlah halaman total. Bila perlu, tambahkan method `Count*()` di repo dan field `total` di envelope.
+
+---
+
+## 13. ✅ Async Logging MCP: Fire-and-Forget (RESOLVED)
+
+**Lokasi:** `backend/internal/services/services.go` -> `MCPService.Execute()`
+
+**Masalah sebelumnya:** goroutine fire-and-forget mengabaikan semua error DB — log tool call dan AI log bisa hilang diam-diam.
+
+**Sekarang:** goroutine tetap async (tidak memblokir chat), tetapi:
+1. Error di-**log via audit log** (`auth.LogSecurity`) dengan event `tool_call_persist_failed` / `ai_log_persist_failed` sehingga operator bisa mendeteksi kegagalan persistensi.
+2. **Single retry** dengan delay 500ms untuk menangani transient DB issue.
+
+**Catatan:** ini bukan solusi sempurna — tetap bukan replacement untuk proper test dan persistent queue. Tapi log tidak lagi hilang "diam-diam" tanpa jejak audit.
+
+---
+
+## 14. Rate Limiter Global (Bukan Per-IP/Client)
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `RateLimit()`
+
+```go
+limiter := rate.NewLimiter(rate.Every(time.Second), 20)
+```
+
+Satu `Limiter` dibagi **seluruh client**. Artinya 20 req/detik adalah batas **kumulatif** — satu client bisa menghabiskan kuota semua user. Seharusnya per-IP atau per-user menggunakan `sync.Map` of `*rate.Limiter`.
+
+**Dampak di production:** traffic wajar dari beberapa user concurrent bisa memicu `429 Too Many Requests` secara tidak adil.
+
+---
+
+## 15. CORS Origins Hardcoded ke `localhost`
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `CORS()`
+
+```go
+AllowOrigins: []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
+```
+
+Origin hanya `localhost` — **tidak ada production domain**. Backend tidak bisa menerima request dari domain production manapun tanpa mengubah kode. Seharusnya dibaca dari environment variable (mis. `CORS_ALLOWED_ORIGINS`).
+
+**Dampak:** deploy production tanpa mengubah kode ini = frontend tidak bisa memanggil API (CORS blocked).
+
+---
+
+## 16. Recovery Middleware Mengekspos Detail Panic
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` -> `Recovery()`
+
+```go
+utils.Error(c, http.StatusInternalServerError, "Unexpected server error", gin.H{
+    "panic": recovered,
+})
+```
+
+Detail panic (stack trace, nama file, baris kode) dikirim ke client dalam response JSON. Ini **information disclosure** — attacker mendapat insight internal aplikasi.
+
+**Yang perlu dilakukan:** log panic ke server log, kirim generic message ke client tanpa detail.
+
+---
+
+## 17. AI Client: Response Body Tidak Dibatasi Ukurannya
+
+**Lokasi:** `backend/internal/ai/ai_client.go` -> `Generate()`
+
+```go
+json.NewDecoder(res.Body).Decode(&raw)
+```
+
+Seluruh response body di-decode tanpa `http.MaxBytesReader` atau limit lain. Jika AI provider mengembalikan response sangat besar (error page HTML, streaming stuck), ini bisa menghabiskan memory.
+
+**Saran:** gunakan `io.LimitReader(res.Body, maxBytes)` sebelum decode, atau set `http.Client` timeout yang lebih ketat.
+
+---
+
+## 18. `services.go` Sudah ~971 Baris (Lebih Besar dari Catatan #11)
+
+**Lokasi:** `backend/internal/services/services.go`
+
+Update dari #11: file sekarang **971 baris** (sebelumnya dicatat ~940). Pertumbuhan terus-menerus. Prioritas refactor tetap rendah tapi akan makin mahal bila ditunda.
+
+---
+
+## 19. Backoffice: Error Handling Mengasumsi Response Selalu JSON
+
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` -> `request()`
+
+```go
+const payload = (await response.json()) as Envelope<T>;
+```
+
+Semua response dipaksa parse sebagai JSON. Jika backend mengembalikan HTML error page (nginx 502, timeout proxy), `response.json()` akan throw `SyntaxError` yang tidak ter-handle dengan baik — user melihat error teknis bukan pesan yang bermakna.
+
+**Saran:** cek `Content-Type` header sebelum parse, atau wrap dalam try-catch yang menghasilkan pesan user-friendly.
+
+---
+
+## 20. Backoffice: Refresh Token Promise Shared Tanpa Timeout
+
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` -> `refreshAccessToken()`
+
+```go
+if (refreshPromise) {
+    return refreshPromise;
+}
+```
+
+Jika refresh endpoint hang (mis. backend mati), `refreshPromise` tidak pernah resolve. Semua request berikutnya yang menunggu promise ini juga hang tanpa batas waktu.
+
+**Saran:** tambahkan timeout (mis. 10 detik) yang me-reject promise jika refresh belum selesai.
 
 ---
 
@@ -151,12 +267,20 @@ Semua service (Auth, MCP, AI, Trip, Booking, Payment, Log, Analytics) ada di sat
 
 | Prioritas | Item | Alasan |
 |---|---|---|
-| Tinggi | #3 Test untuk auth/payment/AI | Tidak ada safety net untuk kode keamanan-sensitif |
-| Tinggi | #4 Sambungkan booking UI | Alur revenue belum jalan dari UI |
+| **Tinggi** | #3 Test untuk auth/payment/AI | Tidak ada safety net untuk kode keamanan-sensitif |
+| **Tinggi** | #4 Sambungkan booking UI | Alur revenue belum jalan dari UI |
+| **Tinggi** | #15 CORS hardcoded localhost | Deploy production terblokir tanpa ubah kode |
+| **Tinggi** | #16 Recovery middleware info disclosure | Panic detail dikirim ke client |
 | Sedang | #6+#1 Sambungkan SSE + tool MCP nyata | Effort besar yang belum berbuah UX |
 | Sedang | #8 Isolasi guest user | Privasi antar-tamu |
-| Rendah | #11 Pecah services.go | Maintainability |
-| Rendah | #10, #12 | Peningkatan kualitas |
+| Sedang | #14 Rate limiter global | Traffic multi-user terbatasi secara tidak adil |
+| Sedang | #17 AI response body tanpa limit | Potensi memory exhaustion |
+| Sedang | #20 Refresh promise tanpa timeout | UI bisa hang tanpa batas |
+| Sedang | #19 Backoffice error handling asumsi JSON | Error teknis bocor ke user |
+| Rendah | #11/#18 Pecah services.go (971 baris) | Maintainability |
+| Rendah | #10 LLM summarization untuk memory | Masih truncation string |
+| ✅ Selesai | #12 Pagination list endpoint | Sudah diimplementasi |
+| ✅ Selesai | #13 Async logging MCP + retry | Sudah ada audit log + single retry |
 
 ---
 

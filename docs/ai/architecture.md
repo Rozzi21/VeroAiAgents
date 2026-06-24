@@ -21,7 +21,7 @@ flowchart LR
   FE -->|"/api proxy"| BE["backend :8080"]
   BO -->|"/api proxy"| BE
   BE --> PG[("PostgreSQL 16")]
-  BE -->|"OpenAI-compatible"| AI["AI provider (OpenClaw/OpenAI)"]
+  BE -->|"OpenAI-compatible"| AI["AI provider (OpenAI-compatible)"]
   BE -->|"webhook"| N8N["n8n automation"]
   DOKU["DOKU payment"] -->|"webhook"| BE
 ```

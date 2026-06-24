@@ -16,10 +16,10 @@ const (
 )
 
 var (
-	ErrInvalidToken      = errors.New("invalid token")
-	ErrInvalidAudience   = errors.New("invalid token audience")
-	ErrRefreshAsAccess   = errors.New("refresh token cannot be used as access token")
-	ErrAccessOnRefresh   = errors.New("access token cannot be used as refresh token")
+	ErrInvalidToken    = errors.New("invalid token")
+	ErrInvalidAudience = errors.New("invalid token audience")
+	ErrRefreshAsAccess = errors.New("refresh token cannot be used as access token")
+	ErrAccessOnRefresh = errors.New("access token cannot be used as refresh token")
 )
 
 type Claims struct {

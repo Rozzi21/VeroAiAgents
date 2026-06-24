@@ -14,7 +14,7 @@ API Golang berorientasi produksi untuk platform travel otonom berbasis AI. Backe
 - Refresh token disimpan sebagai session di DB (bisa di-revoke) dan dikirim via cookie HttpOnly
 - Audit log keamanan (login, refresh, logout, deteksi penyalahgunaan token); deteksi reuse refresh token (token yang sudah dirotasi dipakai lagi) otomatis mencabut SEMUA sesi aktif user sebagai proteksi pencurian token
 - Orkestrasi chat AI otonom dengan tool MCP (saat ini mock) + memory ringkasan percakapan
-- Adapter AI OpenAI-compatible (mis. OpenClaw) untuk respons akhir, dengan fallback lokal
+- Adapter AI OpenAI-compatible untuk respons akhir, dengan fallback lokal
 - Event realtime SSE untuk workflow AI, pembayaran, booking, dan log operator
 - API trips, bookings, payments, AI logs, tool calls, analytics
 - Verifikasi signature webhook pembayaran DOKU (HMAC-SHA256) + trigger webhook N8N
@@ -103,7 +103,6 @@ API berjalan di `http://localhost:8080`.
 | `DOKU_SECRET` | _(kosong)_ | Secret DOKU untuk verifikasi signature webhook |
 | `N8N_WEBHOOK` | _(kosong)_ | URL webhook N8N untuk otomasi pasca-pembayaran |
 
-> Catatan: `OPENCLAW_API_KEY` / `OPENCLAW_BASE_URL` dipakai di panduan deploy lama. Kode saat ini membaca `AI_API_KEY` / `AI_BASE_URL`. Gunakan variabel `AI_*` tersebut untuk mengarahkan ke endpoint OpenClaw/OpenAI-compatible Anda.
 
 ## Endpoint API
 
@@ -185,13 +184,13 @@ Catatan: `payment_created` dan `booking_confirmed` berasal dari API booking/paym
 3. DOKU memanggil `POST /api/v1/payments/webhook` → signature diverifikasi HMAC-SHA256 (`message = external_id + status`)
 4. Jika status `paid`/`settlement` → publish `booking_confirmed` + trigger webhook N8N (`payment_success`)
 
-## Integrasi AI (OpenAI-compatible / OpenClaw)
+## Integrasi AI (OpenAI-compatible)
 
 Set di `.env`:
 
 ```env
 AI_API_KEY=your_provider_key
-AI_BASE_URL=https://api.openai.com/v1   # atau endpoint OpenClaw Anda
+AI_BASE_URL=https://api.openai.com/v1
 AI_MODEL=gpt-4o-mini
 ```
 

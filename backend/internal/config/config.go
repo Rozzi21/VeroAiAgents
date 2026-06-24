@@ -41,8 +41,6 @@ type Config struct {
 	AIRecentMessages     int
 	AIMemorySummaryAfter int
 	AIMemoryMaxChars     int
-	OpenClawAPIKey       string
-	OpenClawBaseURL      string
 	DOKUClientID         string
 	DOKUSecret           string
 	N8NWebhook           string
@@ -79,8 +77,6 @@ func Load() Config {
 		AIRecentMessages:     getInt("AI_CONTEXT_RECENT_MESSAGES", 8),
 		AIMemorySummaryAfter: getInt("AI_MEMORY_SUMMARY_AFTER", 12),
 		AIMemoryMaxChars:     getInt("AI_MEMORY_MAX_CHARS", 1800),
-		OpenClawAPIKey:       os.Getenv("OPENCLAW_API_KEY"),
-		OpenClawBaseURL:      os.Getenv("OPENCLAW_BASE_URL"),
 		DOKUClientID:         os.Getenv("DOKU_CLIENT_ID"),
 		DOKUSecret:           os.Getenv("DOKU_SECRET"),
 		N8NWebhook:           os.Getenv("N8N_WEBHOOK"),

@@ -161,9 +161,23 @@ func (r *Repository) CreateBooking(booking *models.Booking) error {
 	return r.DB.Create(booking).Error
 }
 
-func (r *Repository) ListBookings() ([]models.Booking, error) {
+func (r *Repository) ListBookings(query dto.ListQuery) ([]models.Booking, error) {
 	var bookings []models.Booking
-	err := r.DB.Preload("User").Preload("Trip").Preload("Payments").Order("created_at desc").Find(&bookings).Error
+	err := r.DB.Preload("User").Preload("Trip").Preload("Payments").
+		Order("created_at desc").Limit(query.Limit).Offset(query.Offset).Find(&bookings).Error
+	return bookings, err
+}
+
+// RecentBookings returns the most recent bookings (without payments preload) for
+// analytics dashboards. This avoids the full-table scan + 3-preload pattern that
+// ListBookings uses, keeping dashboard queries lightweight.
+func (r *Repository) RecentBookings(limit int) ([]models.Booking, error) {
+	if limit <= 0 || limit > dto.MaxListLimit {
+		limit = 10
+	}
+	var bookings []models.Booking
+	err := r.DB.Preload("User").Preload("Trip").
+		Order("created_at desc").Limit(limit).Find(&bookings).Error
 	return bookings, err
 }
 
@@ -197,9 +211,9 @@ func (r *Repository) CreateAILog(log *models.AILog) error {
 	return r.DB.Create(log).Error
 }
 
-func (r *Repository) ListAILogs() ([]models.AILog, error) {
+func (r *Repository) ListAILogs(query dto.ListQuery) ([]models.AILog, error) {
 	var logs []models.AILog
-	err := r.DB.Order("created_at desc").Limit(200).Find(&logs).Error
+	err := r.DB.Order("created_at desc").Limit(query.Limit).Offset(query.Offset).Find(&logs).Error
 	return logs, err
 }
 
@@ -207,8 +221,26 @@ func (r *Repository) CreateToolCall(call *models.ToolCall) error {
 	return r.DB.Create(call).Error
 }
 
-func (r *Repository) ListToolCalls() ([]models.ToolCall, error) {
+func (r *Repository) ListToolCalls(query dto.ListQuery) ([]models.ToolCall, error) {
 	var calls []models.ToolCall
-	err := r.DB.Order("created_at desc").Limit(200).Find(&calls).Error
+	err := r.DB.Order("created_at desc").Limit(query.Limit).Offset(query.Offset).Find(&calls).Error
 	return calls, err
+}
+
+// TailChatMessages returns the last N messages (oldest-first) for a chat session.
+// Unlike ListChatMessages which loads ALL messages, this only fetches the tail,
+// making it efficient for memory-summary refresh on long conversations.
+func (r *Repository) TailChatMessages(sessionID uuid.UUID, limit int) ([]models.ChatMessage, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	var newest []models.ChatMessage
+	if err := r.DB.Where("session_id = ?", sessionID).Order("created_at desc").Limit(limit).Find(&newest).Error; err != nil {
+		return nil, err
+	}
+	messages := make([]models.ChatMessage, len(newest))
+	for i := range newest {
+		messages[len(newest)-1-i] = newest[i]
+	}
+	return messages, nil
 }

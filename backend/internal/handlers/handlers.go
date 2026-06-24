@@ -262,7 +262,10 @@ func (h *Handler) CreateBooking(c *gin.Context) {
 }
 
 func (h *Handler) ListBookings(c *gin.Context) {
-	bookings, err := h.Services.Bookings.List()
+	var query dto.ListQuery
+	_ = c.ShouldBindQuery(&query)
+	query.Normalize()
+	bookings, err := h.Services.Bookings.List(query)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
@@ -326,7 +329,10 @@ func (h *Handler) GetPayment(c *gin.Context) {
 }
 
 func (h *Handler) Logs(c *gin.Context) {
-	logs, err := h.Services.Logs.Logs()
+	var query dto.ListQuery
+	_ = c.ShouldBindQuery(&query)
+	query.Normalize()
+	logs, err := h.Services.Logs.Logs(query)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
@@ -339,7 +345,10 @@ func (h *Handler) WorkflowLogs(c *gin.Context) {
 }
 
 func (h *Handler) ToolCalls(c *gin.Context) {
-	calls, err := h.Services.Logs.ToolCalls()
+	var query dto.ListQuery
+	_ = c.ShouldBindQuery(&query)
+	query.Normalize()
+	calls, err := h.Services.Logs.ToolCalls(query)
 	if err != nil {
 		utils.ServerError(c, err)
 		return

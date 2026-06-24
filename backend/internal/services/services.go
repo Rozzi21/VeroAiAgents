@@ -321,21 +321,47 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 
 	payloadJSON, _ := json.Marshal(payload)
 	resultJSON, _ := json.Marshal(result)
-	_ = s.repo.CreateToolCall(&models.ToolCall{
+	toolCall := models.ToolCall{
 		SessionID: sessionID,
 		ToolName:  toolName,
 		Payload:   string(payloadJSON),
 		Result:    string(resultJSON),
 		Status:    result.Status,
-	})
-	_ = s.repo.CreateAILog(&models.AILog{
+	}
+	aiLog := models.AILog{
 		SessionID:     &sessionID,
 		Workflow:      "mcp_tool_execution",
 		ToolName:      toolName,
 		Status:        result.Status,
 		ExecutionTime: time.Since(start).Milliseconds(),
 		Response:      string(resultJSON),
-	})
+	}
+	// Persist tool call + AI log asynchronously to avoid blocking the chat
+	// workflow with ~8 synchronous DB writes per request. Errors are logged to
+	// the audit log and retried once to prevent silent data loss.
+	go func() {
+		if err := s.repo.CreateToolCall(&toolCall); err != nil {
+			auth.LogSecurity("tool_call_persist_failed", map[string]any{
+				"session_id": sessionID.String(),
+				"tool_name":  toolName,
+				"error":      err.Error(),
+			})
+			// Single retry in case of transient DB issue
+			time.Sleep(500 * time.Millisecond)
+			_ = s.repo.CreateToolCall(&toolCall)
+		}
+		if err := s.repo.CreateAILog(&aiLog); err != nil {
+			auth.LogSecurity("ai_log_persist_failed", map[string]any{
+				"session_id": sessionID.String(),
+				"workflow":   "mcp_tool_execution",
+				"tool_name":  toolName,
+				"error":      err.Error(),
+			})
+			// Single retry in case of transient DB issue
+			time.Sleep(500 * time.Millisecond)
+			_ = s.repo.CreateAILog(&aiLog)
+		}
+	}()
 	s.bus.Publish("mcp_tool_executed", result)
 	return result, nil
 }
@@ -601,7 +627,15 @@ func (s *AIService) refreshMemorySummary(sessionID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	messages, err := s.repo.ListChatMessages(sessionID)
+	// Only fetch the tail of the conversation instead of ALL messages.
+	// We estimate how many recent messages are needed to fill AIMemoryMaxChars.
+	// A conservative heuristic: ~200 chars per message, so fetch enough to exceed
+	// the max. This avoids loading thousands of rows for long sessions.
+	tailLimit := s.cfg.AIMemoryMaxChars / 200
+	if tailLimit < 20 {
+		tailLimit = 20
+	}
+	messages, err := s.repo.TailChatMessages(sessionID, tailLimit)
 	if err != nil {
 		return err
 	}
@@ -807,7 +841,9 @@ func (s *BookingService) Create(userID uuid.UUID, req dto.BookingRequest) (model
 	s.bus.Publish("booking_created", booking)
 	return booking, err
 }
-func (s *BookingService) List() ([]models.Booking, error)           { return s.repo.ListBookings() }
+func (s *BookingService) List(query dto.ListQuery) ([]models.Booking, error) {
+	return s.repo.ListBookings(query)
+}
 func (s *BookingService) Find(id uuid.UUID) (models.Booking, error) { return s.repo.FindBooking(id) }
 
 type PaymentService struct {
@@ -887,8 +923,12 @@ func (s *PaymentService) triggerN8N(eventName string, payload map[string]interfa
 
 type LogService struct{ repo *repositories.Repository }
 
-func (s *LogService) Logs() ([]models.AILog, error)         { return s.repo.ListAILogs() }
-func (s *LogService) ToolCalls() ([]models.ToolCall, error) { return s.repo.ListToolCalls() }
+func (s *LogService) Logs(query dto.ListQuery) ([]models.AILog, error) {
+	return s.repo.ListAILogs(query)
+}
+func (s *LogService) ToolCalls(query dto.ListQuery) ([]models.ToolCall, error) {
+	return s.repo.ListToolCalls(query)
+}
 
 type AnalyticsService struct{ repo *repositories.Repository }
 
@@ -913,7 +953,9 @@ func (s *AnalyticsService) Dashboard() (map[string]interface{}, error) {
 		successRate = float64(paidPayments) / float64(allPayments) * 100
 	}
 
-	bookings, err := s.repo.ListBookings()
+	// Use RecentBookings (limited, no payments preload) instead of ListBookings
+	// to avoid loading the entire bookings table + 3 preloads on every dashboard load.
+	recentBookings, err := s.repo.RecentBookings(10)
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
@@ -924,6 +966,6 @@ func (s *AnalyticsService) Dashboard() (map[string]interface{}, error) {
 		"active_trips":         activeTrips,
 		"ai_usage_stats":       aiLogs,
 		"payment_success_rate": fmt.Sprintf("%.2f%%", successRate),
-		"customer_activity":    bookings,
+		"customer_activity":    recentBookings,
 	}, nil
 }

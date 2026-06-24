@@ -5,7 +5,6 @@ Target server:
 - Host: `postgresql.rozzi.my.id`
 - IP: `68.183.224.98`
 - PostgreSQL: already running on the same server
-- Temporary OpenClaw URL: `http://postgresql.rozzi.my.id:8000/v1/responses`
 
 ## 1. Prepare Server
 
@@ -72,12 +71,13 @@ DATABASE_URL=
 
 JWT_SECRET=change_this_to_a_long_random_secret
 
-OPENCLAW_API_KEY=
-OPENCLAW_BASE_URL=http://127.0.0.1:8000/v1/responses
+AI_API_KEY=your_provider_key
+AI_BASE_URL=https://api.openai.com/v1
+AI_MODEL=gpt-4o-mini
 ```
 
-Because backend, PostgreSQL, and OpenClaw are on the same server, prefer
-`127.0.0.1` internally. Use `postgresql.rozzi.my.id` only when connecting from
+Because backend and PostgreSQL are on the same server, prefer
+`127.0.0.1` internally for DB connections. Use `postgresql.rozzi.my.id` only when connecting from
 outside the server.
 
 ## 4. Build Backend
@@ -129,23 +129,3 @@ ufw reload
 For production, put Nginx/Caddy in front and expose HTTPS instead of opening
 port `8080` directly.
 
-## 7. OpenClaw On Same Server
-
-If OpenClaw is already running on the server, confirm its port:
-
-```bash
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/v1/responses
-```
-
-Then set:
-
-```env
-OPENCLAW_BASE_URL=http://127.0.0.1:8000/v1/responses
-```
-
-If OpenClaw runs on another port/path, update `OPENCLAW_BASE_URL` and restart:
-
-```bash
-systemctl restart vero-travel-api
-```

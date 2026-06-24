@@ -87,6 +87,31 @@ type TripListQuery struct {
 	Offset        int    `form:"offset"`
 }
 
+// ListQuery is a generic pagination query for list endpoints (bookings, logs, etc.).
+type ListQuery struct {
+	Limit  int `form:"limit"`
+	Offset int `form:"offset"`
+}
+
+// DefaultListLimit is the default page size when no limit is provided.
+const DefaultListLimit = 50
+
+// MaxListLimit is the maximum page size allowed to prevent excessive memory usage.
+const MaxListLimit = 200
+
+// Normalize clamps Limit and Offset to safe bounds and applies defaults.
+func (q *ListQuery) Normalize() {
+	if q.Limit <= 0 {
+		q.Limit = DefaultListLimit
+	}
+	if q.Limit > MaxListLimit {
+		q.Limit = MaxListLimit
+	}
+	if q.Offset < 0 {
+		q.Offset = 0
+	}
+}
+
 type UploadResponse struct {
 	URL      string `json:"url"`
 	Filename string `json:"filename"`

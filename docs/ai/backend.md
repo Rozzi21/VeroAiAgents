@@ -8,7 +8,7 @@ Dokumen ini menjelaskan lapisan backend Go: service layer, logika bisnis inti, m
 |---|---|
 | `backend/cmd/server/main.go` | Entry point, wiring dependency, graceful shutdown |
 | `backend/internal/services/services.go` | SEMUA service dalam satu file (~960 baris) |
-| `backend/internal/ai/openclaw.go` | Klien AI OpenAI-compatible + fallback lokal |
+| `backend/internal/ai/ai_client.go` | Klien AI OpenAI-compatible + fallback lokal |
 | `backend/internal/mcp/tools.go` | Katalog definisi tool MCP |
 | `backend/internal/events/bus.go` | Event bus in-memory untuk SSE |
 | `backend/internal/auth/` | JWTService, cookie refresh, audit log |
@@ -57,11 +57,11 @@ Poin penting:
 6. Simpan pesan assistant, refresh memory summary, publish `workflow_completed`.
 7. `selectRecommendedPackages()` memilih hingga 3 paket via scoring kata kunci.
 
-Memory management: `refreshMemorySummary()` membuat ringkasan percakapan setelah >= `AI_MEMORY_SUMMARY_AFTER` (default 12) pesan, dibatasi `AI_MEMORY_MAX_CHARS` (default 1800).
+Memory management: `refreshMemorySummary()` membuat ringkasan percakapan setelah >= `AI_MEMORY_SUMMARY_AFTER` (default 12) pesan, dibatasi `AI_MEMORY_MAX_CHARS` (default 1800). Alih-alih memuat SEMUA pesan sesi, method ini memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi berdasarkan `AIMemoryMaxChars / 200`), lalu memotong string ke maksimum karakter. Ini menghindari loading ribuan row pada sesi panjang.
 
 ### MCPService
 
-`Execute()` menjalankan tool dengan **retry 3x**, mencatat ke `ToolCall` + `AILog`, lalu publish event `mcp_tool_executed`. Semua tool saat ini **mock** (`mock()` mengembalikan data dummy). Katalog di `mcp/tools.go` punya field `Enabled` per-tool; `ActiveCatalog()` mengembalikan tool yang aktif saja.
+`Execute()` menjalankan tool dengan **retry 3x**, lalu publish event `mcp_tool_executed`. Persistensi `ToolCall` + `AILog` dilakukan **asinkron** via goroutine agar tidak memblokir workflow chat (~8 DB write per request dipindah ke background). Goroutine ini kini melakukan **error logging via audit log** (`auth.LogSecurity` dengan event `tool_call_persist_failed` / `ai_log_persist_failed`) dan **single retry** (500ms delay) bila persistensi gagal, agar log tidak hilang diam-diam. Semua tool saat ini **mock** (`mock()` mengembalikan data dummy). Katalog di `mcp/tools.go` punya field `Enabled` per-tool; `ActiveCatalog()` mengembalikan tool yang aktif saja.
 
 ### TripService
 
@@ -78,7 +78,7 @@ CRUD trip + transformasi DTO. Pola penting:
 
 ### AnalyticsService
 
-`Dashboard()` mengagregasi metrik via query GORM langsung (`db.Model().Count()`, `Select("COALESCE(SUM...)")`): total bookings, revenue, active trips, AI usage, payment success rate.
+`Dashboard()` mengagregasi metrik via query GORM langsung (`db.Model().Count()`, `Select("COALESCE(SUM...)")`): total bookings, revenue, active trips, AI usage, payment success rate. Untuk aktivitas customer terbaru, memakai `RecentBookings(10)` (tanpa preload Payments) alih-alih `ListBookings()` agar query dashboard ringan — tidak memuat seluruh tabel booking + 3 preloads.
 
 ## Mekanisme Realtime (Event Bus + SSE)
 
@@ -106,11 +106,11 @@ Catatan: N8N (eksternal) yang berperan sebagai automation/scheduler di luar apli
 
 | Integrasi | Lokasi | Fungsi | Fallback |
 |---|---|---|---|
-| AI Provider (OpenAI-compatible / OpenClaw) | `ai/openclaw.go` | Generasi respons chat via `POST {AI_BASE_URL}/chat/completions` | Bila `AI_API_KEY` kosong atau gagal -> respons lokal |
+| AI Provider (OpenAI-compatible) | `ai/ai_client.go` | Generasi respons chat via `POST {AI_BASE_URL}/chat/completions` | Bila `AI_API_KEY` kosong atau gagal -> respons lokal |
 | DOKU (payment gateway) | `services.go` PaymentService | Webhook pembayaran, verifikasi HMAC-SHA256 | Bila `DOKU_SECRET` kosong, signature tidak diverifikasi |
 | N8N (automation) | `services.go` `triggerN8N()` | Webhook pasca-pembayaran (`payment_success`) | Bila `N8N_WEBHOOK` kosong, di-skip |
 
-### Klien AI (`ai/openclaw.go`)
+### Klien AI (`ai/ai_client.go`)
 
 - `NewClient()` set default: baseURL `https://api.openai.com/v1`, model `gpt-4o-mini`, timeout 35s.
 - `Generate()`: bila API key kosong -> langsung return fallback. Jika ada key -> POST ke `/chat/completions`.

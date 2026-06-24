@@ -79,7 +79,7 @@ Modul Go: `github.com/rozzi/vero-ai-travel-agents/backend`. Pola umum: `Handler 
 
 ### `internal/ai`
 - Tujuan: klien HTTP ke provider OpenAI-compatible (`/chat/completions`) dengan fallback lokal bila API key kosong/gagal.
-- File penting: [`backend/internal/ai/openclaw.go`](../../backend/internal/ai/openclaw.go)
+- File penting: [`backend/internal/ai/ai_client.go`](../../backend/internal/ai/ai_client.go)
 - Dipakai oleh: `services` (AIService).
 
 ### `internal/mcp`

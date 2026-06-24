@@ -119,9 +119,14 @@ File:
 |---|---|
 | `FirstOrCreateUser` | Idempotent create (dipakai guest chat) |
 | `ListTrips(query)` | List trip dengan filter `category`, `status`, `search`, `published_only`, `limit`, `offset` |
+| `ListBookings(query)` | List booking dengan pagination `Limit`/`Offset` + preload User, Trip, Payments |
+| `RecentBookings(limit)` | Booking terbaru (tanpa preload Payments) untuk dashboard analytics — ringan |
+| `ListAILogs(query)` | List AILog dengan pagination `Limit`/`Offset` |
+| `ListToolCalls(query)` | List ToolCall dengan pagination `Limit`/`Offset` |
 | `FindTripBySlugOrID` | Cari trip by slug atau UUID (dipakai endpoint paket publik) |
 | `ReplaceTripItineraries` | **Hapus lalu buat ulang** semua itinerary trip dalam satu transaksi (pola replace-all, bukan upsert) |
 | `ListRecentChatMessages(id, limit)` | N pesan terakhir untuk konteks AI |
+| `TailChatMessages(id, limit)` | N pesan terakhir (oldest-first) untuk refresh memory summary — efisien untuk sesi panjang |
 | `CreateAuthSession` | Simpan sesi refresh saat login/refresh |
 | `FindActiveSessionByJTI` | Sesi yang belum revoked & belum expired |
 | `RevokeSessionByJTI` | Revoke satu sesi (rotation saat refresh) |
@@ -129,6 +134,15 @@ File:
 
 ### Pola transaksi
 `ReplaceTripItineraries` memakai transaksi GORM untuk delete + insert. Operasi multi-langkah yang harus atomik mengikuti pola ini.
+
+### Pagination (`dto.ListQuery`)
+
+Endpoint list bookings, logs, dan tool-calls memakai `dto.ListQuery` (`Limit`, `Offset`) yang dinormalisasi via `Normalize()`:
+- Default `Limit` = 50 (`DefaultListLimit`).
+- Maksimum `Limit` = 200 (`MaxListLimit`) untuk mencegah memory berlebih.
+- `Offset` negatif di-set ke 0.
+
+Handler memanggil `c.ShouldBindQuery(&query)` lalu `query.Normalize()` sebelum meneruskan ke service/repo. `TripListQuery` punya `Limit`/`Offset` sendiri tapi belum memakai `Normalize()` (backward-compatible, limit 0 = tanpa batas).
 
 ## Catatan untuk Agent
 

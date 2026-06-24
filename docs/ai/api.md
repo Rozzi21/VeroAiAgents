@@ -151,7 +151,7 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 | Method | Path | Akses | Fungsi |
 |---|---|---|---|
 | POST | `/api/v1/bookings` | 🔒 | Buat booking (status pending/waiting_payment) |
-| GET | `/api/v1/bookings` | 👮 | Daftar semua booking |
+| GET | `/api/v1/bookings` | 👮 | Daftar semua booking (pagination `limit`/`offset`) |
 | GET | `/api/v1/bookings/:id` | 🔒 | Detail booking |
 | POST | `/api/v1/payments/create` | 🔒 | Buat payment intent (QRIS/VA) |
 | GET | `/api/v1/payments/:id` | 🔒 | Detail payment |
@@ -166,10 +166,12 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 
 | Method | Path | Fungsi |
 |---|---|---|
-| GET | `/api/v1/logs` | Daftar AILog |
+| GET | `/api/v1/logs` | Daftar AILog (pagination `limit`/`offset`) |
 | GET | `/api/v1/logs/workflows` | Alias ke logs (workflow) |
-| GET | `/api/v1/logs/tool-calls` | Daftar ToolCall MCP |
+| GET | `/api/v1/logs/tool-calls` | Daftar ToolCall MCP (pagination `limit`/`offset`) |
 | GET | `/api/v1/analytics/dashboard` | Statistik agregat (lihat `AnalyticsService.Dashboard`) |
+
+Query `ListQuery` (bookings, logs, tool-calls): `limit` (default 50, maks 200), `offset` (default 0). Dipakai untuk pagination sederhana.
 
 ## Server-Sent Events (SSE)
 
