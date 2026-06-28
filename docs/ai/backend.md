@@ -7,7 +7,8 @@ Dokumen ini menjelaskan lapisan backend Go: service layer, logika bisnis inti, m
 | Path | Isi |
 |---|---|
 | `backend/cmd/server/main.go` | Entry point, wiring dependency, graceful shutdown |
-| `backend/internal/services/services.go` | SEMUA service dalam satu file (~960 baris) |
+| `backend/internal/services/` | Service layer, dipecah per-domain (lihat di bawah) |
+| `backend/internal/services/services.go` | `Services` struct, `New()` (wiring), tipe bersama |
 | `backend/internal/ai/ai_client.go` | Klien AI OpenAI-compatible + fallback lokal |
 | `backend/internal/mcp/tools.go` | Katalog definisi tool MCP |
 | `backend/internal/events/bus.go` | Event bus in-memory untuk SSE |
@@ -15,7 +16,21 @@ Dokumen ini menjelaskan lapisan backend Go: service layer, logika bisnis inti, m
 
 ## Service Layer
 
-Semua service didefinisikan di `backend/internal/services/services.go` dan di-wiring di `services.New()`. Container `Services` berisi: `Auth`, `AI`, `MCP`, `Trips`, `Bookings`, `Payments`, `Logs`, `Analytics`.
+Service di-wiring di `services.New()` (`services.go`). Container `Services` berisi: `Auth`, `AI`, `MCP`, `Trips`, `Bookings`, `Payments`, `Logs`, `Analytics`.
+
+Sejak refactor 25 Jun 2026, kode dipecah **per-domain dalam satu package `services`** (bukan lagi satu file monolitik). API publik tidak berubah:
+
+| File | Isi |
+|---|---|
+| `services.go` | `Services` struct, `New()`, `AuthRequestMeta`, `AuthIssueResult`, error vars |
+| `auth_service.go` | `AuthService` (Register, CreateStaff, Login, Refresh, Logout, Me, GuestUser, issueSession) |
+| `ai_service.go` | `AIService` (Chat, generateWithAI, summarizeWorkflow, katalog & rekomendasi paket, memory summary) |
+| `mcp_service.go` | `MCPService` (Execute, mock) + `ToolResult` |
+| `trip_service.go` | `TripService` + `buildTripFromRequest`, `buildItineraries` |
+| `booking_service.go` | `BookingService` + `tripAdultPrice`/`tripChildPrice` |
+| `payment_service.go` | `PaymentService` (Create, Find, Webhook, verifySignature, triggerN8N) |
+| `log_service.go` / `analytics_service.go` | `LogService` / `AnalyticsService` |
+| `helpers.go` | util bersama: `slugify`, `normalize`, `firstNonEmpty`, `firstNonZero`, `parseDate` |
 
 Pola umum: tiap service adalah struct dengan dependency `repo` (repository), dan opsional `bus` (event), `cfg` (config), `jwt`, `mcp`, `client` (AI). Dependency di-inject manual via `services.New()`.
 
@@ -52,7 +67,7 @@ Poin penting:
    - `generating_itinerary` -> `generate_itinerary`
    - `create_payment` SENGAJA DINONAKTIFKAN (lihat known-issues.md)
 3. Ambil katalog paket published dari DB (`publishedPackagesForAI`, limit 20).
-4. Kirim prompt + workflow context + memory + N pesan terakhir ke LLM via `generateWithAI()`.
+4. Kirim ke LLM via `generateWithAI()` dengan urutan pesan `system → catalog → memory → workflow_context → recent_messages`. **Optimasi token (25 Jun 2026):** prompt user tidak lagi di-append ganda (cukup dari `recent_messages`), dan workflow context diringkas via `summarizeWorkflow()` (hanya `tool`+`status`).
 5. Bila AI gagal/empty -> fallback response lokal, log kegagalan.
 6. Simpan pesan assistant, refresh memory summary, publish `workflow_completed`.
 7. `selectRecommendedPackages()` memilih hingga 3 paket via scoring kata kunci.
@@ -72,9 +87,10 @@ CRUD trip + transformasi DTO. Pola penting:
 
 ### BookingService & PaymentService
 
-- `BookingService.Create()`: booking baru selalu `booking_status=pending`, `payment_status=waiting_payment`.
-- `PaymentService.Create()`: payment intent dengan `ExternalID=DOKU-<uuid>`, expired 15 menit.
-- `PaymentService.Webhook()`: verifikasi HMAC-SHA256 (bila `DOKU_SECRET` di-set), update status, dan bila `paid`/`settlement` -> publish `booking_confirmed` + trigger N8N.
+- `BookingService.Create()`: booking baru selalu `booking_status=pending`, `payment_status=waiting_payment`. **Harga dihitung server-side** (SEC-3): `tripAdultPrice(trip)*adult_pax + tripChildPrice(trip)*child_pax` (menghormati diskon), bukan dari body client.
+- `BookingService.Find(id, userID, isStaff)` / `PaymentService.Find(...)`: cek kepemilikan (SEC-2). Non-staff hanya bisa akses miliknya (repo `FindBookingForUser`/`FindPaymentForUser`).
+- `PaymentService.Create()`: payment intent dengan `ExternalID=DOKU-<uuid>`, expired 15 menit. `Amount` diambil dari `Booking.TotalPrice` (SEC-3), bukan dari body.
+- `PaymentService.Webhook()`: bila `DOKU_SECRET` di-set, signature **wajib** valid (SEC-4); di production secret wajib ada. Validasi `amount` (bila dikirim) + idempotency (status `paid`/`settlement` tidak bisa turun/diproses ulang). Bila `paid`/`settlement` -> publish `booking_confirmed` + trigger N8N.
 
 ### AnalyticsService
 
@@ -107,8 +123,8 @@ Catatan: N8N (eksternal) yang berperan sebagai automation/scheduler di luar apli
 | Integrasi | Lokasi | Fungsi | Fallback |
 |---|---|---|---|
 | AI Provider (OpenAI-compatible) | `ai/ai_client.go` | Generasi respons chat via `POST {AI_BASE_URL}/chat/completions` | Bila `AI_API_KEY` kosong atau gagal -> respons lokal |
-| DOKU (payment gateway) | `services.go` PaymentService | Webhook pembayaran, verifikasi HMAC-SHA256 | Bila `DOKU_SECRET` kosong, signature tidak diverifikasi |
-| N8N (automation) | `services.go` `triggerN8N()` | Webhook pasca-pembayaran (`payment_success`) | Bila `N8N_WEBHOOK` kosong, di-skip |
+| DOKU (payment gateway) | `payment_service.go` PaymentService | Webhook pembayaran, verifikasi HMAC-SHA256 | Bila `DOKU_SECRET` kosong: ditolak di production, diterima di dev (SEC-4) |
+| N8N (automation) | `payment_service.go` `triggerN8N()` | Webhook pasca-pembayaran (`payment_success`) | Bila `N8N_WEBHOOK` kosong, di-skip |
 
 ### Klien AI (`ai/ai_client.go`)
 
@@ -118,7 +134,7 @@ Catatan: N8N (eksternal) yang berperan sebagai automation/scheduler di luar apli
 
 ## Pola Penting untuk Diingat
 
-1. **Semua service di satu file** (`services.go`). Saat menambah fitur, ikuti pola struct + method yang ada.
+1. **Service dipecah per-domain** dalam package `services` (mis. `auth_service.go`, `payment_service.go`). Saat menambah fitur, taruh di file domain yang sesuai (atau buat file baru), bukan menumpuk di `services.go`. Ikuti pola struct + method yang ada.
 2. **Event-driven via publish**: aksi penting (trip_created, booking_created, payment_updated, dll) selalu `bus.Publish()`.
 3. **Fallback-first untuk integrasi eksternal**: tiap integrasi punya jalur degradasi supaya demo tetap jalan.
 4. **Logging audit untuk auth**: tiap aksi auth memanggil `auth.LogSecurity()`.

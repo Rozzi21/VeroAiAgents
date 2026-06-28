@@ -5,10 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 )
+
+// maxAIResponseBytes caps the AI provider response body we will decode (SEC-9).
+const maxAIResponseBytes = 1 << 20 // 1 MiB
 
 type Client struct {
 	APIKey      string
@@ -87,8 +91,11 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 	}
 	defer res.Body.Close()
 
+	// SEC-9: cap how much of the provider response we will read/decode so a
+	// runaway or malicious response cannot exhaust memory.
+	limited := io.LimitReader(res.Body, maxAIResponseBytes)
 	var raw map[string]interface{}
-	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
+	if err := json.NewDecoder(limited).Decode(&raw); err != nil {
 		return CompletionResponse{}, err
 	}
 

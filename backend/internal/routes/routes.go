@@ -21,6 +21,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 		api.POST("/chat", h.GuestChat)
 
 		authGroup := api.Group("/auth")
+		authGroup.Use(middlewares.AuthRateLimit())
 		{
 			authGroup.POST("/register", h.Register)
 			authGroup.POST("/login", h.Login)
@@ -51,6 +52,8 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 				admin.DELETE("/packages/:id", h.DeleteTrip)
 				admin.POST("/uploads", h.UploadTripMedia)
 				admin.GET("/dashboard", h.Analytics)
+				// Staff provisioning is admin-only (SEC-1).
+				admin.POST("/users", middlewares.Role(models.RoleAdmin), h.AdminCreateUser)
 			}
 
 			protected.DELETE("/trips/:id", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.DeleteTrip)

@@ -6,7 +6,7 @@ Baca dokumen sesuai urutan di bawah sebelum mulai mengerjakan tugas apa pun.
 
 ## Apa Itu Project Ini (1 Paragraf)
 
-VeroAiTravelAgents adalah platform travel berbasis AI ("Vero Travel" / "TravelOS"), berupa monorepo dengan tiga aplikasi independen: backend Go (Gin + GORM + PostgreSQL) sebagai orkestrator AI/MCP + REST API + SSE realtime, `frontend/` (Next.js) untuk chat AI pelanggan, dan `backoffice-frontend/` (Next.js) untuk operator/admin mengelola paket trip. Inti AI ada di `backend/internal/services/services.go`. Tool MCP masih mock, integrasi LLM nyata sudah ada dengan fallback lokal, dan tool `create_payment` sengaja dinonaktifkan di workflow chat.
+VeroAiTravelAgents adalah platform travel berbasis AI ("Vero Travel" / "TravelOS"), berupa monorepo dengan tiga aplikasi independen: backend Go (Gin + GORM + PostgreSQL) sebagai orkestrator AI/MCP + REST API + SSE realtime, `frontend/` (Next.js) untuk chat AI pelanggan, dan `backoffice-frontend/` (Next.js) untuk operator/admin mengelola paket trip. Inti AI ada di `backend/internal/services/ai_service.go` (service layer dipecah per-domain dalam package `services`). Tool MCP masih mock, integrasi LLM nyata sudah ada dengan fallback lokal, dan tool `create_payment` sengaja dinonaktifkan di workflow chat.
 
 ## Urutan Baca untuk Agent Baru
 

@@ -48,7 +48,7 @@ Modul Go: `github.com/rozzi/vero-ai-travel-agents/backend`. Pola umum: `Handler 
 
 ### `internal/services`
 - Tujuan: SEMUA logika bisnis. Berisi `AuthService`, `MCPService`, `AIService`, `TripService`, `BookingService`, `PaymentService`, `LogService`, `AnalyticsService`.
-- File penting: [`backend/internal/services/services.go`](../../backend/internal/services/services.go) (file tunggal ~930 baris)
+- File penting: dipecah per-domain dalam package `services` — `services.go` (wiring `New()` + tipe bersama), `auth_service.go`, `ai_service.go`, `mcp_service.go`, `trip_service.go`, `booking_service.go`, `payment_service.go`, `log_service.go`, `analytics_service.go`, `helpers.go`.
 - Bergantung pada: `repositories`, `auth`, `ai`, `mcp`, `events`, `config`, `dto`, `models`.
 - Dipakai oleh: `handlers`.
 - Catatan: ini file terpenting & terbesar. Lihat [backend.md](backend.md) untuk rincian tiap service.
@@ -85,7 +85,7 @@ Modul Go: `github.com/rozzi/vero-ai-travel-agents/backend`. Pola umum: `Handler 
 ### `internal/mcp`
 - Tujuan: katalog definisi tool MCP (metadata + flag `Enabled`).
 - File penting: [`backend/internal/mcp/tools.go`](../../backend/internal/mcp/tools.go)
-- Dipakai oleh: referensi katalog. Eksekusi tool sebenarnya (mock) ada di `MCPService` dalam `services.go`.
+- Dipakai oleh: referensi katalog. Eksekusi tool sebenarnya (mock) ada di `MCPService` dalam `mcp_service.go`.
 
 ### `internal/events`
 - Tujuan: event bus in-memory pub/sub (channel buffered 32, publish non-blocking) untuk SSE.
@@ -103,7 +103,7 @@ Modul Go: `github.com/rozzi/vero-ai-travel-agents/backend`. Pola umum: `Handler 
 - Dipakai oleh: `handlers`, `services`, `repositories` (query struct).
 
 ### `internal/payments`
-- Tujuan: referensi DOKU. Logika utama pembayaran ada di `PaymentService` (services.go).
+- Tujuan: referensi DOKU. Logika utama pembayaran ada di `PaymentService` (`payment_service.go`).
 
 ---
 

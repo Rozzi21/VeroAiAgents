@@ -15,7 +15,7 @@ Handler -> Service -> Repository -> GORM/PostgreSQL
 ```
 
 - **Handler** (`backend/internal/handlers/`): hanya parsing request, panggil service, format response. TIDAK boleh akses DB langsung atau berisi logika bisnis.
-- **Service** (`backend/internal/services/services.go`): semua logika bisnis. TIDAK boleh menyentuh `*gin.Context`.
+- **Service** (`backend/internal/services/`): semua logika bisnis, dipecah per-domain (`auth_service.go`, `ai_service.go`, `payment_service.go`, dst — satu package `services`). TIDAK boleh menyentuh `*gin.Context`. Saat menambah logika, taruh di file domain yang sesuai; jangan menumpuk semuanya di `services.go` (yang kini hanya berisi `Services` struct + `New()` + tipe bersama).
 - **Repository** (`backend/internal/repositories/`): satu-satunya lapisan yang menyentuh `r.DB` (GORM).
 
 DILARANG: handler memanggil repository langsung, atau service menerima `*gin.Context`.

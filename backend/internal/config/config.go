@@ -44,6 +44,7 @@ type Config struct {
 	DOKUClientID         string
 	DOKUSecret           string
 	N8NWebhook           string
+	CORSAllowedOrigins   []string
 }
 
 func Load() Config {
@@ -80,6 +81,7 @@ func Load() Config {
 		DOKUClientID:         os.Getenv("DOKU_CLIENT_ID"),
 		DOKUSecret:           os.Getenv("DOKU_SECRET"),
 		N8NWebhook:           os.Getenv("N8N_WEBHOOK"),
+		CORSAllowedOrigins:   parseCSVEnv("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"}),
 	}
 
 	if cfg.DatabaseURL == "" || strings.Contains(cfg.DatabaseURL, "YOUR_PASSWORD") {
@@ -99,11 +101,15 @@ func Load() Config {
 
 // Validate enforces production-safety invariants. In production the JWT secret
 // must be explicitly set to a non-default, non-empty value; otherwise tokens
-// could be forged using the well-known development secret.
+// could be forged using the well-known development secret. The DOKU webhook
+// secret is also required so payment webhooks cannot be forged (SEC-4).
 func (c Config) Validate() error {
 	if c.AppEnv == "production" {
 		if c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret {
 			return errors.New("JWT_SECRET must be set to a strong, non-default value when APP_ENV=production")
+		}
+		if c.DOKUSecret == "" {
+			return errors.New("DOKU_SECRET must be set when APP_ENV=production to verify payment webhooks")
 		}
 	}
 	return nil
@@ -138,6 +144,26 @@ func getFloat(key string, fallback float64) float64 {
 		return fallback
 	}
 	return parsed
+}
+
+// parseCSVEnv reads a comma-separated env var into a trimmed slice, falling back
+// to the provided default when the var is empty.
+func parseCSVEnv(key string, fallback []string) []string {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	if len(result) == 0 {
+		return fallback
+	}
+	return result
 }
 
 func getBoolEnv(key string, fallback bool) bool {

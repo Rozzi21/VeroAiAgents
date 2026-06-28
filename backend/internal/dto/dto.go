@@ -6,7 +6,16 @@ type RegisterRequest struct {
 	Name     string `json:"name" binding:"required,min=2"`
 	Email    string `json:"email" binding:"required,email"`
 	Password string `json:"password" binding:"required,min=8"`
-	Role     string `json:"role"`
+}
+
+// AdminCreateUserRequest is used by the protected admin endpoint to provision
+// staff (operator/admin) accounts. Unlike public registration, role here is
+// honored because the caller is already authorized as admin.
+type AdminCreateUserRequest struct {
+	Name     string `json:"name" binding:"required,min=2"`
+	Email    string `json:"email" binding:"required,email"`
+	Password string `json:"password" binding:"required,min=8"`
+	Role     string `json:"role" binding:"required,oneof=user operator admin"`
 }
 
 type LoginRequest struct {
@@ -118,19 +127,24 @@ type UploadResponse struct {
 	Size     int64  `json:"size"`
 }
 
+// BookingRequest no longer accepts a client-supplied price (SEC-3). The total
+// is computed server-side from the trip catalog price and the requested pax.
 type BookingRequest struct {
-	TripID     uuid.UUID `json:"trip_id" binding:"required"`
-	TotalPrice float64   `json:"total_price" binding:"required"`
+	TripID   uuid.UUID `json:"trip_id" binding:"required"`
+	AdultPax int       `json:"adult_pax"`
+	ChildPax int       `json:"child_pax"`
 }
 
+// PaymentCreateRequest no longer accepts a client-supplied amount (SEC-3). The
+// amount is derived from the related booking's server-computed total.
 type PaymentCreateRequest struct {
 	BookingID     uuid.UUID `json:"booking_id" binding:"required"`
 	PaymentMethod string    `json:"payment_method" binding:"required,oneof=QRIS VA VIRTUAL_ACCOUNT"`
-	Amount        float64   `json:"amount" binding:"required"`
 }
 
 type PaymentWebhookRequest struct {
-	ExternalID string `json:"external_id" binding:"required"`
-	Status     string `json:"status" binding:"required"`
-	Signature  string `json:"signature"`
+	ExternalID string   `json:"external_id" binding:"required"`
+	Status     string   `json:"status" binding:"required"`
+	Signature  string   `json:"signature"`
+	Amount     *float64 `json:"amount"`
 }

@@ -101,9 +101,11 @@ Legenda: 🔓 publik · 🔒 butuh access token · 👮 butuh role operator/admi
 | POST | `/logout` | 🔓 (cookie) | Revoke session + hapus cookie |
 | GET | `/me` | 🔒 | Profil user saat ini |
 
+> Grup `/auth` memakai rate limit per-IP lebih ketat (`AuthRateLimit`, ~5 req/detik) untuk meredam brute force (SEC-7).
+
 Request penting:
-- `register`: `{name, email, password(min 8), role?}` (DTO `RegisterRequest`).
-  - ⚠️ **Celah keamanan aktif (SEC-1):** endpoint publik ini saat ini **menghormati** field `role`, sehingga siapa pun bisa mendaftar sebagai `admin`/`operator`. Ini privilege escalation kritis — lihat `known-issues.md` bagian A. Field `role` seharusnya diabaikan pada jalur register publik.
+- `register`: `{name, email, password(min 8)}` (DTO `RegisterRequest`).
+  - ✅ **SEC-1 sudah diperbaiki:** register publik **selalu** membuat user biasa (`RoleUser`). Field `role` dihapus dari DTO dan diabaikan total. Pembuatan operator/admin lewat endpoint admin terproteksi (lihat tabel Admin: `POST /admin/users`).
 - `login`: `{email|username, password}` (DTO `LoginRequest`).
 - `refresh`/`logout`: tanpa body; refresh token dibaca dari cookie HttpOnly.
 - Response auth: `{access_token, token_type:"Bearer", expires_in, user}` (user di-omit pada refresh).
@@ -142,10 +144,14 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 | POST | `/packages` | Buat paket |
 | PUT | `/packages/:id` | Update paket / ubah status |
 | DELETE | `/packages/:id` | Hapus paket |
-| POST | `/uploads` | Upload media gambar (FormData `file`, maks per file; ext jpg/jpeg/png/webp/gif) |
+| POST | `/uploads` | Upload media gambar (FormData `file`, maks 5 MiB; ext jpg/jpeg/png/webp/gif + sniff MIME asli) |
 | GET | `/dashboard` | Analytics dashboard |
+| POST | `/users` | **Admin-only** — buat akun staff (operator/admin) |
 
 `admin/packages` dan `trips` memetakan ke handler yang sama (`ListTrips`/`CreateTrip`/`UpdateTrip`/`DeleteTrip`). Beda utama: grup `/admin` memaksa role operator/admin untuk semua verb termasuk GET.
+
+- `POST /admin/users` (guard `Role(admin)`, lebih ketat dari grup admin biasa): `{name, email, password(min 8), role(oneof user|operator|admin)}` (DTO `AdminCreateUserRequest`) → `AuthService.CreateStaff()`. Ini satu-satunya jalur sah pembuatan operator/admin pasca SEC-1.
+- Upload (`POST /admin/uploads`): selain ekstensi, content-type asli diverifikasi via `http.DetectContentType` (512 byte pertama) dan ukuran dibatasi 5 MiB (SEC-5).
 
 ### Bookings & Payments
 
@@ -158,14 +164,14 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 | GET | `/api/v1/payments/:id` | 🔒 | Detail payment |
 | POST | `/api/v1/payments/webhook` | 🔓 | Webhook DOKU (verifikasi HMAC-SHA256) |
 
-> ⚠️ **Catatan keamanan (lihat `known-issues.md` bagian A):**
-> - `GET /bookings/:id` & `GET /payments/:id` **tidak** memeriksa kepemilikan (IDOR, SEC-2).
-> - `total_price` booking & `amount` payment diambil mentah dari client tanpa validasi server (tampering, SEC-3).
-> - `webhook` menerima status tanpa signature bila `DOKU_SECRET` kosong (SEC-4).
+> ✅ **Catatan keamanan (SEC-2/3/4 sudah diperbaiki, lihat `known-issues.md` bagian A):**
+> - `GET /bookings/:id` & `GET /payments/:id` kini cek kepemilikan: user non-staff hanya bisa akses miliknya; lainnya balas not found (SEC-2).
+> - Harga booking & amount payment **dihitung server-side**, tidak menerima nominal dari client (SEC-3).
+> - `webhook` menolak request tanpa signature valid bila `DOKU_SECRET` ter-set; di production `DOKU_SECRET` wajib (SEC-4).
 
-- `booking` request: `{trip_id, total_price}` (DTO `BookingRequest`).
-- `payment create` request: `{booking_id, payment_method(oneof QRIS|VA|VIRTUAL_ACCOUNT), amount}` (DTO `PaymentCreateRequest`).
-- `webhook` request: `{external_id, status, signature?}`. Signature juga bisa via header `X-Doku-Signature`. Verifikasi: `HMAC-SHA256(external_id + status, DOKU_SECRET)`.
+- `booking` request: `{trip_id, adult_pax?, child_pax?}` (DTO `BookingRequest`). `total_price` **dihapus** — total dihitung server-side dari harga paket (menghormati diskon) × pax. Bila pax tidak diisi, default 1 dewasa.
+- `payment create` request: `{booking_id, payment_method(oneof QRIS|VA|VIRTUAL_ACCOUNT)}` (DTO `PaymentCreateRequest`). `amount` **dihapus** — diambil dari `Booking.TotalPrice`.
+- `webhook` request: `{external_id, status, signature?, amount?}`. Signature juga bisa via header `X-Doku-Signature`. Verifikasi: `HMAC-SHA256(external_id + status, DOKU_SECRET)`. Bila `amount` dikirim, harus cocok dengan payment. Idempotency: status `paid`/`settlement` tidak bisa diturunkan/diproses ulang.
 - Saat status `paid`/`settlement`: publish event `booking_confirmed` + trigger webhook N8N.
 
 ### Logs & Analytics (semua 👮)

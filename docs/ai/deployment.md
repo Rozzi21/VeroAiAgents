@@ -58,8 +58,9 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `DOKU_CLIENT_ID` | _(kosong)_ | Client ID DOKU |
-| `DOKU_SECRET` | _(kosong)_ | Secret untuk verifikasi signature webhook HMAC-SHA256 |
+| `DOKU_SECRET` | _(kosong)_ | Secret verifikasi signature webhook HMAC-SHA256. **Wajib di production** — `Config.Validate()` menolak start bila kosong saat `APP_ENV=production` (SEC-4) |
 | `N8N_WEBHOOK` | _(kosong)_ | URL webhook N8N untuk otomasi pasca-pembayaran |
+| `CORS_ALLOWED_ORIGINS` | _(localhost dev)_ | Daftar origin diizinkan CORS, dipisah koma (mis. `https://app.vero.com,https://admin.vero.com`). Fallback ke `http://localhost:3000,:3001,:5173` bila kosong (SEC-8) |
 
 
 ### Environment Variables (Frontend)
@@ -143,7 +144,7 @@ flowchart LR
 ```
 
 - **Uploads**: backend menyimpan file ke `./uploads/trips/` dan menyajikannya via `router.Static("/uploads", ...)`. Di server, folder ini perlu persistensi (volume) dan kepemilikan yang benar (`chown www-data` di panduan systemd).
-- **CORS**: backend mengizinkan origin `http://localhost:3000`, `:3001`, `:5173` (`middlewares/middlewares.go` → `CORS()`). Tambahkan origin production di sini saat deploy.
+- **CORS**: origin dibaca dari env `CORS_ALLOWED_ORIGINS` (CSV) via `config.go` lalu diteruskan ke `middlewares.CORS(cfg.CORSAllowedOrigins)`. Fallback ke `http://localhost:3000`, `:3001`, `:5173` bila env kosong. Set origin production via env saat deploy (tidak perlu ubah kode lagi — SEC-8).
 
 ## Service Pihak Ketiga
 
@@ -159,7 +160,7 @@ flowchart LR
 1. `APP_ENV=production`.
 2. `JWT_SECRET` panjang dan acak (backend menolak start jika tidak).
 3. `DATABASE_PASSWORD` kuat; pertimbangkan `DATABASE_SSLMODE=require`.
-4. `DOKU_SECRET` diisi agar verifikasi signature webhook aktif (jika kosong, verifikasi dilewati).
+4. `DOKU_SECRET` **wajib** diisi di production (backend menolak start bila kosong saat `APP_ENV=production`); webhook tanpa signature valid ditolak (SEC-4).
 5. HTTPS via reverse proxy; set `JWT_COOKIE_SECURE=true`.
 6. Jika frontend beda domain dari API: `JWT_COOKIE_SAME_SITE=None` (otomatis Secure) + tambahkan origin ke CORS.
 7. Volume persisten untuk `uploads/`.

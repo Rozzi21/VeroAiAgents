@@ -47,7 +47,7 @@ Lapisan dan tanggung jawabnya:
 - **`internal/database`** — koneksi GORM (retry 5x, pooling), `AutoMigrate`, migrasi legacy, health check.
 - **`internal/models`** — skema GORM (entity).
 - **`internal/repositories`** — akses data (CRUD). Satu-satunya lapisan yang menyentuh GORM langsung (kecuali Analytics yang query agregat lewat `repo.DB`).
-- **`internal/services`** — logika bisnis. Semua service ada di satu file `services.go`.
+- **`internal/services`** — logika bisnis, dipecah per-domain dalam satu package (`auth_service.go`, `ai_service.go`, `mcp_service.go`, `trip_service.go`, `booking_service.go`, `payment_service.go`, `log_service.go`, `analytics_service.go`, `helpers.go`); `services.go` menyisakan wiring `New()` + tipe bersama.
 - **`internal/handlers`** — HTTP handler + dokumentasi OpenAPI (`docs.go`).
 - **`internal/routes`** — registrasi rute dan penerapan middleware per-grup.
 - **`internal/middlewares`** — cross-cutting concerns.
@@ -158,13 +158,13 @@ Pola frontend (kedua app): **custom hook untuk data/logic** (`use-trip-form.ts`,
 
 ## 6. Keputusan Arsitektur Penting
 
-1. **`create_payment` MCP dinonaktifkan di workflow chat.** Agar AI tidak pernah menyebut QRIS/pembayaran sebelum ada booking sungguhan. Ditandai `Enabled: false` di `internal/mcp/tools.go` dan dikomentari di `internal/services/services.go`. Jangan aktifkan kembali tanpa wiring booking+payment end-to-end.
-2. **Tool MCP masih mock.** `internal/services/services.go` fungsi `mock()` mengembalikan data dummy. Integrasi LLM nyata sudah ada (`internal/ai`) dengan fallback lokal bila `AI_API_KEY` kosong.
+1. **`create_payment` MCP dinonaktifkan di workflow chat.** Agar AI tidak pernah menyebut QRIS/pembayaran sebelum ada booking sungguhan. Ditandai `Enabled: false` di `internal/mcp/tools.go` dan dikomentari di `internal/services/ai_service.go` (langkah workflow `Chat()`). Jangan aktifkan kembali tanpa wiring booking+payment end-to-end.
+2. **Tool MCP masih mock.** `internal/services/mcp_service.go` fungsi `mock()` mengembalikan data dummy. Integrasi LLM nyata sudah ada (`internal/ai`) dengan fallback lokal bila `AI_API_KEY` kosong.
 3. **Guest chat tanpa auth.** `POST /api/v1/chat` membuat user "Guest Traveler" otomatis. Memudahkan demo; tidak butuh login.
 4. **Refresh token sebagai session DB + cookie HttpOnly.** Bukan disimpan di JS. Bisa di-revoke, dirotasi tiap refresh, dengan reuse detection revoke-all.
 5. **Access TTL pendek (15 menit).** Memperkecil dampak XSS; refresh otomatis menangani perpanjangan.
 6. **`WriteTimeout=0`** demi SSE long-lived.
-7. **Semua service di satu file** (`services.go`). Praktis sekarang, tapi technical debt saat tumbuh (lihat [known-issues.md](known-issues.md)).
+7. **Service dipecah per-domain** dalam package `services` (refactor 25 Jun 2026); `services.go` hanya berisi wiring + tipe bersama.
 8. **Envelope respons seragam** dipakai konsisten; frontend bergantung pada `payload.data`.
 
 ## 7. Entry Point Aplikasi

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +20,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/middlewares"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
@@ -106,6 +108,20 @@ func (h *Handler) Me(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "Current user", user)
+}
+
+// AdminCreateUser provisions operator/admin accounts. Guarded by Role(admin).
+func (h *Handler) AdminCreateUser(c *gin.Context) {
+	var req dto.AdminCreateUserRequest
+	if !bind(c, &req) {
+		return
+	}
+	user, err := h.Services.Auth.CreateStaff(req, authRequestMeta(c))
+	if err != nil {
+		utils.BadRequest(c, "Create user failed", gin.H{"detail": err.Error()})
+		return
+	}
+	utils.Success(c, http.StatusCreated, "User created", user)
 }
 
 func (h *Handler) Chat(c *gin.Context) {
@@ -278,7 +294,7 @@ func (h *Handler) GetBooking(c *gin.Context) {
 	if !ok {
 		return
 	}
-	booking, err := h.Services.Bookings.Find(id)
+	booking, err := h.Services.Bookings.Find(id, currentUserID(c), isStaff(c))
 	if err != nil {
 		utils.NotFound(c, "Booking not found")
 		return
@@ -320,7 +336,7 @@ func (h *Handler) GetPayment(c *gin.Context) {
 	if !ok {
 		return
 	}
-	payment, err := h.Services.Payments.Find(id)
+	payment, err := h.Services.Payments.Find(id, currentUserID(c), isStaff(c))
 	if err != nil {
 		utils.NotFound(c, "Payment not found")
 		return
@@ -365,6 +381,9 @@ func (h *Handler) Analytics(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Analytics dashboard", data)
 }
 
+// maxUploadBytes caps a single media upload (SEC-5).
+const maxUploadBytes = 5 << 20 // 5 MiB
+
 func (h *Handler) UploadTripMedia(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -372,10 +391,26 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 		return
 	}
 
+	// SEC-5: enforce a size limit before touching disk.
+	if file.Size <= 0 || file.Size > maxUploadBytes {
+		utils.BadRequest(c, "File too large", gin.H{"max_bytes": maxUploadBytes, "size": file.Size})
+		return
+	}
+
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	allowed := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".webp": true, ".gif": true}
 	if !allowed[ext] {
 		utils.BadRequest(c, "Unsupported media type", gin.H{"extension": ext})
+		return
+	}
+
+	// SEC-5: verify the real content type from the file's magic bytes instead of
+	// trusting the filename extension alone.
+	if detected, err := detectImageContentType(file); err != nil {
+		utils.BadRequest(c, "Unable to read file", gin.H{"detail": err.Error()})
+		return
+	} else if !strings.HasPrefix(detected, "image/") {
+		utils.BadRequest(c, "File content is not a valid image", gin.H{"detected": detected})
 		return
 	}
 
@@ -396,6 +431,22 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 		Filename: filename,
 		Size:     file.Size,
 	})
+}
+
+// detectImageContentType sniffs the first 512 bytes to determine the true MIME
+// type of an uploaded file (SEC-5).
+func detectImageContentType(file *multipart.FileHeader) (string, error) {
+	f, err := file.Open()
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	buf := make([]byte, 512)
+	n, err := f.Read(buf)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	return http.DetectContentType(buf[:n]), nil
 }
 
 func (h *Handler) EventStream(c *gin.Context) {
@@ -463,4 +514,18 @@ func currentUserID(c *gin.Context) uuid.UUID {
 		return uuid.Nil
 	}
 	return id
+}
+
+// isStaff reports whether the current request belongs to an operator/admin.
+// Used for ownership checks: staff may read any resource, others only their own.
+func isStaff(c *gin.Context) bool {
+	value, exists := c.Get(middlewares.ContextRole)
+	if !exists {
+		return false
+	}
+	role, ok := value.(models.Role)
+	if !ok {
+		return false
+	}
+	return role == models.RoleOperator || role == models.RoleAdmin
 }

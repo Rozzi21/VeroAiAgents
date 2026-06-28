@@ -25,7 +25,7 @@ VeroAiTravelAgents/
 │   │   ├── database/              → koneksi GORM, retry, AutoMigrate, health
 │   │   ├── models/models.go       → semua skema GORM (10 entity)
 │   │   ├── repositories/          → akses data (CRUD)
-│   │   ├── services/services.go   → SEMUA business logic (~960 baris)
+│   │   ├── services/              → business logic, dipecah per-domain (*_service.go) + services.go (wiring)
 │   │   ├── handlers/              → HTTP handler + docs.go (OpenAPI)
 │   │   ├── routes/routes.go       → registrasi rute + middleware
 │   │   ├── middlewares/           → Auth, Role, CORS, RateLimit, dll
@@ -66,7 +66,7 @@ VeroAiTravelAgents/
 
 | File | Kapan disentuh |
 |---|---|
-| `backend/internal/services/services.go` | Hampir semua perubahan business logic (auth, AI, trip, booking, payment, analytics) |
+| `backend/internal/services/*_service.go` | Business logic per-domain (auth, AI, trip, booking, payment, analytics); `services.go` untuk wiring/tipe bersama |
 | `backend/internal/handlers/handlers.go` | Menambah/ubah HTTP handler |
 | `backend/internal/routes/routes.go` | Menambah endpoint baru atau ubah middleware |
 | `backend/internal/handlers/docs.go` | WAJIB diperbarui saat rute berubah (OpenAPI manual) |
@@ -105,7 +105,7 @@ VeroAiTravelAgents/
 ## Fakta Penting (Status Saat Ini)
 
 - **Belum ada automated test** di seluruh repo.
-- **Tool MCP masih simulasi/mock** (`services.go` method `mock`).
+- **Tool MCP masih simulasi/mock** (`mcp_service.go` method `mock`).
 - **Frontend customer**: hanya 2 endpoint aktif (chat + detail paket), tanpa auth.
 - **Backoffice**: auth + CRUD paket + upload media aktif; dashboard/orders/settings masih placeholder.
 - **Dependencies frontend**: kedua app Next.js memakai `lucide-react` ^1.18; `framer-motion` sudah dihapus (tidak pernah dipakai). Animasi chat = client-side murni.

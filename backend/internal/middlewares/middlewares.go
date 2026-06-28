@@ -1,8 +1,10 @@
 package middlewares
 
 import (
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -20,9 +22,16 @@ const (
 	ContextEmail  = "email"
 )
 
-func CORS() gin.HandlerFunc {
+// CORS builds the CORS middleware from the configured allow-list (SEC-8). Origins
+// come from CORS_ALLOWED_ORIGINS so production domains can be added without code
+// changes.
+func CORS(allowedOrigins []string) gin.HandlerFunc {
+	origins := allowedOrigins
+	if len(origins) == 0 {
+		origins = []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"}
+	}
 	return cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"},
+		AllowOrigins:     origins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Authorization", "Content-Type", "X-Request-ID", "X-Doku-Signature"},
 		ExposeHeaders:    []string{"Content-Length", "X-Request-ID"},
@@ -53,24 +62,57 @@ func SecureHeaders() gin.HandlerFunc {
 	}
 }
 
+// Recovery logs panic detail (including request id) to the server log but never
+// leaks it to the client (SEC-6 information disclosure).
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
-		utils.Error(c, http.StatusInternalServerError, "Unexpected server error", gin.H{
-			"panic": recovered,
-		})
+		requestID, _ := c.Get("request_id")
+		log.Printf("panic recovered request_id=%v path=%s: %v", requestID, c.FullPath(), recovered)
+		utils.Error(c, http.StatusInternalServerError, "Unexpected server error", gin.H{})
 	})
 }
 
-func RateLimit() gin.HandlerFunc {
-	limiter := rate.NewLimiter(rate.Every(time.Second), 20)
+// ipRateLimiter keeps one token-bucket limiter per client IP so a single client
+// cannot exhaust the quota for everyone (SEC-7).
+type ipRateLimiter struct {
+	limiters sync.Map // map[string]*rate.Limiter
+	every    rate.Limit
+	burst    int
+}
+
+func newIPRateLimiter(every rate.Limit, burst int) *ipRateLimiter {
+	return &ipRateLimiter{every: every, burst: burst}
+}
+
+func (l *ipRateLimiter) get(ip string) *rate.Limiter {
+	if existing, ok := l.limiters.Load(ip); ok {
+		return existing.(*rate.Limiter)
+	}
+	limiter := rate.NewLimiter(l.every, l.burst)
+	actual, _ := l.limiters.LoadOrStore(ip, limiter)
+	return actual.(*rate.Limiter)
+}
+
+func (l *ipRateLimiter) middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if !limiter.Allow() {
+		if !l.get(c.ClientIP()).Allow() {
 			utils.Error(c, http.StatusTooManyRequests, "Too many requests", gin.H{})
 			c.Abort()
 			return
 		}
 		c.Next()
 	}
+}
+
+// RateLimit applies a per-IP global limit (20 req/s, burst 20).
+func RateLimit() gin.HandlerFunc {
+	return newIPRateLimiter(rate.Every(time.Second), 20).middleware()
+}
+
+// AuthRateLimit applies a stricter per-IP limit for auth endpoints to slow down
+// credential brute-force (5 req/s, burst 5).
+func AuthRateLimit() gin.HandlerFunc {
+	return newIPRateLimiter(rate.Every(time.Second), 5).middleware()
 }
 
 func Auth(jwtService *auth.JWTService) gin.HandlerFunc {

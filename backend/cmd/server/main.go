@@ -52,10 +52,12 @@ func main() {
 	handler := handlers.New(serviceContainer, db)
 
 	router := gin.New()
+	// Limit multipart memory buffering for uploads (SEC-5).
+	router.MaxMultipartMemory = 8 << 20 // 8 MiB
 	router.Use(
 		middlewares.RequestID(),
 		middlewares.SecureHeaders(),
-		middlewares.CORS(),
+		middlewares.CORS(cfg.CORSAllowedOrigins),
 		middlewares.RateLimit(),
 		gin.Logger(),
 		middlewares.Recovery(),

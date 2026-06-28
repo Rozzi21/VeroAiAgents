@@ -1,0 +1,121 @@
+package services
+
+import (
+	"encoding/json"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
+)
+
+type MCPService struct {
+	repo *repositories.Repository
+	bus  *events.Bus
+}
+
+type ToolResult struct {
+	Tool   string                 `json:"tool"`
+	Status string                 `json:"status"`
+	Data   map[string]interface{} `json:"data"`
+}
+
+func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error) {
+	start := time.Now()
+	var result ToolResult
+
+	for attempt := 1; attempt <= 3; attempt++ {
+		result = s.mock(toolName, payload)
+		if result.Status == "success" {
+			break
+		}
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+	}
+
+	payloadJSON, _ := json.Marshal(payload)
+	resultJSON, _ := json.Marshal(result)
+	toolCall := models.ToolCall{
+		SessionID: sessionID,
+		ToolName:  toolName,
+		Payload:   string(payloadJSON),
+		Result:    string(resultJSON),
+		Status:    result.Status,
+	}
+	aiLog := models.AILog{
+		SessionID:     &sessionID,
+		Workflow:      "mcp_tool_execution",
+		ToolName:      toolName,
+		Status:        result.Status,
+		ExecutionTime: time.Since(start).Milliseconds(),
+		Response:      string(resultJSON),
+	}
+	// Persist tool call + AI log asynchronously to avoid blocking the chat
+	// workflow with ~8 synchronous DB writes per request. Errors are logged to
+	// the audit log and retried once to prevent silent data loss.
+	go func() {
+		if err := s.repo.CreateToolCall(&toolCall); err != nil {
+			auth.LogSecurity("tool_call_persist_failed", map[string]any{
+				"session_id": sessionID.String(),
+				"tool_name":  toolName,
+				"error":      err.Error(),
+			})
+			// Single retry in case of transient DB issue
+			time.Sleep(500 * time.Millisecond)
+			_ = s.repo.CreateToolCall(&toolCall)
+		}
+		if err := s.repo.CreateAILog(&aiLog); err != nil {
+			auth.LogSecurity("ai_log_persist_failed", map[string]any{
+				"session_id": sessionID.String(),
+				"workflow":   "mcp_tool_execution",
+				"tool_name":  toolName,
+				"error":      err.Error(),
+			})
+			// Single retry in case of transient DB issue
+			time.Sleep(500 * time.Millisecond)
+			_ = s.repo.CreateAILog(&aiLog)
+		}
+	}()
+	s.bus.Publish("mcp_tool_executed", result)
+	return result, nil
+}
+
+func (s *MCPService) mock(toolName string, payload map[string]interface{}) ToolResult {
+	switch toolName {
+	case "search_destination":
+		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"destinations": []string{"Tokyo", "Kyoto", "Osaka", "Bali"},
+			"match":        0.96,
+		}}
+	case "search_hotels":
+		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"hotels": []string{"Aman Kyoto", "Hoshinoya Tokyo", "Bali Ocean Villa"},
+			"count":  18,
+		}}
+	case "calculate_budget":
+		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"estimated_total": 5400,
+			"currency":        "USD",
+			"confidence":      0.92,
+		}}
+	case "generate_itinerary":
+		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"days": []string{"Arrival and coastal relaxation", "Culture and food route", "Checkout and transfer"},
+		}}
+	// Fitur create_payment dimatikan sementara — mock QRIS tidak dijalankan di workflow chat.
+	// case "create_payment":
+	//	return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+	//		"method":      "QRIS",
+	//		"external_id": "DOKU-" + uuid.NewString(),
+	//		"expires_in":  "15m",
+	//	}}
+	case "send_whatsapp":
+		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"delivered": true,
+			"channel":   "whatsapp",
+		}}
+	default:
+		return ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "unknown tool"}}
+	}
+}
