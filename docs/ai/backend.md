@@ -130,7 +130,7 @@ Catatan: N8N (eksternal) yang berperan sebagai automation/scheduler di luar apli
 
 - `NewClient()` set default: baseURL `https://api.openai.com/v1`, model `gpt-4o-mini`, timeout 35s.
 - `Generate()`: bila API key kosong -> langsung return fallback. Jika ada key -> POST ke `/chat/completions`.
-- `extractText()` parsing fleksibel: coba `choices[0].message.content`, lalu `choices[0].text`, lalu top-level keys (`text`, `output`, `content`, `message`).
+- `extractText()` parsing fleksibel: coba `choices[0].message.content`, lalu `choices[0].message.reasoning_content`, `reasoning`, `thinking`, lalu `choices[0].text`, lalu top-level keys (`text`, `output`, `content`, `message`). Fallback ini menjaga agar model penalaran (Qwen/DeepSeek) yang mengembalikan jawaban di `reasoning_content` tidak terabaikan ketika `content` kosong.
 
 ## Pola Penting untuk Diingat
 
