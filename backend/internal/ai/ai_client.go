@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -113,25 +114,53 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 	return out, nil
 }
 
+// extractText extracts the final assistant text from an OpenAI-compatible
+// response payload. It prefers the standard content field, then falls back to
+// reasoning fields used by models such as Qwen or DeepSeek, then scans for any
+// non-empty string field. This keeps the client provider-agnostic.
 func extractText(raw map[string]interface{}) string {
 	if choices, ok := raw["choices"].([]interface{}); ok && len(choices) > 0 {
 		if choice, ok := choices[0].(map[string]interface{}); ok {
 			if message, ok := choice["message"].(map[string]interface{}); ok {
-				if content, ok := message["content"].(string); ok {
-					return content
+				if text, field := extractString(message, "content"); text != "" {
+					log.Printf("[ai] extracted text from choices[0].message.%s", field)
+					return text
 				}
+				for _, key := range []string{"reasoning_content", "reasoning", "thinking"} {
+					if text, field := extractString(message, key); text != "" {
+						log.Printf("[ai] extracted text from choices[0].message.%s (content empty)", field)
+						return text
+					}
+				}
+				log.Printf("[ai] choices[0].message has no usable text field")
+				return ""
 			}
-			if text, ok := choice["text"].(string); ok {
+			if text, field := extractString(choice, "text"); text != "" {
+				log.Printf("[ai] extracted text from choices[0].%s", field)
 				return text
 			}
 		}
 	}
 
 	for _, key := range []string{"text", "output", "content", "message"} {
-		if value, ok := raw[key].(string); ok {
+		if value, ok := raw[key].(string); ok && value != "" {
+			log.Printf("[ai] extracted text from top-level %s", key)
 			return value
 		}
 	}
 
+	log.Printf("[ai] no usable text field found in response")
 	return ""
+}
+
+// extractString returns a non-empty trimmed string from m[key] and the key
+// name that matched. It returns ("", "") if the value is missing, not a
+// string, or empty after trimming.
+func extractString(m map[string]interface{}, key string) (string, string) {
+	if v, ok := m[key].(string); ok {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v), key
+		}
+	}
+	return "", ""
 }
