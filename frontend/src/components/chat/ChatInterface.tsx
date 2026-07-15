@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
   MapPin,
@@ -38,6 +38,15 @@ export default function ChatInterface() {
     0: true,
   });
   const [loading, setLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
+  }, []);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [completedTyping, loading, messages, scrollToBottom]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -126,6 +135,7 @@ export default function ChatInterface() {
                     {message.shouldAnimate ? (
                       <TypingText
                         text={message.content}
+                        onUpdate={() => scrollToBottom("auto")}
                         onDone={() =>
                           setCompletedTyping((items) => ({
                             ...items,
@@ -162,6 +172,7 @@ export default function ChatInterface() {
                 </span>
               </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
       </div>
 
@@ -202,14 +213,17 @@ export default function ChatInterface() {
 
 function TypingText({
   text,
+  onUpdate,
   onDone,
 }: {
   text: string;
+  onUpdate?: () => void;
   onDone: () => void;
 }) {
   const [visibleLength, setVisibleLength] = useState(0);
   const doneRef = useRef(false);
   const onDoneRef = useRef(onDone);
+  const onUpdateRef = useRef(onUpdate);
   const charsPerTick = useMemo(() => (text.length > 500 ? 4 : 2), [text.length]);
 
   useEffect(() => {
@@ -217,11 +231,16 @@ function TypingText({
   }, [onDone]);
 
   useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
+  useEffect(() => {
     setVisibleLength(0);
     doneRef.current = false;
   }, [text]);
 
   useEffect(() => {
+    onUpdateRef.current?.();
     if (visibleLength >= text.length) {
       if (!doneRef.current) {
         doneRef.current = true;
