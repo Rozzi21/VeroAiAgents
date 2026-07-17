@@ -226,11 +226,10 @@ func (s *AIService) buildMessages(sessionID uuid.UUID, prompt string, workflow [
 				"2. Number of children (if any) " +
 				"3. Travel date " +
 				"4. Contact information (Email OR WhatsApp number). Explain that this is needed so the team can follow up. " +
-				"You have access to tools. Call the `update_order_draft` tool every time you gather new information so the UI can update the order summary. " +
-				"Once ALL the required information has been collected, call the `create_booking` tool to finalize the order. " +
-				"CRITICAL: You MUST wait for the tool result before telling the customer anything about the order status. " +
-				"If `create_booking` returns status=success, THEN tell the customer their order has been created. " +
-				"If `create_booking` returns status=failed, tell the customer there was a problem and ask them to try again. NEVER claim the order was created if the tool failed or was not called. " +
+				"You have access to tools. Call `update_order_draft` when gathering info. " +
+				"CRITICAL INSTRUCTION: `update_order_draft` DOES NOT create the order. Once ALL required info is collected, you MUST call `create_booking` to actually save the order to the database. " +
+				"NEVER tell the customer the order is created until you have successfully called `create_booking` and received a success response. " +
+				"If `create_booking` succeeds, confirm the order. If it fails, apologize and ask them to try again. " +
 				"Use natural, customer-facing language. NEVER expose internal order statuses (like NEW, PENDING, PROCESSING), and never explain backend workflows, database, or admin processes. " +
 				"Instead of technical steps, suggest the next step naturally: e.g., 'Silakan pilih paket yang Anda inginkan.', ask 'Berapa orang yang ikut?', or say 'Pesanan Anda sudah berhasil dibuat. Tim kami akan segera menghubungi Anda.' (only after tool success). " +
 				"Payments are temporarily disabled, so never mention DOKU, QRIS, virtual accounts, checkout links, payment sessions, payment instructions, or paying now. " +
