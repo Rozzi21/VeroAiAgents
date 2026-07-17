@@ -28,15 +28,15 @@ type ToolResult struct {
 func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error) {
 	start := time.Now()
 	var result ToolResult
-	if toolName == "create_payment" {
+	switch toolName {
+	case "create_payment":
 		// DOKU/payment tools are temporarily disabled. Keep the tool name blocked
 		// here as a defense-in-depth guard even if a caller bypasses AIService.Chat.
 		result = ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "payment tools are temporarily disabled"}}
-	} else if toolName == "create_booking" {
+	case "create_booking":
 		// Execute actual booking logic
 		result = s.executeCreateBooking(payload)
-	} else {
-
+	default:
 		for attempt := 1; attempt <= 3; attempt++ {
 			result = s.mock(toolName, payload)
 			if result.Status == "success" {
@@ -93,7 +93,7 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 	return result, nil
 }
 
-func (s *MCPService) mock(toolName string, payload map[string]interface{}) ToolResult {
+func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 	switch toolName {
 	case "search_destination":
 		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
