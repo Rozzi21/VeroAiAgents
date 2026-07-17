@@ -27,7 +27,10 @@ type ContextMenuState = {
 
 export function useTripsList() {
   const router = useRouter();
-  const [activePanel, setActivePanel] = useState<ActivePanel>("trips");
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "";
+  const [activePanel, setActivePanel] = useState<ActivePanel>(
+    pathname.includes("/orders") ? "orders" : "trips"
+  );
   const [category, setCategory] = useState<Category>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");

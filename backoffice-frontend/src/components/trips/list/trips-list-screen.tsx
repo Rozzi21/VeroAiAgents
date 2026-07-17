@@ -28,8 +28,10 @@ export function TripsListScreen() {
 
       <main className="lg:pl-[288px]">
         <div className="mx-auto min-h-screen max-w-[1180px] px-6 py-5 md:px-10 lg:px-14">
-          <section className={list.activePanel === "dashboard" ? "mt-12" : undefined}>
+          <section className={list.activePanel !== "trips" ? "mt-12" : undefined}>
             {list.activePanel === "dashboard" ? (
+              <OnDevelopmentPanel />
+            ) : list.activePanel === "orders" ? (
               <OnDevelopmentPanel />
             ) : (
               <>

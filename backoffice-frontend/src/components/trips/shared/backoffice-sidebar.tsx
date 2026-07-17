@@ -5,6 +5,7 @@ import {
   LayoutDashboard,
   LockKeyhole,
   LogOut,
+  ShoppingCart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { logout } from "@/lib/api";
@@ -113,6 +114,12 @@ export function BackofficeSidebar(props: BackofficeSidebarProps) {
               active={props.activePanel === "trips"}
               onClick={() => props.onPanelChange("trips")}
             />
+            <SidebarItem
+              icon={<ShoppingCart size={18} />}
+              label="Orders"
+              active={props.activePanel === "orders"}
+              onClick={() => props.onPanelChange("orders")}
+            />
           </>
         ) : (
           <>
@@ -126,6 +133,11 @@ export function BackofficeSidebar(props: BackofficeSidebarProps) {
               icon={<Compass size={18} />}
               label="Trips"
               active
+            />
+            <SidebarLink
+              href="/orders"
+              icon={<ShoppingCart size={18} />}
+              label="Orders"
             />
           </>
         )}
