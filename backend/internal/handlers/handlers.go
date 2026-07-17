@@ -320,6 +320,27 @@ func (h *Handler) GetBooking(c *gin.Context) {
 	utils.Success(c, http.StatusOK, "Booking", booking)
 }
 
+func (h *Handler) UpdateBooking(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req dto.UpdateBookingStatusRequest
+	if !bind(c, &req) {
+		return
+	}
+	booking, err := h.Services.Bookings.UpdateStatus(id, currentUserID(c), isStaff(c), req)
+	if err != nil {
+		if err.Error() == "Booking not found" {
+			utils.NotFound(c, "Booking not found")
+			return
+		}
+		utils.BadRequest(c, "Update booking failed", gin.H{"detail": err.Error()})
+		return
+	}
+	utils.Success(c, http.StatusOK, "Booking updated", booking)
+}
+
 func (h *Handler) CreatePayment(c *gin.Context) {
 	if !h.Services.Config.PaymentsEnabled {
 		h.PaymentFeatureDisabled(c)

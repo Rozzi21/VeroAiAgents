@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -62,6 +63,51 @@ func (s *BookingService) Find(id, userID uuid.UUID, isStaff bool) (models.Bookin
 		return s.repo.FindBooking(id)
 	}
 	return s.repo.FindBookingForUser(id, userID)
+}
+
+// allowedTransitions defines the valid status moves for backoffice order
+// management. Terminal/completed states cannot transition backwards except
+// through cancellation from intermediate states.
+func allowedTransitions() map[string]map[string]bool {
+	return map[string]map[string]bool{
+		"pending":    {"processing": true, "confirmed": true, "cancelled": true},
+		"processing": {"confirmed": true, "cancelled": true},
+		"confirmed":  {"completed": true, "cancelled": true},
+		"completed":  {},
+		"cancelled":  {},
+	}
+}
+
+// UpdateStatus allows backoffice staff to advance a booking through the
+// internal workflow. It enforces allowed transitions server-side and returns
+// the updated booking.
+func (s *BookingService) UpdateStatus(id, userID uuid.UUID, isStaff bool, req dto.UpdateBookingStatusRequest) (models.Booking, error) {
+	booking, err := s.Find(id, userID, isStaff)
+	if err != nil {
+		return models.Booking{}, err
+	}
+
+	current := booking.BookingStatus
+	target := req.BookingStatus
+
+	if current == target {
+		return booking, nil
+	}
+
+	transitions, ok := allowedTransitions()[current]
+	if !ok || !transitions[target] {
+		return models.Booking{}, fmt.Errorf("invalid status transition from %s to %s", current, target)
+	}
+
+	booking.BookingStatus = target
+	if err := s.repo.UpdateBooking(&booking); err != nil {
+		return models.Booking{}, err
+	}
+
+	// Re-fetch so the caller receives the latest persisted state with preloads.
+	booking, _ = s.Find(id, userID, isStaff)
+	s.bus.Publish("booking_updated", booking)
+	return booking, nil
 }
 
 // tripAdultPrice/tripChildPrice resolve the effective price honoring discounts.

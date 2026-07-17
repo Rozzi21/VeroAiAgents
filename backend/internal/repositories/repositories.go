@@ -227,6 +227,10 @@ func (r *Repository) UpdatePayment(payment *models.Payment) error {
 	return r.DB.Save(payment).Error
 }
 
+func (r *Repository) UpdateBooking(booking *models.Booking) error {
+	return r.DB.Save(booking).Error
+}
+
 func (r *Repository) CreateAILog(log *models.AILog) error {
 	return r.DB.Create(log).Error
 }

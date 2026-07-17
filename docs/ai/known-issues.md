@@ -133,7 +133,7 @@ Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, 
 
 - **Dashboard** (`on-development-panel.tsx`) → layar "On Development", tidak memanggil `analytics/dashboard`.
 - **`/settings`, `/trips/[id]`** → masih me-render `CurrentTripsScreen` placeholder.
-- **`/orders`** → memakai `CurrentTripsScreen` shell, tetapi panel Orders sudah memanggil `GET /api/v1/bookings` dan menampilkan order pending.
+- **`/orders`** → sudah memiliki antarmuka lengkap (Order Management) sesuai desain Stitch.
 - **Mock data** di `backoffice-frontend/src/lib/data.ts` (`travelCards`, `orders`, `payments`, `workflowSteps`) **tidak dipakai** komponen mana pun.
 
 **Yang benar-benar jalan di backoffice:** auth + CRUD paket + upload media + list order manual. Selain itu placeholder.

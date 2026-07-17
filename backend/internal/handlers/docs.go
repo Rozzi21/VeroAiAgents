@@ -94,7 +94,7 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 
 			// Bookings
 			"/api/v1/bookings":      gin.H{"post": op("Bookings", "Create pending booking/order", true), "get": op("Bookings", "List bookings/orders (operator/admin)", true)},
-			"/api/v1/bookings/{id}": gin.H{"get": op("Bookings", "Get booking by id", true)},
+			"/api/v1/bookings/{id}": gin.H{"get": op("Bookings", "Get booking by id", true), "put": op("Bookings", "Update booking status (operator/admin)", true)},
 
 			// Payments
 			"/api/v1/payments/create":  gin.H{"post": op("Payments", "Disabled unless PAYMENTS_ENABLED=true; preserved QRIS/VA payment intent endpoint", true)},

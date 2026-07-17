@@ -65,6 +65,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			protected.POST("/bookings", h.CreateBooking)
 			protected.GET("/bookings", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.ListBookings)
 			protected.GET("/bookings/:id", h.GetBooking)
+			protected.PUT("/bookings/:id", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.UpdateBooking)
 
 			// DOKU/payment routes are isolated behind PAYMENTS_ENABLED. Disabled mode
 			// preserves handlers/services for future use but prevents payment sessions

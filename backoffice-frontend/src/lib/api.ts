@@ -73,10 +73,24 @@ export type BookingOrder = {
   trip?: TripPackage;
   booking_status: string;
   payment_status: string;
+  adult_pax: number;
+  child_pax: number;
+  contact_name?: string;
+  contact_email?: string;
+  contact_phone?: string;
+  travel_date?: string;
   total_price: number;
   booking_date: string;
   created_at: string;
+  updated_at: string;
 };
+
+export type BookingStatus =
+  | "pending"
+  | "processing"
+  | "confirmed"
+  | "completed"
+  | "cancelled";
 
 type Envelope<T> = {
   success: boolean;

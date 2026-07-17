@@ -166,6 +166,7 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 | POST | `/api/v1/bookings` | 🔒 | Buat booking/order (status `pending`/`pending_admin_processing`) |
 | GET | `/api/v1/bookings` | 👮 | Daftar semua booking (pagination `limit`/`offset`) |
 | GET | `/api/v1/bookings/:id` | 🔒 | Detail booking |
+| PUT | `/api/v1/bookings/:id` | 👮 | Ubah status booking/order (transisi `pending` -> `processing` -> `confirmed` -> `completed` / `cancelled`) |
 | POST | `/api/v1/payments/create` | 🔒 | Buat payment intent (QRIS/VA) |
 | GET | `/api/v1/payments/:id` | 🔒 | Detail payment |
 | POST | `/api/v1/payments/webhook` | 🔓 | Webhook DOKU (verifikasi HMAC-SHA256) |

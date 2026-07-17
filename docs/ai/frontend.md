@@ -121,7 +121,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 ### Fitur yang BELUM aktif (placeholder/mock)
 
 - Dashboard = panel "On Development" (`on-development-panel.tsx`).
-- `/settings`, `/trips/[id]` placeholder. `/orders` memakai panel order sederhana dari `/api/v1/bookings`.
+- `/settings`, `/trips/[id]` placeholder. `/orders` sudah memiliki layout lengkap (Order Management) dengan statistik, pencarian, filter, dan order detail drawer. Mendukung update status manual via `PUT /api/v1/bookings/:id`.
 - Mock data di `lib/data.ts` tidak dirender.
 - Tidak ada UI pembayaran, tidak ada fetch bookings/logs/analytics.
 

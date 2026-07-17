@@ -146,6 +146,13 @@ type PaymentCreateRequest struct {
 	PaymentMethod string    `json:"payment_method" binding:"required,oneof=QRIS VA VIRTUAL_ACCOUNT"`
 }
 
+// UpdateBookingStatusRequest is used by backoffice staff to advance a booking
+// through the internal order workflow. Allowed transitions are enforced by the
+// service layer, not by the client.
+type UpdateBookingStatusRequest struct {
+	BookingStatus string `json:"booking_status" binding:"required,oneof=pending processing confirmed completed cancelled"`
+}
+
 type PaymentWebhookRequest struct {
 	ExternalID string   `json:"external_id" binding:"required"`
 	Status     string   `json:"status" binding:"required"`
