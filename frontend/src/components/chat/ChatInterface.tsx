@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarDays,
+  CheckCircle2,
   MapPin,
   Plus,
   Send,
@@ -12,13 +13,13 @@ import {
 } from "lucide-react";
 import RecommendationCard from "../cards/RecommendationCard";
 import { TripPriceBlock } from "../pricing/TripPriceBlock";
-import { apiFetch, assetURL, BookingOrder, TripPackage } from "@/lib/api";
+import { apiFetch, assetURL, TripPackage } from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
-import { formatTripPax } from "@/lib/format-trip-pax";
 
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  workflow?: Record<string, unknown>[];
   packages?: TripPackage[];
   shouldAnimate?: boolean;
 };
@@ -204,6 +205,7 @@ export default function ChatInterface() {
       {selectedPackage && (
         <PackageDetailPanel
           trip={selectedPackage}
+          messages={messages}
           onClose={() => setSelectedPackage(null)}
         />
       )}
@@ -295,44 +297,48 @@ function PackageRecommendations({
 
 function PackageDetailPanel({
   trip,
+	messages,
   onClose,
 }: {
   trip: TripPackage;
+	messages: ChatMessage[];
   onClose: () => void;
 }) {
   const image = assetURL(trip.image_url || trip.media?.[0]?.url);
   const adultPrice = getTripAdultPrice(trip);
   const childPrice = getTripChildPrice(trip);
-	const [creatingOrder, setCreatingOrder] = useState(false);
-	const [order, setOrder] = useState<BookingOrder | null>(null);
-	const [orderError, setOrderError] = useState<string | null>(null);
 
-	async function handleConfirmOrder() {
-		if (creatingOrder || order) {
-			return;
-		}
-		setCreatingOrder(true);
-		setOrderError(null);
-		try {
-			const created = await apiFetch<BookingOrder>("/api/v1/orders", {
-				method: "POST",
-				body: JSON.stringify({
-					trip_id: trip.id,
-					adult_pax: 1,
-					child_pax: 0,
-				}),
-			});
-			setOrder(created);
-		} catch (error) {
-			setOrderError(
-				error instanceof Error
-					? error.message
-					: "Order belum bisa dibuat. Silakan coba lagi."
-			);
-		} finally {
-			setCreatingOrder(false);
+	// Extract draft or created order state from the AI workflow payloads
+	let draftPaxAdult = 1;
+	let draftPaxChild = 0;
+	let draftDate = "Flexible";
+	let isOrderCreated = false;
+	let orderId = "";
+
+	if (messages) {
+		for (const msg of messages) {
+			if (msg.role === "assistant" && msg.workflow) {
+				for (const wf of msg.workflow) {
+					if (wf.tool === "update_order_draft" && wf.data && typeof wf.data === "object") {
+						const data = wf.data as Record<string, unknown>;
+						if (data.trip_id === trip.id) {
+							draftPaxAdult = Number(data.adult_pax) || 1;
+							draftPaxChild = Number(data.child_pax) || 0;
+							if (data.travel_date) draftDate = String(data.travel_date);
+						}
+					}
+					if (wf.tool === "create_booking" && wf.status === "success" && wf.data && typeof wf.data === "object") {
+						const data = wf.data as Record<string, unknown>;
+						isOrderCreated = true;
+						orderId = String(data.booking_id);
+					}
+				}
+			}
 		}
 	}
+
+	const estimatedTotal = (adultPrice.displayPrice * draftPaxAdult) + (childPrice.displayPrice * draftPaxChild);
+	const paxLabel = `${draftPaxAdult} Dewasa${draftPaxChild > 0 ? `, ${draftPaxChild} Anak` : ""}`;
 
   return (
     <aside className="h-screen w-[35%] overflow-y-auto border-l border-slate-200 bg-white shadow-[-20px_0_60px_-45px_rgba(15,23,42,0.55)]">
@@ -376,52 +382,39 @@ function PackageDetailPanel({
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
-          <InfoPill icon={<CalendarDays size={16} />} label={trip.duration || "Flexible"} />
-          <InfoPill
-            icon={<Ticket size={16} />}
-            label={formatTripPax(trip.adult_pax, trip.child_pax)}
-          />
+          <InfoPill icon={<CalendarDays size={16} />} label={draftDate !== "Flexible" ? draftDate : trip.duration || "Flexible"} />
+          <InfoPill icon={<Ticket size={16} />} label={paxLabel} />
         </div>
 
         <section className="mt-7 rounded-3xl border border-slate-100 bg-slate-50 p-5">
-          <TripPriceBlock label="Harga Paket" price={adultPrice} />
+          <TripPriceBlock label="Dewasa" price={adultPrice} />
           {childPrice.displayPrice > 0 ? (
             <div className="mt-4 border-t border-slate-200 pt-4">
               <TripPriceBlock label="Harga Anak" price={childPrice} size="md" />
             </div>
           ) : null}
+					<div className="mt-4 border-t border-slate-200 pt-4">
+						<div className="flex justify-between items-center text-slate-800">
+							<span className="font-bold">Estimasi Total</span>
+							<span className="text-xl font-black">
+								{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(estimatedTotal)}
+							</span>
+						</div>
+					</div>
         </section>
 
-				<section className="mt-7 rounded-3xl border border-[#df3333]/10 bg-[#fff7f7] p-5">
-					<h3 className="text-lg font-black text-slate-900">Konfirmasi Order</h3>
-					<p className="mt-2 text-sm leading-6 text-slate-600">
-						Payment DOKU sementara dinonaktifkan. Setelah Anda konfirmasi,
-						order disimpan dengan status pending dan admin akan memproses manual
-						di Backoffice.
-					</p>
-					<button
-						type="button"
-						onClick={handleConfirmOrder}
-						disabled={creatingOrder || Boolean(order)}
-						className="mt-4 w-full rounded-2xl bg-[#df3333] px-4 py-3 text-sm font-black text-white shadow-lg shadow-red-500/15 transition hover:bg-[#c92a2a] disabled:cursor-not-allowed disabled:opacity-60"
-					>
-						{order
-							? "Order Tersimpan"
-							: creatingOrder
-								? "Menyimpan Order..."
-								: "Konfirmasi & Buat Order"}
-					</button>
-					{order ? (
-						<p className="mt-3 rounded-2xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
-							Order #{order.id.slice(0, 8)} tersimpan dengan status {order.booking_status}. Admin akan follow up tanpa payment otomatis.
+				{isOrderCreated ? (
+					<section className="mt-7 rounded-3xl border border-emerald-100 bg-emerald-50 p-5">
+						<div className="flex items-center gap-3">
+							<CheckCircle2 size={24} className="text-emerald-500" />
+							<h3 className="text-lg font-black text-emerald-900">Order Berhasil</h3>
+						</div>
+						<p className="mt-2 text-sm leading-6 text-emerald-800 font-medium">
+							ID Pesanan: {orderId.slice(0, 8)}<br />
+							Tim kami akan menghubungi Anda melalui kontak yang telah diberikan untuk membantu proses selanjutnya.
 						</p>
-					) : null}
-					{orderError ? (
-						<p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
-							{orderError}
-						</p>
-					) : null}
-				</section>
+					</section>
+				) : null}
 
         <section className="mt-7">
           <h3 className="text-lg font-black text-slate-900">Summary</h3>

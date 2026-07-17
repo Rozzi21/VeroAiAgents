@@ -118,15 +118,21 @@ type Itinerary struct {
 
 type Booking struct {
 	BaseModel
-	UserID        uuid.UUID `json:"user_id" gorm:"type:uuid;index;not null"`
-	User          User      `json:"user,omitempty" gorm:"foreignKey:UserID"`
-	TripID        uuid.UUID `json:"trip_id" gorm:"type:uuid;index;not null"`
-	Trip          Trip      `json:"trip,omitempty" gorm:"foreignKey:TripID"`
-	BookingStatus string    `json:"booking_status" gorm:"size:40;not null;default:pending"`
-	PaymentStatus string    `json:"payment_status" gorm:"size:40;not null;default:waiting_payment"`
-	TotalPrice    float64   `json:"total_price" gorm:"type:numeric(14,2);not null"`
-	BookingDate   time.Time `json:"booking_date" gorm:"not null"`
-	Payments      []Payment `json:"payments,omitempty" gorm:"foreignKey:BookingID"`
+	UserID        uuid.UUID  `json:"user_id" gorm:"type:uuid;index;not null"`
+	User          User       `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	TripID        uuid.UUID  `json:"trip_id" gorm:"type:uuid;index;not null"`
+	Trip          Trip       `json:"trip,omitempty" gorm:"foreignKey:TripID"`
+	BookingStatus string     `json:"booking_status" gorm:"size:40;not null;default:pending"`
+	PaymentStatus string     `json:"payment_status" gorm:"size:40;not null;default:waiting_payment"`
+	AdultPax      int        `json:"adult_pax" gorm:"not null;default:1"`
+	ChildPax      int        `json:"child_pax" gorm:"not null;default:0"`
+	ContactName   string     `json:"contact_name" gorm:"size:120"`
+	ContactEmail  string     `json:"contact_email" gorm:"size:180"`
+	ContactPhone  string     `json:"contact_phone" gorm:"size:40"`
+	TravelDate    *time.Time `json:"travel_date,omitempty"`
+	TotalPrice    float64    `json:"total_price" gorm:"type:numeric(14,2);not null"`
+	BookingDate   time.Time  `json:"booking_date" gorm:"not null"`
+	Payments      []Payment  `json:"payments,omitempty" gorm:"foreignKey:BookingID"`
 }
 
 type Payment struct {

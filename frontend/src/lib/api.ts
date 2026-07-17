@@ -48,6 +48,12 @@ export type BookingOrder = {
   payment_status: string;
   total_price: number;
   booking_date: string;
+  adult_pax: number;
+  child_pax: number;
+  contact_name: string;
+  contact_email: string;
+  contact_phone: string;
+  travel_date: string;
   trip?: TripPackage;
 };
 

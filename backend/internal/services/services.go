@@ -33,11 +33,11 @@ type Services struct {
 func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService, bus *events.Bus) *Services {
 	s := &Services{Config: cfg, Repo: repo, JWT: jwt, Events: bus}
 	s.Auth = &AuthService{repo: repo, jwt: jwt, cfg: cfg}
-	s.MCP = &MCPService{repo: repo, bus: bus}
+	s.Bookings = &BookingService{repo: repo, bus: bus}
+	s.MCP = &MCPService{repo: repo, bus: bus, bookings: s.Bookings, auth: s.Auth}
 	aiClient := ai.NewClient(cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, cfg.AITemperature, cfg.AITimeout)
 	s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, client: aiClient, cfg: cfg}
 	s.Trips = &TripService{repo: repo, bus: bus}
-	s.Bookings = &BookingService{repo: repo, bus: bus}
 	s.Payments = &PaymentService{repo: repo, bus: bus, cfg: cfg}
 	s.Logs = &LogService{repo: repo}
 	s.Analytics = &AnalyticsService{repo: repo}

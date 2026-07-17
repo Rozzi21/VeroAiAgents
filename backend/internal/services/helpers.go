@@ -2,6 +2,7 @@ package services
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,6 +34,14 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ParseIntFromString(s string, fallback int) int {
+	parsed, err := strconv.Atoi(s)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func firstNonZero(values ...float64) float64 {

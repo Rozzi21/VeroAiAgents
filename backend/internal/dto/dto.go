@@ -130,9 +130,13 @@ type UploadResponse struct {
 // BookingRequest no longer accepts a client-supplied price (SEC-3). The total
 // is computed server-side from the trip catalog price and the requested pax.
 type BookingRequest struct {
-	TripID   uuid.UUID `json:"trip_id" binding:"required"`
-	AdultPax int       `json:"adult_pax"`
-	ChildPax int       `json:"child_pax"`
+	TripID       uuid.UUID `json:"trip_id" binding:"required"`
+	AdultPax     int       `json:"adult_pax"`
+	ChildPax     int       `json:"child_pax"`
+	ContactName  string    `json:"contact_name"`
+	ContactEmail string    `json:"contact_email"`
+	ContactPhone string    `json:"contact_phone"`
+	TravelDate   string    `json:"travel_date"`
 }
 
 // PaymentCreateRequest no longer accepts a client-supplied amount (SEC-3). The

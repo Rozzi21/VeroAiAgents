@@ -7,6 +7,8 @@ const (
 	ToolGenerateItinerary = "generate_itinerary"
 	ToolCreatePayment     = "create_payment"
 	ToolSendWhatsApp      = "send_whatsapp"
+	ToolUpdateOrderDraft  = "update_order_draft"
+	ToolCreateBooking     = "create_booking"
 )
 
 // ToolDefinition describes an MCP tool that the AI orchestration layer can call.
@@ -37,6 +39,8 @@ func Catalog() []ToolDefinition {
 		{Name: ToolSearchHotels, Description: "Search hotel and villa inventory.", Inputs: []string{"destination", "dates", "tier"}, Enabled: true},
 		{Name: ToolCalculateBudget, Description: "Estimate total trip cost and confidence.", Inputs: []string{"destination", "duration", "travelers"}, Enabled: true},
 		{Name: ToolGenerateItinerary, Description: "Create a day-by-day travel itinerary.", Inputs: []string{"destination", "duration", "interests"}, Enabled: true},
+		{Name: ToolUpdateOrderDraft, Description: "Update the UI with the currently collected order details.", Inputs: []string{"trip_id", "adult_pax", "child_pax", "contact_name", "contact_email", "contact_phone", "travel_date"}, Enabled: true},
+		{Name: ToolCreateBooking, Description: "Create the final order in the database. Call this only when all required info is complete.", Inputs: []string{"trip_id", "adult_pax", "child_pax", "contact_name", "contact_email", "contact_phone", "travel_date"}, Enabled: true},
 		{Name: ToolCreatePayment, Description: "Create QRIS or Virtual Account payment intent. Disabled while DOKU payment flow is temporarily off; not registered in active AI workflow.", Inputs: []string{"booking_id", "amount", "method"}, Enabled: false},
 		{Name: ToolSendWhatsApp, Description: "Trigger WhatsApp confirmation automation. Defined for future use, not yet part of the live workflow.", Inputs: []string{"phone", "message"}, Enabled: false},
 	}

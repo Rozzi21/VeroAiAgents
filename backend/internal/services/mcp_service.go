@@ -6,14 +6,17 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
 type MCPService struct {
-	repo *repositories.Repository
-	bus  *events.Bus
+	repo     *repositories.Repository
+	bus      *events.Bus
+	bookings *BookingService
+	auth     *AuthService
 }
 
 type ToolResult struct {
@@ -29,6 +32,9 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 		// DOKU/payment tools are temporarily disabled. Keep the tool name blocked
 		// here as a defense-in-depth guard even if a caller bypasses AIService.Chat.
 		result = ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "payment tools are temporarily disabled"}}
+	} else if toolName == "create_booking" {
+		// Execute actual booking logic
+		result = s.executeCreateBooking(payload)
 	} else {
 
 		for attempt := 1; attempt <= 3; attempt++ {
@@ -124,4 +130,71 @@ func (s *MCPService) mock(toolName string, payload map[string]interface{}) ToolR
 	default:
 		return ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "unknown tool"}}
 	}
+}
+
+func (s *MCPService) executeCreateBooking(payload map[string]interface{}) ToolResult {
+	// Get guest user
+	guestUser, err := s.auth.GuestUser()
+	if err != nil {
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": err.Error()}}
+	}
+
+	tripIDStr, _ := payload["trip_id"].(string)
+	tripID, err := uuid.Parse(tripIDStr)
+	if err != nil {
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": "invalid trip_id"}}
+	}
+
+	adultPax := 1
+	if v, ok := payload["adult_pax"].(float64); ok {
+		adultPax = int(v)
+	} else if v, ok := payload["adult_pax"].(string); ok {
+		adultPax = parseIntFallback(v, 1)
+	}
+
+	childPax := 0
+	if v, ok := payload["child_pax"].(float64); ok {
+		childPax = int(v)
+	} else if v, ok := payload["child_pax"].(string); ok {
+		childPax = parseIntFallback(v, 0)
+	}
+
+	req := dto.BookingRequest{
+		TripID:       tripID,
+		AdultPax:     adultPax,
+		ChildPax:     childPax,
+		ContactName:  getString(payload, "contact_name"),
+		ContactEmail: getString(payload, "contact_email"),
+		ContactPhone: getString(payload, "contact_phone"),
+		TravelDate:   getString(payload, "travel_date"),
+	}
+
+	if req.ContactName == "" {
+		req.ContactName = "Guest"
+	}
+	if req.ContactEmail == "" && req.ContactPhone == "" {
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": "contact_email or contact_phone is required"}}
+	}
+
+	booking, err := s.bookings.Create(guestUser.ID, req)
+	if err != nil {
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": err.Error()}}
+	}
+
+	return ToolResult{Tool: "create_booking", Status: "success", Data: map[string]interface{}{
+		"booking_id":     booking.ID.String(),
+		"booking_status": booking.BookingStatus,
+		"total_price":    booking.TotalPrice,
+	}}
+}
+
+func getString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+func parseIntFallback(v string, fallback int) int {
+	return ParseIntFromString(v, fallback)
 }

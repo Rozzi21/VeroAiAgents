@@ -37,6 +37,12 @@ func (s *BookingService) Create(userID uuid.UUID, req dto.BookingRequest) (model
 		// backoffice/admin processing. Re-enable DOKU by restoring the old
 		// waiting_payment status alongside PAYMENTS_ENABLED=true.
 		PaymentStatus: "pending_admin_processing",
+		AdultPax:      adultPax,
+		ChildPax:      childPax,
+		ContactName:   req.ContactName,
+		ContactEmail:  req.ContactEmail,
+		ContactPhone:  req.ContactPhone,
+		TravelDate:    parseDate(req.TravelDate),
 		TotalPrice:    total,
 		BookingDate:   time.Now(),
 	}
