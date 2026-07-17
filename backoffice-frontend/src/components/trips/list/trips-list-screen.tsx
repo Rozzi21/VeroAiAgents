@@ -13,6 +13,7 @@ import { CreateTripCard } from "./create-trip-card";
 import { EmptyPackagesState } from "./empty-packages-state";
 import { OnDevelopmentPanel } from "./on-development-panel";
 import { InfoModal } from "./info-modal";
+import { OrdersPanel } from "@/components/orders/orders-panel";
 
 export function TripsListScreen() {
   const list = useTripsList();
@@ -32,7 +33,7 @@ export function TripsListScreen() {
             {list.activePanel === "dashboard" ? (
               <OnDevelopmentPanel />
             ) : list.activePanel === "orders" ? (
-              <OnDevelopmentPanel />
+              <OrdersPanel />
             ) : (
               <>
                 <TripsSearchHeader query={list.query} onQueryChange={list.setQuery} />

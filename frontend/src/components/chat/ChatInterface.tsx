@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import RecommendationCard from "../cards/RecommendationCard";
 import { TripPriceBlock } from "../pricing/TripPriceBlock";
-import { apiFetch, assetURL, TripPackage } from "@/lib/api";
+import { apiFetch, assetURL, BookingOrder, TripPackage } from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 import { formatTripPax } from "@/lib/format-trip-pax";
 
@@ -303,6 +303,36 @@ function PackageDetailPanel({
   const image = assetURL(trip.image_url || trip.media?.[0]?.url);
   const adultPrice = getTripAdultPrice(trip);
   const childPrice = getTripChildPrice(trip);
+	const [creatingOrder, setCreatingOrder] = useState(false);
+	const [order, setOrder] = useState<BookingOrder | null>(null);
+	const [orderError, setOrderError] = useState<string | null>(null);
+
+	async function handleConfirmOrder() {
+		if (creatingOrder || order) {
+			return;
+		}
+		setCreatingOrder(true);
+		setOrderError(null);
+		try {
+			const created = await apiFetch<BookingOrder>("/api/v1/orders", {
+				method: "POST",
+				body: JSON.stringify({
+					trip_id: trip.id,
+					adult_pax: 1,
+					child_pax: 0,
+				}),
+			});
+			setOrder(created);
+		} catch (error) {
+			setOrderError(
+				error instanceof Error
+					? error.message
+					: "Order belum bisa dibuat. Silakan coba lagi."
+			);
+		} finally {
+			setCreatingOrder(false);
+		}
+	}
 
   return (
     <aside className="h-screen w-[35%] overflow-y-auto border-l border-slate-200 bg-white shadow-[-20px_0_60px_-45px_rgba(15,23,42,0.55)]">
@@ -361,6 +391,37 @@ function PackageDetailPanel({
             </div>
           ) : null}
         </section>
+
+				<section className="mt-7 rounded-3xl border border-[#df3333]/10 bg-[#fff7f7] p-5">
+					<h3 className="text-lg font-black text-slate-900">Konfirmasi Order</h3>
+					<p className="mt-2 text-sm leading-6 text-slate-600">
+						Payment DOKU sementara dinonaktifkan. Setelah Anda konfirmasi,
+						order disimpan dengan status pending dan admin akan memproses manual
+						di Backoffice.
+					</p>
+					<button
+						type="button"
+						onClick={handleConfirmOrder}
+						disabled={creatingOrder || Boolean(order)}
+						className="mt-4 w-full rounded-2xl bg-[#df3333] px-4 py-3 text-sm font-black text-white shadow-lg shadow-red-500/15 transition hover:bg-[#c92a2a] disabled:cursor-not-allowed disabled:opacity-60"
+					>
+						{order
+							? "Order Tersimpan"
+							: creatingOrder
+								? "Menyimpan Order..."
+								: "Konfirmasi & Buat Order"}
+					</button>
+					{order ? (
+						<p className="mt-3 rounded-2xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+							Order #{order.id.slice(0, 8)} tersimpan dengan status {order.booking_status}. Admin akan follow up tanpa payment otomatis.
+						</p>
+					) : null}
+					{orderError ? (
+						<p className="mt-3 rounded-2xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+							{orderError}
+						</p>
+					) : null}
+				</section>
 
         <section className="mt-7">
           <h3 className="text-lg font-black text-slate-900">Summary</h3>

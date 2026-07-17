@@ -63,4 +63,5 @@ type AuthIssueResult struct {
 var (
 	ErrRefreshTokenRevoked = errors.New("refresh token revoked")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
+	ErrPaymentsDisabled    = errors.New("payment feature temporarily disabled")
 )

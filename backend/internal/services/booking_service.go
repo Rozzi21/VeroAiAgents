@@ -33,7 +33,10 @@ func (s *BookingService) Create(userID uuid.UUID, req dto.BookingRequest) (model
 		UserID:        userID,
 		TripID:        req.TripID,
 		BookingStatus: "pending",
-		PaymentStatus: "waiting_payment",
+		// Payments are temporarily disabled. New orders stay pending for manual
+		// backoffice/admin processing. Re-enable DOKU by restoring the old
+		// waiting_payment status alongside PAYMENTS_ENABLED=true.
+		PaymentStatus: "pending_admin_processing",
 		TotalPrice:    total,
 		BookingDate:   time.Now(),
 	}

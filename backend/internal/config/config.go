@@ -41,10 +41,14 @@ type Config struct {
 	AIRecentMessages     int
 	AIMemorySummaryAfter int
 	AIMemoryMaxChars     int
-	DOKUClientID         string
-	DOKUSecret           string
-	N8NWebhook           string
-	CORSAllowedOrigins   []string
+	// PaymentsEnabled is a temporary feature flag for the DOKU payment flow.
+	// Default false keeps booking/order creation manual-admin processed. Set
+	// PAYMENTS_ENABLED=true to re-enable payment routes/webhooks/services later.
+	PaymentsEnabled    bool
+	DOKUClientID       string
+	DOKUSecret         string
+	N8NWebhook         string
+	CORSAllowedOrigins []string
 }
 
 func Load() Config {
@@ -78,6 +82,7 @@ func Load() Config {
 		AIRecentMessages:     getInt("AI_CONTEXT_RECENT_MESSAGES", 8),
 		AIMemorySummaryAfter: getInt("AI_MEMORY_SUMMARY_AFTER", 12),
 		AIMemoryMaxChars:     getInt("AI_MEMORY_MAX_CHARS", 1800),
+		PaymentsEnabled:      getBoolEnv("PAYMENTS_ENABLED", false),
 		DOKUClientID:         os.Getenv("DOKU_CLIENT_ID"),
 		DOKUSecret:           os.Getenv("DOKU_SECRET"),
 		N8NWebhook:           os.Getenv("N8N_WEBHOOK"),
@@ -101,14 +106,15 @@ func Load() Config {
 
 // Validate enforces production-safety invariants. In production the JWT secret
 // must be explicitly set to a non-default, non-empty value; otherwise tokens
-// could be forged using the well-known development secret. The DOKU webhook
-// secret is also required so payment webhooks cannot be forged (SEC-4).
+// could be forged using the well-known development secret. When payments are
+// explicitly re-enabled, the DOKU webhook secret is also required so payment
+// webhooks cannot be forged (SEC-4).
 func (c Config) Validate() error {
 	if c.AppEnv == "production" {
 		if c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret {
 			return errors.New("JWT_SECRET must be set to a strong, non-default value when APP_ENV=production")
 		}
-		if c.DOKUSecret == "" {
+		if c.PaymentsEnabled && c.DOKUSecret == "" {
 			return errors.New("DOKU_SECRET must be set when APP_ENV=production to verify payment webhooks")
 		}
 	}

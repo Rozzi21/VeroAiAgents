@@ -119,6 +119,12 @@ Request penting:
 | GET | `/api/v1/chat/:id/messages` | 🔒 | Pesan dalam satu sesi |
 | GET | `/api/v1/events/stream` | 🔒 | SSE stream event workflow/payment/log |
 
+### Temporary Manual Order Flow
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/orders` | 🔓 | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
+
 - `chat` request: `{prompt(min 2), session_id?, stream?}` (DTO `ChatRequest`).
 - `chat` response data: `{session_id, message, workflow[], recommended_packages[]}` (lihat `ChatResult`).
 
@@ -157,17 +163,19 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 
 | Method | Path | Akses | Fungsi |
 |---|---|---|---|
-| POST | `/api/v1/bookings` | 🔒 | Buat booking (status pending/waiting_payment) |
+| POST | `/api/v1/bookings` | 🔒 | Buat booking/order (status `pending`/`pending_admin_processing`) |
 | GET | `/api/v1/bookings` | 👮 | Daftar semua booking (pagination `limit`/`offset`) |
 | GET | `/api/v1/bookings/:id` | 🔒 | Detail booking |
 | POST | `/api/v1/payments/create` | 🔒 | Buat payment intent (QRIS/VA) |
 | GET | `/api/v1/payments/:id` | 🔒 | Detail payment |
 | POST | `/api/v1/payments/webhook` | 🔓 | Webhook DOKU (verifikasi HMAC-SHA256) |
 
+> ⚠️ **Temporary disable:** DOKU/payment flow is off by default via `PAYMENTS_ENABLED=false`. `/payments/create`, `/payments/:id`, and `/payments/webhook` return `503 Payment feature temporarily disabled`; code is preserved for future re-enable.
+
 > ✅ **Catatan keamanan (SEC-2/3/4 sudah diperbaiki, lihat `known-issues.md` bagian A):**
 > - `GET /bookings/:id` & `GET /payments/:id` kini cek kepemilikan: user non-staff hanya bisa akses miliknya; lainnya balas not found (SEC-2).
 > - Harga booking & amount payment **dihitung server-side**, tidak menerima nominal dari client (SEC-3).
-> - `webhook` menolak request tanpa signature valid bila `DOKU_SECRET` ter-set; di production `DOKU_SECRET` wajib (SEC-4).
+> - `webhook` menolak request tanpa signature valid bila `DOKU_SECRET` ter-set; di production `DOKU_SECRET` wajib hanya saat `PAYMENTS_ENABLED=true` (SEC-4).
 
 - `booking` request: `{trip_id, adult_pax?, child_pax?}` (DTO `BookingRequest`). `total_price` **dihapus** — total dihitung server-side dari harga paket (menghormati diskon) × pax. Bila pax tidak diisi, default 1 dewasa.
 - `payment create` request: `{booking_id, payment_method(oneof QRIS|VA|VIRTUAL_ACCOUNT)}` (DTO `PaymentCreateRequest`). `amount` **dihapus** — diambil dari `Booking.TotalPrice`.

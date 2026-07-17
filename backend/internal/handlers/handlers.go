@@ -277,6 +277,24 @@ func (h *Handler) CreateBooking(c *gin.Context) {
 	utils.Success(c, http.StatusCreated, "Booking created", booking)
 }
 
+func (h *Handler) GuestCreateOrder(c *gin.Context) {
+	var req dto.BookingRequest
+	if !bind(c, &req) {
+		return
+	}
+	user, err := h.Services.Auth.GuestUser()
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	booking, err := h.Services.Bookings.Create(user.ID, req)
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	utils.Success(c, http.StatusCreated, "Order created for manual admin processing", booking)
+}
+
 func (h *Handler) ListBookings(c *gin.Context) {
 	var query dto.ListQuery
 	_ = c.ShouldBindQuery(&query)
@@ -303,6 +321,10 @@ func (h *Handler) GetBooking(c *gin.Context) {
 }
 
 func (h *Handler) CreatePayment(c *gin.Context) {
+	if !h.Services.Config.PaymentsEnabled {
+		h.PaymentFeatureDisabled(c)
+		return
+	}
 	var req dto.PaymentCreateRequest
 	if !bind(c, &req) {
 		return
@@ -316,6 +338,10 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 }
 
 func (h *Handler) PaymentWebhook(c *gin.Context) {
+	if !h.Services.Config.PaymentsEnabled {
+		h.PaymentFeatureDisabled(c)
+		return
+	}
 	var req dto.PaymentWebhookRequest
 	if !bind(c, &req) {
 		return
@@ -332,6 +358,10 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 }
 
 func (h *Handler) GetPayment(c *gin.Context) {
+	if !h.Services.Config.PaymentsEnabled {
+		h.PaymentFeatureDisabled(c)
+		return
+	}
 	id, ok := parseID(c, "id")
 	if !ok {
 		return
@@ -342,6 +372,12 @@ func (h *Handler) GetPayment(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "Payment", payment)
+}
+
+func (h *Handler) PaymentFeatureDisabled(c *gin.Context) {
+	utils.Error(c, http.StatusServiceUnavailable, "Payment feature temporarily disabled", gin.H{
+		"detail": "DOKU payment flow is disabled; orders are saved as pending for manual backoffice processing.",
+	})
 }
 
 func (h *Handler) Logs(c *gin.Context) {

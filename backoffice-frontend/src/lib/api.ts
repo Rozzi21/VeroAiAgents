@@ -65,6 +65,19 @@ export type TripStatus =
   | "full"
   | "completed";
 
+export type BookingOrder = {
+  id: string;
+  user_id: string;
+  user?: { id: string; name: string; email: string; role?: string };
+  trip_id: string;
+  trip?: TripPackage;
+  booking_status: string;
+  payment_status: string;
+  total_price: number;
+  booking_date: string;
+  created_at: string;
+};
+
 type Envelope<T> = {
   success: boolean;
   message: string;

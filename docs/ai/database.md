@@ -68,7 +68,7 @@ Rencana harian milik Trip. `Day`, `Title`, `Description`. Di-replace penuh saat 
 
 ### Booking ([models.go](../../backend/internal/models/models.go))
 Pemesanan trip oleh user.
-- `BookingStatus` (default `pending`), `PaymentStatus` (default `waiting_payment`), `TotalPrice`, `BookingDate`.
+- `BookingStatus` (default `pending`), `PaymentStatus` (saat ini di-set service ke `pending_admin_processing` karena DOKU disabled; model lama masih default `waiting_payment` untuk future re-enable), `TotalPrice`, `BookingDate`.
 - Relasi: `belongs to` User & Trip; `has many` Payment.
 
 ### Payment ([models.go](../../backend/internal/models/models.go))

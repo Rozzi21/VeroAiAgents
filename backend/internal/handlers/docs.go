@@ -14,10 +14,10 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 			"version": "1.0.0",
 			"description": "AI-native autonomous travel orchestration API. " +
 				"Provides guest AI chat, public package catalog, JWT auth with refresh cookie, " +
-				"trip/package management, bookings, payments (DOKU webhook), MCP tool + AI logs, " +
+				"trip/package management, manual pending orders, preserved-but-disabled payments (DOKU webhook), MCP tool + AI logs, " +
 				"analytics, and realtime SSE events. " +
-				"Note: the create_payment MCP tool is intentionally disabled in the chat workflow, " +
-				"so the AI never surfaces QRIS/payment before a real booking exists.",
+				"Temporary note: PAYMENTS_ENABLED defaults false, payment routes return 503, " +
+				"and the create_payment MCP tool is intentionally disabled/unregistered from the active chat workflow.",
 		},
 		"servers": []gin.H{{"url": "http://localhost:8080", "description": "Local development"}},
 		"tags": []gin.H{
@@ -27,8 +27,9 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 			{"name": "Packages", "description": "Public published package catalog"},
 			{"name": "Trips", "description": "Authenticated trip read + operator/admin management"},
 			{"name": "Admin", "description": "Operator/admin package management, uploads, dashboard"},
-			{"name": "Bookings", "description": "Booking creation and retrieval"},
-			{"name": "Payments", "description": "Payment intent creation and DOKU webhook"},
+			{"name": "Bookings", "description": "Booking/order creation and retrieval"},
+			{"name": "Orders", "description": "Public manual order creation while payment is disabled"},
+			{"name": "Payments", "description": "Preserved DOKU payment endpoints; disabled unless PAYMENTS_ENABLED=true"},
 			{"name": "Logs", "description": "AI workflow logs and MCP tool calls"},
 			{"name": "Analytics", "description": "Operator/admin analytics dashboard"},
 			{"name": "Realtime", "description": "Server-Sent Events stream"},
@@ -62,6 +63,9 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 			// Guest AI chat (no auth) — consumed by the customer frontend
 			"/api/v1/chat": gin.H{"post": op("Chat", "Run the autonomous AI chat workflow as guest", false)},
 
+			// Public manual order creation while DOKU payment is disabled
+			"/api/v1/orders": gin.H{"post": op("Orders", "Create pending order for manual backoffice processing", false)},
+
 			// Authenticated chat history
 			"/api/v1/chat/sessions":      gin.H{"get": op("Chat", "List chat sessions for current user", true)},
 			"/api/v1/chat/{id}/messages": gin.H{"get": op("Chat", "List messages of a chat session", true)},
@@ -73,7 +77,7 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 				"description": "Streams workflow events: ai_thinking, searching_destination, calculating_budget, " +
 					"generating_itinerary, ai_response, workflow_completed, plus mcp_tool_executed, trip_created, " +
 					"booking_created, payment_created, payment_updated, booking_confirmed, and periodic heartbeat. " +
-					"Note: payment_created/booking_confirmed originate from the booking+payment APIs, not from the chat workflow.",
+					"Note: payment_created/booking_confirmed only occur when PAYMENTS_ENABLED=true; current manual order flow emits booking_created only.",
 				"security":  []gin.H{{"BearerAuth": []string{}}},
 				"responses": okResponse("text/event-stream"),
 			}},
@@ -89,13 +93,13 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 			"/api/v1/admin/dashboard":     gin.H{"get": op("Admin", "Analytics dashboard (operator/admin)", true)},
 
 			// Bookings
-			"/api/v1/bookings":      gin.H{"post": op("Bookings", "Create booking", true), "get": op("Bookings", "List bookings (operator/admin)", true)},
+			"/api/v1/bookings":      gin.H{"post": op("Bookings", "Create pending booking/order", true), "get": op("Bookings", "List bookings/orders (operator/admin)", true)},
 			"/api/v1/bookings/{id}": gin.H{"get": op("Bookings", "Get booking by id", true)},
 
 			// Payments
-			"/api/v1/payments/create":  gin.H{"post": op("Payments", "Create QRIS or Virtual Account payment intent", true)},
-			"/api/v1/payments/webhook": gin.H{"post": op("Payments", "DOKU payment webhook (HMAC-SHA256 verified)", false)},
-			"/api/v1/payments/{id}":    gin.H{"get": op("Payments", "Get payment by id", true)},
+			"/api/v1/payments/create":  gin.H{"post": op("Payments", "Disabled unless PAYMENTS_ENABLED=true; preserved QRIS/VA payment intent endpoint", true)},
+			"/api/v1/payments/webhook": gin.H{"post": op("Payments", "Disabled unless PAYMENTS_ENABLED=true; preserved DOKU webhook", false)},
+			"/api/v1/payments/{id}":    gin.H{"get": op("Payments", "Disabled unless PAYMENTS_ENABLED=true; preserved payment lookup", true)},
 
 			// Logs (operator/admin)
 			"/api/v1/logs":            gin.H{"get": op("Logs", "List AI logs (operator/admin)", true)},

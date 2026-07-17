@@ -34,7 +34,7 @@ Seluruh sembilan temuan di bawah sudah diperbaiki dan diverifikasi `go build`/`g
 
 **Lokasi:** `payment_service.go` → `Webhook()`, `config.go` → `Validate()`.
 
-Bila `DOKU_SECRET` ter-set, webhook **wajib** signature valid (tolak bila kosong/salah). Bila secret kosong saat `APP_ENV=production`, webhook ditolak; `Config.Validate()` juga mewajibkan `DOKU_SECRET` non-kosong di production. Ditambah validasi `amount` (jika dikirim) harus cocok dengan payment, dan idempotency: status yang sudah `paid`/`settlement` tidak bisa diturunkan dan tidak diproses ulang.
+Bila `PAYMENTS_ENABLED=true` dan `DOKU_SECRET` ter-set, webhook **wajib** signature valid (tolak bila kosong/salah). Bila secret kosong saat `APP_ENV=production` dan payments enabled, webhook ditolak; `Config.Validate()` juga mewajibkan `DOKU_SECRET` non-kosong di production hanya saat payments enabled. Ditambah validasi `amount` (jika dikirim) harus cocok dengan payment, dan idempotency: status yang sudah `paid`/`settlement` tidak bisa diturunkan dan tidak diproses ulang.
 
 ### SEC-5. ✅ SEDANG — Upload Media: Batas Ukuran & MIME Asli (FIXED)
 
@@ -91,7 +91,7 @@ Semua tool MCP mengembalikan data dummy hardcoded, bukan hasil pencarian/komputa
 
 **Lokasi:** `backend/internal/services/ai_service.go` (workflow steps di `Chat()`), `backend/internal/mcp/tools.go` (`Enabled: false`)
 
-Ini **keputusan desain, bukan bug**. Tool `create_payment` dikeluarkan dari pipeline chat agar AI tidak menjanjikan/menyebut pembayaran (QRIS) sebelum ada booking nyata. `send_whatsapp` juga `Enabled: false`.
+Ini **keputusan desain, bukan bug**. Tool `create_payment` dikeluarkan dari pipeline chat dan diblok di `MCPService.Execute()` agar AI tidak menjanjikan/menyebut pembayaran (QRIS/DOKU) selama `PAYMENTS_ENABLED=false`. `send_whatsapp` juga `Enabled: false`.
 
 **Jangan** mengaktifkan kembali tanpa lebih dulu menyambungkan alur booking end-to-end di frontend. Lihat komentar di `mcp/tools.go` `Catalog()`.
 
@@ -117,11 +117,11 @@ Tidak ada `*_test.go` maupun test JS/TS. Verifikasi saat ini hanya `go build`, `
 
 Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, dan webhook DOKU. Namun:
 
-- Tombol "Book This Trip" dan "Add to Plan" di customer frontend **tidak punya handler** (terverifikasi masih placeholder).
-- Teks "Secure AI-powered checkout" hanya hiasan.
+- Tombol customer sudah membuat order manual via `POST /api/v1/orders`, tanpa payment otomatis.
+- Teks checkout sudah diganti menjadi manual admin processing.
 - Tidak ada UI checkout/QRIS di mana pun.
 
-**Dampak:** Booking hanya bisa dibuat lewat API langsung. Alur revenue belum tersambung end-to-end.
+**Dampak:** Order manual sudah bisa dibuat dari customer UI, tetapi revenue/payment DOKU belum tersambung end-to-end karena payment sengaja dinonaktifkan.
 
 > Catatan kontrak (pasca SEC-3): `POST /bookings` kini menerima `{trip_id, adult_pax, child_pax}` (tanpa `total_price`); `POST /payments/create` menerima `{booking_id, payment_method}` (tanpa `amount`). Saat menyambungkan UI, ikuti kontrak baru ini — harga dihitung server-side.
 
@@ -132,10 +132,11 @@ Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, 
 **Lokasi:** `backoffice-frontend/src/app/`
 
 - **Dashboard** (`on-development-panel.tsx`) → layar "On Development", tidak memanggil `analytics/dashboard`.
-- **`/orders`, `/settings`, `/trips/[id]`** → semuanya me-render `CurrentTripsScreen` (list trip yang sama).
+- **`/settings`, `/trips/[id]`** → masih me-render `CurrentTripsScreen` placeholder.
+- **`/orders`** → memakai `CurrentTripsScreen` shell, tetapi panel Orders sudah memanggil `GET /api/v1/bookings` dan menampilkan order pending.
 - **Mock data** di `backoffice-frontend/src/lib/data.ts` (`travelCards`, `orders`, `payments`, `workflowSteps`) **tidak dipakai** komponen mana pun.
 
-**Yang benar-benar jalan di backoffice:** auth + CRUD paket + upload media. Selain itu placeholder.
+**Yang benar-benar jalan di backoffice:** auth + CRUD paket + upload media + list order manual. Selain itu placeholder.
 
 ---
 
@@ -144,7 +145,7 @@ Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, 
 - `GET /api/v1/events/stream` (SSE) — **tidak ada** EventSource di kedua frontend.
 - `GET /api/v1/analytics/dashboard` — tidak dipanggil backoffice.
 - `GET /api/v1/logs`, `/logs/workflows`, `/logs/tool-calls` — tidak dipanggil.
-- `GET /api/v1/bookings`, `/bookings/:id` — tidak dipanggil.
+- `GET /api/v1/bookings/:id` — tidak dipanggil.
 - `GET /api/v1/chat/sessions`, `/chat/:id/messages` — tidak dipanggil.
 
 **Dampak:** Effort SSE realtime saat ini "terbuang" dari sisi UX. Peluang: sambungkan SSE ke customer chat untuk progress workflow realtime.
@@ -179,7 +180,7 @@ Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, 
 
 **Lokasi:** `backend/.env.example`
 
-`DATABASE_PASSWORD=password_aman`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev. `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default; sejak perbaikan SEC-4 juga mewajibkan `DOKU_SECRET` non-kosong di production. `DATABASE_PASSWORD` masih **belum** divalidasi.
+`DATABASE_PASSWORD=password_aman`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev. `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default; sejak DOKU disabled, `DOKU_SECRET` hanya wajib non-kosong di production saat `PAYMENTS_ENABLED=true`. `DATABASE_PASSWORD` masih **belum** divalidasi.
 
 **Catatan:** `.env` aktual developer berisi AI key nyata. Jangan commit `.env`.
 
@@ -262,7 +263,7 @@ Response dipaksa parse JSON tanpa try-catch. Jika backend membalas HTML (nginx 5
 | Prioritas | Item | Alasan |
 |---|---|---|
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
-| 🟡 Sedang | #4 Sambungkan booking UI | Alur revenue belum jalan dari UI (ikuti kontrak baru pasca SEC-3) |
+| 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
 | 🟡 Sedang | #14/#15 Backoffice api.ts (JSON & timeout) | Error/hang tidak tertangani |
 | Rendah | #13 Uang float64 | Presisi (makin relevan setelah harga server-side SEC-3) |

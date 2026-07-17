@@ -54,8 +54,9 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		{"searching_destination", "search_hotels"},
 		{"calculating_budget", "calculate_budget"},
 		{"generating_itinerary", "generate_itinerary"},
-		// Fitur create_payment dimatikan sementara agar AI tidak menyebut QRIS/pembayaran
-		// sebelum booking sungguhan dibuat. Aktifkan kembali setelah integrasi payment siap.
+		// DOKU/payment disabled temporarily. AI must not call create_payment or
+		// mention QRIS/checkout; orders are saved as pending for admin processing.
+		// Re-enable only with PAYMENTS_ENABLED=true and MCP Catalog Enabled=true.
 		// {"payment_created", "create_payment"},
 	}
 
@@ -118,7 +119,7 @@ func (s *AIService) generateWithAI(sessionID uuid.UUID, prompt string, workflow 
 	messages := []ai.Message{
 		{
 			Role:    "system",
-			Content: "You are Vero Travel, an autonomous travel assistant. Answer in natural Indonesian. Recommend only from the provided published package catalog when packages are relevant. Mention exact package names so the UI can show matching cards. Explain concise reasoning and suggest the next booking step. Do not use Markdown formatting, bold markers, asterisks, headings, or decorative symbols. Use plain text and simple hyphen bullets only when a list is helpful.",
+			Content: "You are Vero Travel, an autonomous travel assistant. Answer in natural Indonesian. Recommend only from the provided published package catalog when packages are relevant. Mention exact package names so the UI can show matching cards. Explain concise reasoning and suggest the next booking step: customer confirms selected package, then an order is saved with NEW/PENDING status for admin processing. Payments are temporarily disabled, so never mention DOKU, QRIS, virtual accounts, checkout links, payment sessions, payment instructions, or paying now. Do not use Markdown formatting, bold markers, asterisks, headings, or decorative symbols. Use plain text and simple hyphen bullets only when a list is helpful.",
 		},
 	}
 	if catalog := packageCatalogSummary(packages); catalog != "" {

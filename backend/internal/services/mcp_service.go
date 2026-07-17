@@ -25,13 +25,19 @@ type ToolResult struct {
 func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error) {
 	start := time.Now()
 	var result ToolResult
+	if toolName == "create_payment" {
+		// DOKU/payment tools are temporarily disabled. Keep the tool name blocked
+		// here as a defense-in-depth guard even if a caller bypasses AIService.Chat.
+		result = ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "payment tools are temporarily disabled"}}
+	} else {
 
-	for attempt := 1; attempt <= 3; attempt++ {
-		result = s.mock(toolName, payload)
-		if result.Status == "success" {
-			break
+		for attempt := 1; attempt <= 3; attempt++ {
+			result = s.mock(toolName, payload)
+			if result.Status == "success" {
+				break
+			}
+			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 		}
-		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 	}
 
 	payloadJSON, _ := json.Marshal(payload)

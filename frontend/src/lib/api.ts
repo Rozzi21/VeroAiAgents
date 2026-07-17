@@ -40,6 +40,17 @@ export type TripPackage = {
   itineraries?: Array<{ day: number; title: string; description: string }>;
 };
 
+export type BookingOrder = {
+  id: string;
+  user_id: string;
+  trip_id: string;
+  booking_status: string;
+  payment_status: string;
+  total_price: number;
+  booking_date: string;
+  trip?: TripPackage;
+};
+
 type Envelope<T> = {
   success: boolean;
   message: string;

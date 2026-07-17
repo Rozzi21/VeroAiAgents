@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowLeft, MapPin, Clock, CheckCircle2, Plane, BedDouble, Ticket, ShieldCheck } from "lucide-react";
-import { apiFetch, assetURL, TripPackage } from "@/lib/api";
+import { apiFetch, assetURL, BookingOrder, TripPackage } from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 import { TripPriceBlock, TripPriceInline } from "@/components/pricing/TripPriceBlock";
 
 export default function TripDetailPage({ params }: { params: { id: string } }) {
   const [trip, setTrip] = useState<TripPackage | null>(null);
+  const [creatingOrder, setCreatingOrder] = useState(false);
+  const [order, setOrder] = useState<BookingOrder | null>(null);
+  const [orderError, setOrderError] = useState<string | null>(null);
 
   useEffect(() => {
     apiFetch<TripPackage>(`/api/v1/packages/${params.id}`)
@@ -27,6 +30,29 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
   const image = assetURL(trip.image_url || trip.media?.[0]?.url);
   const adultPrice = getTripAdultPrice(trip);
   const childPrice = getTripChildPrice(trip);
+
+  async function handleConfirmOrder() {
+    if (!trip || creatingOrder || order) {
+      return;
+    }
+    setCreatingOrder(true);
+    setOrderError(null);
+    try {
+      const created = await apiFetch<BookingOrder>("/api/v1/orders", {
+        method: "POST",
+        body: JSON.stringify({ trip_id: trip.id, adult_pax: 1, child_pax: 0 }),
+      });
+      setOrder(created);
+    } catch (error) {
+      setOrderError(
+        error instanceof Error
+          ? error.message
+          : "Order belum bisa dibuat. Silakan coba lagi."
+      );
+    } finally {
+      setCreatingOrder(false);
+    }
+  }
 
   return (
     <div className="flex-1 overflow-y-auto h-screen bg-slate-50">
@@ -135,19 +161,30 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
             </div>
 
             <div className="space-y-3">
-              <button className="w-full bg-[#df3333] hover:bg-[#c92a2a] text-white py-4 rounded-xl font-bold text-lg transition-colors shadow-lg shadow-red-500/20 flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={handleConfirmOrder}
+                disabled={creatingOrder || Boolean(order)}
+                className="w-full bg-[#df3333] hover:bg-[#c92a2a] disabled:opacity-60 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg transition-colors shadow-lg shadow-red-500/20 flex items-center justify-center gap-2"
+              >
                 <Plane size={20} />
-                Book This Trip
+                {order ? "Order Saved" : creatingOrder ? "Saving Order..." : "Confirm & Create Order"}
               </button>
-              <button className="w-full bg-white border-2 border-slate-200 hover:border-[#df3333]/50 hover:bg-slate-50 text-slate-700 py-3.5 rounded-xl font-bold transition-all flex items-center justify-center gap-2">
-                <CheckCircle2 size={18} className="text-[#df3333]" />
-                Add to Plan
-              </button>
+              {order ? (
+                <div className="rounded-xl bg-emerald-50 p-3 text-sm font-semibold text-emerald-800">
+                  Order #{order.id.slice(0, 8)} saved as {order.booking_status}. Admin will process manually.
+                </div>
+              ) : null}
+              {orderError ? (
+                <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+                  {orderError}
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400 font-medium">
               <ShieldCheck size={14} />
-              Secure AI-powered checkout
+              Manual admin processing. DOKU payment temporarily disabled.
             </div>
           </div>
         </div>

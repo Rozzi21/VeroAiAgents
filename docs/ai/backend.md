@@ -87,10 +87,12 @@ CRUD trip + transformasi DTO. Pola penting:
 
 ### BookingService & PaymentService
 
-- `BookingService.Create()`: booking baru selalu `booking_status=pending`, `payment_status=waiting_payment`. **Harga dihitung server-side** (SEC-3): `tripAdultPrice(trip)*adult_pax + tripChildPrice(trip)*child_pax` (menghormati diskon), bukan dari body client.
+- `BookingService.Create()`: booking/order baru selalu `booking_status=pending`, `payment_status=pending_admin_processing` selama DOKU dinonaktifkan sementara. **Harga dihitung server-side** (SEC-3): `tripAdultPrice(trip)*adult_pax + tripChildPrice(trip)*child_pax` (menghormati diskon), bukan dari body client.
 - `BookingService.Find(id, userID, isStaff)` / `PaymentService.Find(...)`: cek kepemilikan (SEC-2). Non-staff hanya bisa akses miliknya (repo `FindBookingForUser`/`FindPaymentForUser`).
 - `PaymentService.Create()`: payment intent dengan `ExternalID=DOKU-<uuid>`, expired 15 menit. `Amount` diambil dari `Booking.TotalPrice` (SEC-3), bukan dari body.
 - `PaymentService.Webhook()`: bila `DOKU_SECRET` di-set, signature **wajib** valid (SEC-4); di production secret wajib ada. Validasi `amount` (bila dikirim) + idempotency (status `paid`/`settlement` tidak bisa turun/diproses ulang). Bila `paid`/`settlement` -> publish `booking_confirmed` + trigger N8N.
+
+Temporary: `PAYMENTS_ENABLED=false` by default disables DOKU routes, `PaymentService.Create/Find/Webhook`, and MCP `create_payment`. Orders are saved for manual admin processing in Backoffice.
 
 ### AnalyticsService
 

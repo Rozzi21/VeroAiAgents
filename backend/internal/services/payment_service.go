@@ -26,6 +26,10 @@ type PaymentService struct {
 }
 
 func (s *PaymentService) Create(req dto.PaymentCreateRequest) (models.Payment, error) {
+	if !s.cfg.PaymentsEnabled {
+		return models.Payment{}, ErrPaymentsDisabled
+	}
+
 	// SEC-3: amount is derived from the booking's server-computed total, never
 	// from the client request.
 	booking, err := s.repo.FindBooking(req.BookingID)
@@ -49,6 +53,10 @@ func (s *PaymentService) Create(req dto.PaymentCreateRequest) (models.Payment, e
 
 // Find enforces ownership for non-staff callers (SEC-2 anti-IDOR).
 func (s *PaymentService) Find(id, userID uuid.UUID, isStaff bool) (models.Payment, error) {
+	if !s.cfg.PaymentsEnabled {
+		return models.Payment{}, ErrPaymentsDisabled
+	}
+
 	if isStaff {
 		return s.repo.FindPayment(id)
 	}
@@ -56,6 +64,10 @@ func (s *PaymentService) Find(id, userID uuid.UUID, isStaff bool) (models.Paymen
 }
 
 func (s *PaymentService) Webhook(req dto.PaymentWebhookRequest) (models.Payment, error) {
+	if !s.cfg.PaymentsEnabled {
+		return models.Payment{}, ErrPaymentsDisabled
+	}
+
 	// SEC-4: require a valid HMAC signature whenever a secret is configured.
 	// Without a configured secret the webhook is only accepted outside
 	// production (Config.Validate enforces DOKU_SECRET in production).

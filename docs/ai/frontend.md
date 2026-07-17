@@ -47,8 +47,8 @@ Catatan: efek mengetik (`TypingText`) adalah animasi client-side; respons chat d
 
 ### Fitur yang BELUM aktif (UI placeholder)
 
-- Tombol "Book This Trip" dan "Add to Plan" di `/trip/[id]` — tanpa handler.
-- Teks "Secure AI-powered checkout" — hiasan, tidak ada flow pembayaran.
+- Tombol customer sekarang membuat order manual lewat `POST /api/v1/orders`; tidak membuat payment/session DOKU.
+- Teks checkout diganti menjadi manual admin processing; DOKU payment temporarily disabled.
 - Link sidebar "Past Journeys", "Saved Places", "Settings", "My Profile" — `href="#"`.
 - Tombol "+" di input chat — tanpa handler.
 
@@ -66,11 +66,11 @@ Dashboard operator/admin untuk CRUD paket trip. Punya auth penuh (JWT access di 
 | `/` | `backoffice-frontend/src/app/page.tsx` | Layar utama: list paket / dashboard (panel) |
 | `/trips` | `backoffice-frontend/src/app/trips/page.tsx` | Placeholder → render `CurrentTripsScreen` |
 | `/trips/[id]` | `backoffice-frontend/src/app/trips/[id]/page.tsx` | Placeholder → render `CurrentTripsScreen` |
-| `/orders` | `backoffice-frontend/src/app/orders/page.tsx` | Placeholder → render `CurrentTripsScreen` |
+| `/orders` | `backoffice-frontend/src/app/orders/page.tsx` | Render `CurrentTripsScreen`; panel Orders menampilkan booking/order dari `/api/v1/bookings` |
 | `/settings` | `backoffice-frontend/src/app/settings/page.tsx` | Placeholder → render `CurrentTripsScreen` |
 | layout root | `backoffice-frontend/src/app/layout.tsx` | Membungkus seluruh app dengan `AppShell` |
 
-PENTING: `/trips`, `/trips/[id]`, `/orders`, `/settings` semuanya placeholder yang me-render layar yang sama (`CurrentTripsScreen` = re-export `TripsListScreen`). Belum ada implementasi unik.
+PENTING: `/trips`, `/trips/[id]`, `/orders`, `/settings` masih me-render layar shell yang sama (`CurrentTripsScreen` = re-export `TripsListScreen`). Namun panel `/orders` sekarang menampilkan daftar order dari backend; dashboard/settings/trip detail backoffice masih placeholder.
 
 ### Guard Auth: `AppShell`
 
@@ -121,7 +121,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 ### Fitur yang BELUM aktif (placeholder/mock)
 
 - Dashboard = panel "On Development" (`on-development-panel.tsx`).
-- `/orders`, `/settings`, `/trips/[id]` placeholder.
+- `/settings`, `/trips/[id]` placeholder. `/orders` memakai panel order sederhana dari `/api/v1/bookings`.
 - Mock data di `lib/data.ts` tidak dirender.
 - Tidak ada UI pembayaran, tidak ada fetch bookings/logs/analytics.
 

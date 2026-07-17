@@ -58,7 +58,8 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `DOKU_CLIENT_ID` | _(kosong)_ | Client ID DOKU |
-| `DOKU_SECRET` | _(kosong)_ | Secret verifikasi signature webhook HMAC-SHA256. **Wajib di production** — `Config.Validate()` menolak start bila kosong saat `APP_ENV=production` (SEC-4) |
+| `PAYMENTS_ENABLED` | `false` | Feature flag DOKU/payment flow. Default `false` keeps manual admin order processing and makes payment endpoints return 503. Set `true` only when re-enabling DOKU. |
+| `DOKU_SECRET` | _(kosong)_ | Secret verifikasi signature webhook HMAC-SHA256. **Wajib di production hanya saat `PAYMENTS_ENABLED=true`** — `Config.Validate()` menolak start bila kosong saat DOKU diaktifkan (SEC-4) |
 | `N8N_WEBHOOK` | _(kosong)_ | URL webhook N8N untuk otomasi pasca-pembayaran |
 | `CORS_ALLOWED_ORIGINS` | _(localhost dev)_ | Daftar origin diizinkan CORS, dipisah koma (mis. `https://app.vero.com,https://admin.vero.com`). Fallback ke `http://localhost:3000,:3001,:5173` bila kosong (SEC-8) |
 
@@ -160,7 +161,7 @@ flowchart LR
 1. `APP_ENV=production`.
 2. `JWT_SECRET` panjang dan acak (backend menolak start jika tidak).
 3. `DATABASE_PASSWORD` kuat; pertimbangkan `DATABASE_SSLMODE=require`.
-4. `DOKU_SECRET` **wajib** diisi di production (backend menolak start bila kosong saat `APP_ENV=production`); webhook tanpa signature valid ditolak (SEC-4).
+4. `DOKU_SECRET` **wajib** diisi di production saat `PAYMENTS_ENABLED=true` (backend menolak start bila kosong); webhook tanpa signature valid ditolak (SEC-4). Default `PAYMENTS_ENABLED=false` untuk flow order manual.
 5. HTTPS via reverse proxy; set `JWT_COOKIE_SECURE=true`.
 6. Jika frontend beda domain dari API: `JWT_COOKIE_SAME_SITE=None` (otomatis Secure) + tambahkan origin ke CORS.
 7. Volume persisten untuk `uploads/`.

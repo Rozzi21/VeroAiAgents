@@ -19,6 +19,10 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 		api.GET("/packages", h.PublicPackages)
 		api.GET("/packages/:id", h.GetPackage)
 		api.POST("/chat", h.GuestChat)
+		// Public manual order entry for the temporary AI-driven flow:
+		// Customer -> AI chat -> select package -> confirm -> order saved as pending.
+		// This endpoint never creates DOKU payment/session while PAYMENTS_ENABLED=false.
+		api.POST("/orders", h.GuestCreateOrder)
 
 		authGroup := api.Group("/auth")
 		authGroup.Use(middlewares.AuthRateLimit())
@@ -62,8 +66,16 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			protected.GET("/bookings", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.ListBookings)
 			protected.GET("/bookings/:id", h.GetBooking)
 
-			protected.POST("/payments/create", h.CreatePayment)
-			protected.GET("/payments/:id", h.GetPayment)
+			// DOKU/payment routes are isolated behind PAYMENTS_ENABLED. Disabled mode
+			// preserves handlers/services for future use but prevents payment sessions
+			// or DOKU webhook processing during the temporary manual-admin order flow.
+			if s.Config.PaymentsEnabled {
+				protected.POST("/payments/create", h.CreatePayment)
+				protected.GET("/payments/:id", h.GetPayment)
+			} else {
+				protected.POST("/payments/create", h.PaymentFeatureDisabled)
+				protected.GET("/payments/:id", h.PaymentFeatureDisabled)
+			}
 
 			protected.GET("/logs", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.Logs)
 			protected.GET("/logs/workflows", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.WorkflowLogs)
@@ -71,6 +83,10 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			protected.GET("/analytics/dashboard", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.Analytics)
 		}
 
-		api.POST("/payments/webhook", h.PaymentWebhook)
+		if s.Config.PaymentsEnabled {
+			api.POST("/payments/webhook", h.PaymentWebhook)
+		} else {
+			api.POST("/payments/webhook", h.PaymentFeatureDisabled)
+		}
 	}
 }

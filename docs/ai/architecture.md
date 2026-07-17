@@ -96,7 +96,14 @@ Lihat [api.md](api.md) bagian Authentication Flow untuk diagram lengkap. Ringkas
 ### 3.3 Pembayaran (booking -> payment -> webhook)
 
 ```
-POST /api/v1/bookings        -> Booking (booking_status=pending, payment_status=waiting_payment)
+POST /api/v1/orders          -> Booking/Order (booking_status=pending, payment_status=pending_admin_processing)
+GET  /api/v1/bookings        -> Order appears in Backoffice for admin processing
+
+Temporary disabled behind PAYMENTS_ENABLED=false:
+POST /api/v1/payments/create -> 503, preserved Payment code not executed
+POST /api/v1/payments/webhook -> 503, DOKU webhook not processed
+
+Future re-enable path:
 POST /api/v1/payments/create -> Payment (ExternalID=DOKU-..., expired 15 menit)
 POST /api/v1/payments/webhook (dari DOKU) -> verifikasi HMAC-SHA256 (message = external_id + status)
   jika status paid/settlement -> publish booking_confirmed + trigger webhook N8N (payment_success)
@@ -158,7 +165,7 @@ Pola frontend (kedua app): **custom hook untuk data/logic** (`use-trip-form.ts`,
 
 ## 6. Keputusan Arsitektur Penting
 
-1. **`create_payment` MCP dinonaktifkan di workflow chat.** Agar AI tidak pernah menyebut QRIS/pembayaran sebelum ada booking sungguhan. Ditandai `Enabled: false` di `internal/mcp/tools.go` dan dikomentari di `internal/services/ai_service.go` (langkah workflow `Chat()`). Jangan aktifkan kembali tanpa wiring booking+payment end-to-end.
+1. **`create_payment` MCP dinonaktifkan di workflow chat.** Agar AI tidak pernah menyebut QRIS/pembayaran saat DOKU disabled. Ditandai `Enabled: false` di `internal/mcp/tools.go`, diblok di `MCPService.Execute()`, dan dikomentari di `internal/services/ai_service.go` (langkah workflow `Chat()`). Jangan aktifkan kembali tanpa `PAYMENTS_ENABLED=true` dan wiring booking+payment end-to-end.
 2. **Tool MCP masih mock.** `internal/services/mcp_service.go` fungsi `mock()` mengembalikan data dummy. Integrasi LLM nyata sudah ada (`internal/ai`) dengan fallback lokal bila `AI_API_KEY` kosong.
 3. **Guest chat tanpa auth.** `POST /api/v1/chat` membuat user "Guest Traveler" otomatis. Memudahkan demo; tidak butuh login.
 4. **Refresh token sebagai session DB + cookie HttpOnly.** Bukan disimpan di JS. Bisa di-revoke, dirotasi tiap refresh, dengan reuse detection revoke-all.
