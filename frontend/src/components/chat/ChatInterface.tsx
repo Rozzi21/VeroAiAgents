@@ -172,7 +172,7 @@ export default function ChatInterface() {
                 </span>
               </div>
           )}
-          <div ref={messagesEndRef} />
+          <div ref={messagesEndRef} className="h-24" />
         </div>
       </div>
 
