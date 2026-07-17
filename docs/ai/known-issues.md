@@ -70,18 +70,22 @@ Origins dibaca dari env `CORS_ALLOWED_ORIGINS` (CSV), fallback ke localhost dev.
 
 ## B. Placeholder & Integrasi Belum Selesai
 
-### 1. MCP Tools Masih Mock (Bukan Integrasi Nyata)
+### 1. Sebagian MCP Tools Masih Mock (Bukan Integrasi Nyata)
 
 **Lokasi:** `backend/internal/services/mcp_service.go` → `MCPService.mock()`
 
-Semua tool MCP mengembalikan data dummy hardcoded, bukan hasil pencarian/komputasi nyata:
+Sebagian tool MCP masih mengembalikan data dummy hardcoded, bukan hasil pencarian/komputasi nyata:
 
 - `search_destination` → selalu `["Tokyo", "Kyoto", "Osaka", "Bali"]`
 - `search_hotels` → selalu `["Aman Kyoto", "Hoshinoya Tokyo", "Bali Ocean Villa"]`
 - `calculate_budget` → selalu `5400 USD`
 - `generate_itinerary` → 3 hari statis
 
-**Dampak:** Workflow chat terlihat "pintar" tapi konteks tool tidak mencerminkan input user. Yang benar-benar dinamis hanyalah respons LLM akhir (`generateWithAI`) dan pemilihan paket dari katalog DB (`selectRecommendedPackages`).
+Tool yang sudah nyata:
+- `create_booking` → memanggil `BookingService.Create()` dan menyimpan booking/order ke DB.
+- `update_order_draft` → lightweight success response untuk validasi tool call UI/draft.
+
+**Dampak:** Workflow rekomendasi masih terlihat "pintar" tapi konteks search/budget/itinerary tool tidak mencerminkan input user. Yang benar-benar dinamis adalah respons LLM akhir (`generateWithToolLoop`), pemilihan paket dari katalog DB (`selectRecommendedPackages`), dan order creation via `create_booking`.
 
 **Yang perlu dilakukan:** Ganti `mock()` dengan implementasi nyata. Pertahankan signature `Execute()` agar logging/retry tetap jalan.
 
@@ -97,17 +101,17 @@ Ini **keputusan desain, bukan bug**. Tool `create_payment` dikeluarkan dari pipe
 
 ---
 
-### 3. Tidak Ada Automated Test
+### 3. Automated Test Masih Minim
 
 **Lokasi:** seluruh repo
 
-Tidak ada `*_test.go` maupun test JS/TS. Verifikasi saat ini hanya `go build`, `gofmt`, dan `tsc --noEmit`.
+Backend sudah memiliki test minimal untuk `internal/ai`, tetapi belum ada coverage memadai untuk service/repository dan belum ada test JS/TS. Verifikasi utama masih `go build`, `go test ./...`, `gofmt`, dan `tsc --noEmit`.
 
 **Area paling berisiko tanpa test (prioritas bila menambah test):**
 1. `AuthService.Register()`/`Login()`/`Refresh()`/`CreateStaff()` — rotasi token, reuse detection, revoke-all, **dan regresi SEC-1** (register tidak boleh bisa set role).
 2. `PaymentService.Webhook()` — verifikasi HMAC signature + idempotency + amount mismatch (SEC-4).
 3. `BookingService.Create()`/`PaymentService.Create()` — harga server-side (SEC-3), dan `Find()` ownership (SEC-2).
-4. `AIService.Chat()` — orkestrasi workflow + fallback.
+4. `AIService.Chat()` — orkestrasi workflow, function calling loop, guard agar AI tidak mengklaim order berhasil tanpa `create_booking` success.
 
 ---
 

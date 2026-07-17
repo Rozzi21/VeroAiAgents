@@ -4,8 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   CalendarDays,
+  Check,
+  Copy,
   Mail,
   MapPin,
+  MessageCircle,
   PackageCheck,
   Phone,
   Search,
@@ -39,8 +42,8 @@ const statusLabels: Record<BookingStatus, string> = {
 };
 
 const statusTone: Record<BookingStatus, string> = {
-  pending: "bg-[#ef0000] text-white",
-  processing: "bg-[#e8edff] text-[#25356b]",
+  pending: "bg-[#c1121f] text-white",
+  processing: "bg-[#eef0ff] text-[#111827]",
   confirmed: "bg-[#dcfce7] text-[#166534]",
   completed: "bg-[#f0e7ff] text-[#5b21b6]",
   cancelled: "bg-[#fee2e2] text-[#991b1b]",
@@ -153,23 +156,23 @@ function StatsCard({
   return (
     <div
       className={cn(
-        "min-h-[102px] rounded-lg border p-4 shadow-[0_22px_50px_-38px_rgba(17,24,39,0.55)]",
+        "min-h-[102px] rounded-xl border p-4 shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)]",
         prominent
-          ? "border-[#df0000] bg-[#df0000] text-white shadow-[0_28px_70px_-36px_rgba(223,0,0,0.8)]"
-          : "border-[#f1dfe0] bg-white text-[#151827]"
+          ? "border-[#c1121f] bg-[#c1121f] text-white"
+          : "border-[#e4e7f2] bg-white text-[#111827]"
       )}
     >
       <p className="text-[10px] font-bold tracking-wide">{title}</p>
       <div className="mt-2 flex items-center justify-between">
-        <p className="text-3xl font-black tracking-[-0.05em]">
+        <p className="text-3xl font-extrabold tracking-[-0.04em]">
           {value.toLocaleString("id-ID")}
         </p>
-        {prominent && <span className="rounded border border-white/30 px-1.5 py-1 text-xs font-black">NEW</span>}
+        {prominent && <span className="rounded border border-white/30 px-1.5 py-1 text-xs font-extrabold">NEW</span>}
       </div>
       <p
         className={cn(
-          "mt-3 inline-flex items-center gap-1 text-[10px] font-black",
-          prominent ? "rounded-full bg-white/15 px-2 py-1" : "text-[#00609a]"
+          "mt-3 inline-flex items-center gap-1 text-[10px] font-bold",
+          prominent ? "rounded-full bg-white/15 px-2 py-1" : "text-[#7b7f8c]"
         )}
       >
         {note}
@@ -183,11 +186,13 @@ function OrderCard({
   busy,
   onView,
   onAdvance,
+  onCancel,
 }: {
   order: BookingOrder;
   busy: boolean;
   onView: (order: BookingOrder) => void;
   onAdvance: (order: BookingOrder) => void;
+  onCancel: (order: BookingOrder) => void;
 }) {
   const status = normalizeStatus(order.booking_status);
   const next = nextStatus(status);
@@ -195,46 +200,56 @@ function OrderCard({
   return (
     <article
       className={cn(
-        "rounded-2xl border bg-white p-4 shadow-[0_28px_70px_-48px_rgba(17,24,39,0.55)]",
-        status === "pending" ? "border-l-2 border-l-[#df0000]" : "border-[#f4e6e8]"
+        "rounded-2xl border bg-white p-4 shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)]",
+        status === "pending" ? "border-l-2 border-l-[#c1121f] border-[#e4e7f2]" : "border-[#e4e7f2]"
       )}
     >
       <div className="flex items-start justify-between gap-4">
-        <div className="text-[10px] font-bold uppercase text-[#6b4e58]">#{order.id.slice(0, 8)}</div>
-        <span className={cn("rounded px-2 py-0.5 text-[9px] font-black", statusTone[status])}>
+        <div className="text-[10px] font-bold uppercase text-[#606473]">#{order.id.slice(0, 8)}</div>
+        <span className={cn("rounded px-2 py-0.5 text-[9px] font-extrabold", statusTone[status])}>
           {statusLabels[status]}
         </span>
       </div>
 
       <div className="mt-2 flex items-start justify-between gap-4">
-        <h2 className="text-lg font-black leading-tight tracking-[-0.03em] text-[#181b26]">
+        <h2 className="text-lg font-extrabold leading-tight tracking-[-0.03em] text-[#111827]">
           {packageName(order)}
         </h2>
         <div className="text-right">
-          <p className="text-[10px] font-bold text-[#6b4e58]">Total Price</p>
-          <p className="font-black text-[#df0000]">{formatIDR(order.total_price)}</p>
+          <p className="text-[10px] font-bold text-[#606473]">Total Price</p>
+          <p className="font-extrabold text-[#c1121f]">{formatIDR(order.total_price)}</p>
         </div>
       </div>
 
-      <div className="mt-5 grid grid-cols-1 gap-4 text-xs text-[#222633] sm:grid-cols-2">
+      <div className="mt-5 grid grid-cols-1 gap-4 text-xs text-[#111827] sm:grid-cols-2">
         <Info icon={<UserRound size={15} />} label="Customer" value={customerName(order)} subValue={order.contact_phone ? "WhatsApp available" : undefined} />
         <Info icon={<CalendarDays size={15} />} label="Travel Date" value={travelDate(order)} />
         <Info icon={<MapPin size={15} />} label="Destination" value={destination(order)} />
         <Info icon={<UsersRound size={15} />} label="Travelers" value={travelers(order)} />
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#f2e7e9] pt-4">
-        <p className="text-[10px] font-bold text-[#6b4e58]">Created: {formatRelative(order.created_at || order.booking_date)}</p>
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t border-[#e4e7f2] pt-4">
+        <p className="text-[10px] font-bold text-[#7b7f8c]">Created: {formatRelative(order.created_at || order.booking_date)}</p>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => onView(order)} className="h-9 rounded-lg px-4 text-xs font-bold text-[#5a2730] hover:bg-[#fff1f2]">
+          <button type="button" onClick={() => onView(order)} className="h-9 rounded-xl px-4 text-xs font-bold text-[#111827] hover:bg-[#eef0ff]">
             View Details
           </button>
+          {status !== "completed" && status !== "cancelled" && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onCancel(order)}
+              className="h-9 rounded-xl border border-[#fee2e2] px-4 text-xs font-bold text-[#991b1b] transition hover:bg-[#fee2e2] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          )}
           {next && (
             <button
               type="button"
               disabled={busy}
               onClick={() => onAdvance(order)}
-              className="inline-flex h-9 items-center gap-2 rounded-lg bg-[#df0000] px-4 text-xs font-black text-white shadow-[0_14px_28px_-18px_rgba(223,0,0,0.9)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="inline-flex h-9 items-center gap-2 rounded-xl bg-[#111827] px-4 text-xs font-extrabold text-white shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {busy ? "Processing..." : transitionLabels[status]}
               {!busy && <ArrowRight size={14} />}
@@ -249,17 +264,17 @@ function OrderCard({
 function Info({ icon, label, value, subValue }: { icon: React.ReactNode; label: string; value: string; subValue?: string }) {
   return (
     <div className="flex gap-3">
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f2ecff] text-[#7e3f60]">{icon}</span>
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#eef0ff] text-[#111827]">{icon}</span>
       <div>
-        <p className="text-[10px] font-bold text-[#7c4650]">{label}</p>
-        <p className="mt-0.5 font-semibold text-[#1c202b]">{value}</p>
+        <p className="text-[10px] font-bold text-[#7b7f8c]">{label}</p>
+        <p className="mt-0.5 font-semibold text-[#111827]">{value}</p>
         {subValue && <p className="mt-0.5 text-[10px] font-bold text-emerald-600">{subValue}</p>}
       </div>
     </div>
   );
 }
 
-function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder | null; onClose: () => void; onAdvance: (order: BookingOrder) => void; busy: boolean }) {
+function DetailDrawer({ order, onClose, onAdvance, onCancel, busy }: { order: BookingOrder | null; onClose: () => void; onAdvance: (order: BookingOrder) => void; onCancel: (order: BookingOrder) => void; busy: boolean }) {
   if (!order) return null;
   const status = normalizeStatus(order.booking_status);
   const next = nextStatus(status);
@@ -269,17 +284,17 @@ function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder
   return (
     <div className="fixed inset-0 z-[100] bg-black/30" onClick={onClose}>
       <aside
-        className="ml-auto flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white shadow-[0_30px_100px_-35px_rgba(17,24,39,0.65)]"
+        className="ml-auto flex h-full w-full max-w-xl flex-col overflow-y-auto bg-white shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)]"
         role="dialog"
         aria-modal="true"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#f0e4e6] bg-white/95 p-6 backdrop-blur">
+        <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-[#e4e7f2] bg-white/95 p-6 backdrop-blur">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.2em] text-[#df0000]">Order Detail</p>
-            <h2 className="mt-2 text-2xl font-black text-[#151827]">#{order.id.slice(0, 8)}</h2>
+            <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-[#c1121f]">Order Detail</p>
+            <h2 className="mt-2 text-2xl font-extrabold text-[#111827]">#{order.id.slice(0, 8)}</h2>
           </div>
-          <button type="button" onClick={onClose} className="rounded-full p-2 text-[#6b7280] hover:bg-[#faf0f1]" aria-label="Close order detail">
+          <button type="button" onClick={onClose} className="rounded-full p-2 text-[#6b7280] hover:bg-[#eef0ff]" aria-label="Close order detail">
             <X size={20} />
           </button>
         </div>
@@ -293,18 +308,19 @@ function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder
 
           <Section title="CUSTOMER INFORMATION">
             <Detail label="Customer name" value={customerName(order)} />
-            <Detail label="WhatsApp / phone" value={order.contact_phone || "Not provided"} />
-            <Detail label="Email" value={email || "Not provided"} />
+            <CopyableField label="WhatsApp / phone" value={order.contact_phone || ""} placeholder="Not provided" />
+            <CopyableField label="Email" value={email} placeholder="Not provided" />
             <div className="flex flex-wrap gap-2 pt-2">
-              {wa ? (
-                <a href={wa} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-xs font-black text-white">
-                  <Phone size={14} /> Contact Customer
+              {wa && (
+                <a href={wa} target="_blank" rel="noreferrer" className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-extrabold text-white hover:bg-emerald-700 transition">
+                  <MessageCircle size={14} /> Chat WhatsApp
                 </a>
-              ) : email ? (
-                <a href={`mailto:${email}`} className="inline-flex h-10 items-center gap-2 rounded-lg bg-[#151827] px-4 text-xs font-black text-white">
-                  <Mail size={14} /> Contact Customer
+              )}
+              {email && (
+                <a href={`mailto:${email}`} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#111827] px-4 text-xs font-extrabold text-white hover:bg-[#1f2937] transition">
+                  <Mail size={14} /> Send Email
                 </a>
-              ) : null}
+              )}
             </div>
           </Section>
 
@@ -330,7 +346,7 @@ function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder
 
           <Section title="PACKAGE INFORMATION">
             {order.trip?.highlights?.length ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm font-medium text-[#4b5563]">
+              <ul className="list-disc space-y-1 pl-5 text-sm font-medium text-[#7b7f8c]">
                 {order.trip.highlights.map((item) => <li key={item}>{item}</li>)}
               </ul>
             ) : (
@@ -343,16 +359,28 @@ function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder
             <Detail label="Admin notes" value="Not supported by backend" />
           </Section>
 
-          {next && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => onAdvance(order)}
-              className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-[#df0000] text-sm font-black text-white disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {busy ? "Processing..." : transitionLabels[status]}
-              {!busy && <ArrowRight size={16} />}
-            </button>
+          {status !== "completed" && status !== "cancelled" && (
+            <div className="flex gap-3">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onCancel(order)}
+                className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-[#fee2e2] text-sm font-bold text-[#991b1b] transition hover:bg-[#fee2e2] disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Cancel Order
+              </button>
+              {next && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onAdvance(order)}
+                  className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl bg-[#111827] text-sm font-extrabold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busy ? "Processing..." : transitionLabels[status]}
+                  {!busy && <ArrowRight size={16} />}
+                </button>
+              )}
+            </div>
           )}
         </div>
       </aside>
@@ -362,8 +390,8 @@ function DetailDrawer({ order, onClose, onAdvance, busy }: { order: BookingOrder
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-[#f1e5e7] p-5">
-      <h3 className="text-xs font-black tracking-[0.18em] text-[#df0000]">{title}</h3>
+    <section className="rounded-2xl border border-[#e4e7f2] p-5">
+      <h3 className="text-xs font-extrabold tracking-[0.18em] text-[#c1121f]">{title}</h3>
       <div className="mt-4 space-y-3">{children}</div>
     </section>
   );
@@ -372,14 +400,48 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Detail({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4 text-sm">
-      <span className="font-bold text-[#7b6f76]">{label}</span>
-      <span className="max-w-[60%] text-right font-semibold text-[#171923]">{value}</span>
+      <span className="font-bold text-[#7b7f8c]">{label}</span>
+      <span className="max-w-[60%] text-right font-semibold text-[#111827]">{value}</span>
+    </div>
+  );
+}
+
+function CopyableField({ label, value, placeholder }: { label: string; value: string; placeholder?: string }) {
+  const [copied, setCopied] = useState(false);
+  const display = value || placeholder || "Not provided";
+  const canCopy = Boolean(value);
+
+  const handleCopy = async () => {
+    if (!canCopy) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* noop */ }
+  };
+
+  return (
+    <div className="flex items-center justify-between gap-4 text-sm">
+      <span className="font-bold text-[#7b7f8c]">{label}</span>
+      <div className="flex items-center gap-2">
+        <span className={cn("font-semibold", canCopy ? "text-[#111827]" : "text-[#7b7f8c]")}>{display}</span>
+        {canCopy && (
+          <button
+            type="button"
+            onClick={handleCopy}
+            className="flex h-7 w-7 items-center justify-center rounded-lg text-[#7b7f8c] transition hover:bg-[#eef0ff] hover:text-[#111827]"
+            title="Copy"
+          >
+            {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
 function Skeleton() {
-  return <div className="h-60 animate-pulse rounded-2xl bg-white/80 shadow-[0_28px_70px_-48px_rgba(17,24,39,0.55)]" />;
+  return <div className="h-60 animate-pulse rounded-2xl bg-white/80 shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)]" />;
 }
 
 export function OrdersPanel() {
@@ -445,13 +507,41 @@ export function OrdersPanel() {
     }
   };
 
+  const handleCancel = async (order: BookingOrder) => {
+    const status = normalizeStatus(order.booking_status);
+    if (status === "completed" || status === "cancelled") return;
+    if (!window.confirm(`Batalkan order #${order.id.slice(0, 8)}? Aksi ini tidak bisa di-undo.`)) return;
+    setBusyId(order.id);
+    try {
+      const updated = await updateOrderStatus(order.id, "cancelled");
+      setOrders((current) => current.map((item) => item.id === order.id ? updated : item));
+      setSelected((current) => current?.id === order.id ? updated : current);
+      setToast({ type: "success", text: "Order berhasil dibatalkan." });
+      void loadOrders();
+    } catch (err) {
+      setToast({ type: "error", text: err instanceof Error ? err.message : "Gagal membatalkan order." });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-[#fbf8ff] px-0 py-8 text-[#161a23] sm:px-2 lg:px-0">
+    <div className="min-h-screen bg-white px-0 py-8 text-[#161a23] sm:px-2 lg:px-0">
       <div className="mx-auto max-w-[1180px]">
-        <header>
-          <h1 className="text-3xl font-black tracking-[-0.04em] md:text-4xl">Orders</h1>
-          <p className="mt-2 text-sm font-medium text-[#7b4d55]">Kelola dan proses pesanan perjalanan pelanggan.</p>
-        </header>
+        <div className="flex flex-col justify-between gap-6 md:flex-row md:items-end">
+          <div>
+            <h1 className="text-5xl font-extrabold tracking-[-0.04em] text-[#111827] md:text-[54px]">
+              All Orders
+            </h1>
+            <p className="mt-3 text-lg font-medium text-[#7b7f8c]">
+              Kelola dan proses pesanan perjalanan pelanggan.
+            </p>
+          </div>
+          <label className="flex h-10 w-full max-w-[248px] items-center gap-3 rounded-xl bg-[#eef0ff] px-4 text-[#606473]">
+            <Search size={18} />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search orders..." className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-[#606473]" />
+          </label>
+        </div>
 
         <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <StatsCard title="New Orders" value={stats.pending} note={`↗ ${stats.todayNew} today`} prominent />
@@ -460,36 +550,48 @@ export function OrdersPanel() {
           <StatsCard title="Completed" value={stats.completed} note="◎ All Time" />
         </div>
 
-        <div className="mt-12 flex flex-col gap-4 lg:flex-row lg:items-center">
-          <label className="flex h-11 w-full max-w-md items-center gap-3 rounded-full bg-white px-4 text-[#7b6f76] shadow-sm">
-            <Search size={16} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search customer, order ID or package..." className="min-w-0 flex-1 bg-transparent text-sm font-medium outline-none placeholder:text-[#b3a7ad]" />
-          </label>
-          <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-12 flex flex-wrap items-center gap-2">
+          <div className="flex rounded-xl bg-white p-1 shadow-[0_12px_26px_-20px_rgba(17,24,39,0.7)] ring-1 ring-[#e4e7f2]">
             {filters.map((item) => (
-              <button key={item.value} type="button" onClick={() => setFilter(item.value)} className={cn("h-9 shrink-0 rounded-full border px-4 text-xs font-black transition", filter === item.value ? "border-[#151827] bg-[#151827] text-white" : "border-[#f0b5b5] bg-white text-[#8f2f35] hover:bg-[#fff1f2]")}>{item.label}</button>
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setFilter(item.value)}
+                className={cn(
+                  "h-9 shrink-0 rounded-lg px-4 text-xs font-bold transition",
+                  filter === item.value
+                    ? "bg-[#111827] text-white shadow-sm"
+                    : "text-[#6b7280] hover:text-[#111827]"
+                )}
+              >
+                {item.label}
+              </button>
             ))}
           </div>
         </div>
 
         {loading ? (
-          <div className="mt-6 grid gap-5 lg:grid-cols-2"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>
+          <div className="mt-12 grid gap-5 lg:grid-cols-2"><Skeleton /><Skeleton /><Skeleton /><Skeleton /></div>
         ) : error ? (
-          <div className="mt-8 rounded-2xl border border-red-100 bg-red-50 p-8 text-center text-sm font-bold text-red-700">{error}</div>
+          <div className="mt-12 rounded-2xl border border-[#e4e7f2] bg-[#fdfbff] p-8 text-center text-sm font-semibold text-red-700">{error}</div>
         ) : filteredOrders.length === 0 ? (
-          <div className="mt-8 rounded-2xl border border-dashed border-[#e9d9dd] bg-white p-10 text-center">
-            <PackageCheck className="mx-auto text-[#df0000]" size={34} />
-            <h2 className="mt-4 text-2xl font-black">Tidak ada order</h2>
-            <p className="mt-2 text-sm font-medium text-[#777c88]">Order akan muncul otomatis setelah AI/customer membuat pesanan.</p>
+          <div className="mt-12 flex min-h-[520px] items-center justify-center rounded-2xl border border-dashed border-[#e4e7f2] bg-[#fdfbff] text-center">
+            <div>
+              <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#eef0ff] text-[#c1121f]">
+                <PackageCheck size={26} />
+              </div>
+              <h2 className="mt-6 text-4xl font-extrabold tracking-[-0.04em]">Tidak ada order</h2>
+              <p className="mt-3 text-base font-medium text-[#777c88]">Order akan muncul otomatis setelah AI/customer membuat pesanan.</p>
+            </div>
           </div>
         ) : (
-          <div className="mt-6 grid gap-5 lg:grid-cols-2">
-            {filteredOrders.map((order) => <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={setSelected} onAdvance={handleAdvance} />)}
+          <div className="mt-12 grid gap-5 lg:grid-cols-2">
+            {filteredOrders.map((order) => <OrderCard key={order.id} order={order} busy={busyId === order.id} onView={setSelected} onAdvance={handleAdvance} onCancel={handleCancel} />)}
           </div>
         )}
       </div>
 
-      <DetailDrawer order={selected} onClose={() => setSelected(null)} onAdvance={handleAdvance} busy={Boolean(selected && busyId === selected.id)} />
+      <DetailDrawer order={selected} onClose={() => setSelected(null)} onAdvance={handleAdvance} onCancel={handleCancel} busy={Boolean(selected && busyId === selected.id)} />
       <ToastNotification toast={toast} onClose={() => setToast(null)} />
     </div>
   );

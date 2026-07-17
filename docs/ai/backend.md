@@ -24,8 +24,8 @@ Sejak refactor 25 Jun 2026, kode dipecah **per-domain dalam satu package `servic
 |---|---|
 | `services.go` | `Services` struct, `New()`, `AuthRequestMeta`, `AuthIssueResult`, error vars |
 | `auth_service.go` | `AuthService` (Register, CreateStaff, Login, Refresh, Logout, Me, GuestUser, issueSession) |
-| `ai_service.go` | `AIService` (Chat, generateWithAI, summarizeWorkflow, katalog & rekomendasi paket, memory summary) |
-| `mcp_service.go` | `MCPService` (Execute, mock) + `ToolResult` |
+| `ai_service.go` | `AIService` (Chat, `generateWithToolLoop`, tool execution loop, summarizeWorkflow, katalog & rekomendasi paket, memory summary) |
+| `mcp_service.go` | `MCPService` (`Execute`, `executeCreateBooking`, `mock`) + `ToolResult` |
 | `trip_service.go` | `TripService` + `buildTripFromRequest`, `buildItineraries` |
 | `booking_service.go` | `BookingService` + `tripAdultPrice`/`tripChildPrice` |
 | `payment_service.go` | `PaymentService` (Create, Find, Webhook, verifySignature, triggerN8N) |
@@ -38,7 +38,8 @@ Pola umum: tiap service adalah struct dengan dependency `repo` (repository), dan
 func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService, bus *events.Bus) *Services {
     s := &Services{Config: cfg, Repo: repo, JWT: jwt, Events: bus}
     s.Auth = &AuthService{repo: repo, jwt: jwt, cfg: cfg}
-    s.MCP = &MCPService{repo: repo, bus: bus}
+    s.Bookings = &BookingService{repo: repo, bus: bus}
+    s.MCP = &MCPService{repo: repo, bus: bus, bookings: s.Bookings, auth: s.Auth}
     aiClient := ai.NewClient(cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, cfg.AITemperature, cfg.AITimeout)
     s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, client: aiClient, cfg: cfg}
     // ...
@@ -67,16 +68,27 @@ Poin penting:
    - `generating_itinerary` -> `generate_itinerary`
    - `create_payment` SENGAJA DINONAKTIFKAN (lihat known-issues.md)
 3. Ambil katalog paket published dari DB (`publishedPackagesForAI`, limit 20).
-4. Kirim ke LLM via `generateWithAI()` dengan urutan pesan `system → catalog → memory → workflow_context → recent_messages`. **Optimasi token (25 Jun 2026):** prompt user tidak lagi di-append ganda (cukup dari `recent_messages`), dan workflow context diringkas via `summarizeWorkflow()` (hanya `tool`+`status`).
-5. Bila AI gagal/empty -> fallback response lokal, log kegagalan.
-6. Simpan pesan assistant, refresh memory summary, publish `workflow_completed`.
-7. `selectRecommendedPackages()` memilih hingga 3 paket via scoring kata kunci.
+4. Kirim ke LLM via `generateWithToolLoop()` dengan urutan pesan `system → catalog → memory → workflow_context → recent_messages`, plus OpenAI-compatible `tools` dari `mcp.OpenAITools()`.
+5. Bila LLM mengembalikan `tool_calls`, backend parse arguments, eksekusi via `MCPService.Execute()`, append hasil sebagai role `tool`, lalu panggil LLM lagi sampai ada final text response atau `MaxToolCallRounds` tercapai.
+6. `create_booking` hanya boleh dianggap berhasil bila tool result `status=success`; jika model mengklaim pesanan dibuat tanpa hasil tersebut, backend mengganti response dengan pesan gagal aman.
+7. Bila AI gagal/empty -> fallback response lokal, log kegagalan.
+8. Simpan pesan assistant, refresh memory summary, publish `workflow_completed`.
+9. `selectRecommendedPackages()` memilih hingga 3 paket via scoring kata kunci.
 
 Memory management: `refreshMemorySummary()` membuat ringkasan percakapan setelah >= `AI_MEMORY_SUMMARY_AFTER` (default 12) pesan, dibatasi `AI_MEMORY_MAX_CHARS` (default 1800). Alih-alih memuat SEMUA pesan sesi, method ini memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi berdasarkan `AIMemoryMaxChars / 200`), lalu memotong string ke maksimum karakter. Ini menghindari loading ribuan row pada sesi panjang.
 
 ### MCPService
 
-`Execute()` menjalankan tool dengan **retry 3x**, lalu publish event `mcp_tool_executed`. Persistensi `ToolCall` + `AILog` dilakukan **asinkron** via goroutine agar tidak memblokir workflow chat (~8 DB write per request dipindah ke background). Goroutine ini kini melakukan **error logging via audit log** (`auth.LogSecurity` dengan event `tool_call_persist_failed` / `ai_log_persist_failed`) dan **single retry** (500ms delay) bila persistensi gagal, agar log tidak hilang diam-diam. Semua tool saat ini **mock** (`mock()` mengembalikan data dummy). Katalog di `mcp/tools.go` punya field `Enabled` per-tool; `ActiveCatalog()` mengembalikan tool yang aktif saja.
+`Execute()` menjalankan tool, mencatat log tool selected/called/arguments/execution/result, lalu publish event `mcp_tool_executed`. Persistensi `ToolCall` + `AILog` dilakukan **asinkron** via goroutine agar tidak memblokir workflow chat. Goroutine ini melakukan **error logging via audit log** (`auth.LogSecurity` dengan event `tool_call_persist_failed` / `ai_log_persist_failed`) dan **single retry** (500ms delay) bila persistensi gagal.
+
+Tool status saat ini:
+- `create_booking` nyata: memanggil `BookingService.Create()` dan menyimpan booking ke DB. Response sukses memuat `{success:true, order_id, status, booking_id, booking_status, payment_status, total_price}`.
+- `create_order` aktif sebagai alias aman dari `create_booking` untuk kompatibilitas istilah order/booking.
+- `update_order_draft` lightweight: mengembalikan draft payload agar tool call valid dan tidak menjadi `unknown tool`.
+- `search_destination`, `search_hotels`, `calculate_budget`, `generate_itinerary` masih mock (`mock()` mengembalikan data dummy).
+- `create_payment` diblok karena DOKU/payment disabled.
+
+Katalog di `mcp/tools.go` punya field `Enabled` per-tool; `ActiveCatalog()` mengembalikan tool aktif, dan `OpenAITools()` mengubahnya menjadi schema OpenAI tool calling.
 
 ### TripService
 
@@ -131,7 +143,8 @@ Catatan: N8N (eksternal) yang berperan sebagai automation/scheduler di luar apli
 ### Klien AI (`ai/ai_client.go`)
 
 - `NewClient()` set default: baseURL `https://api.openai.com/v1`, model `gpt-4o-mini`, timeout 35s.
-- `Generate()`: bila API key kosong -> langsung return fallback. Jika ada key -> POST ke `/chat/completions`.
+- `Generate()`: bila API key kosong -> langsung return fallback. Jika ada key -> POST ke `/chat/completions` dengan `messages`, `temperature`, dan optional `tools`.
+- `extractToolCalls()` parsing `choices[0].message.tool_calls`; `AIService.generateWithToolLoop()` mengeksekusi tool via MCP dan mengirim balik hasil role `tool` sebelum final response.
 - `extractText()` parsing fleksibel: coba `choices[0].message.content`, lalu `choices[0].message.reasoning_content`, `reasoning`, `thinking`, lalu `choices[0].text`, lalu top-level keys (`text`, `output`, `content`, `message`). Fallback ini menjaga agar model penalaran (Qwen/DeepSeek) yang mengembalikan jawaban di `reasoning_content` tidak terabaikan ketika `content` kosong.
 
 ## Pola Penting untuk Diingat

@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"sort"
 	"strings"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/config"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/mcp"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
@@ -46,6 +48,8 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		return ChatResult{}, err
 	}
 
+	// Phase 1: Run the hardcoded MCP workflow pipeline (search/budget/itinerary).
+	// These are pre-processing steps that feed context into the LLM.
 	steps := []struct {
 		event string
 		tool  string
@@ -54,10 +58,6 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		{"searching_destination", "search_hotels"},
 		{"calculating_budget", "calculate_budget"},
 		{"generating_itinerary", "generate_itinerary"},
-		// DOKU/payment disabled temporarily. AI must not call create_payment or
-		// mention QRIS/checkout; orders are saved as pending for admin processing.
-		// Re-enable only with PAYMENTS_ENABLED=true and MCP Catalog Enabled=true.
-		// {"payment_created", "create_payment"},
 	}
 
 	results := make([]ToolResult, 0, len(steps))
@@ -70,9 +70,11 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		results = append(results, result)
 	}
 
+	// Phase 2: Call the LLM with function calling support, then execute any
+	// tool calls the LLM makes (create_booking, update_order_draft, etc.).
 	response := "I found a premium autonomous travel plan with destination matches, hotel inventory, budget estimate, and itinerary draft."
 	packages, _ := s.publishedPackagesForAI()
-	aiResponse, err := s.generateWithAI(sessionID, req.Prompt, results, packages)
+	aiResponse, toolResults, err := s.generateWithToolLoop(sessionID, req.Prompt, results, packages)
 	if err != nil {
 		errorPayload, _ := json.Marshal(map[string]interface{}{
 			"error": err.Error(),
@@ -98,6 +100,18 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 			"status":     aiResponse.RawStatus,
 		})
 	}
+
+	// Merge tool results from the LLM-driven tool calls into workflow results.
+	results = append(results, toolResults...)
+
+	// Defense-in-depth: even with tool calling enabled and strict prompting, the
+	// model must not be allowed to claim booking creation unless the backend tool
+	// actually succeeded.
+	if responseClaimsOrderCreated(response) && !hasSuccessfulCreateBooking(toolResults) {
+		log.Printf("[ai] blocked unsafe booking success claim for session=%s", sessionID)
+		response = "Maaf, saya belum berhasil membuat pesanan Anda karena terjadi kendala pada sistem. Silakan coba beberapa saat lagi."
+	}
+
 	if err := s.repo.AddChatMessage(&models.ChatMessage{SessionID: sessionID, Role: "assistant", Content: response}); err != nil {
 		return ChatResult{}, err
 	}
@@ -112,10 +126,96 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 	}, nil
 }
 
-func (s *AIService) generateWithAI(sessionID uuid.UUID, prompt string, workflow []ToolResult, packages []models.Trip) (ai.CompletionResponse, error) {
+// generateWithToolLoop calls the LLM with OpenAI function calling enabled.
+// If the LLM responds with tool_calls, this function executes them via MCP,
+// appends the results back into the conversation, and calls the LLM again
+// so it can generate a final text response based on actual tool results.
+// This ensures the AI NEVER claims an order was created unless the backend
+// actually confirms it.
+func (s *AIService) generateWithToolLoop(sessionID uuid.UUID, prompt string, workflow []ToolResult, packages []models.Trip) (ai.CompletionResponse, []ToolResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.AITimeout)
 	defer cancel()
 
+	messages := s.buildMessages(sessionID, prompt, workflow, packages)
+	tools := mcp.OpenAITools()
+
+	var allToolResults []ToolResult
+
+	for round := 0; round < ai.MaxToolCallRounds; round++ {
+		resp, err := s.client.Generate(ctx, ai.CompletionRequest{
+			Messages: messages,
+			Tools:    tools,
+		})
+		if err != nil {
+			return resp, allToolResults, err
+		}
+
+		// No tool calls — LLM gave a final text response.
+		if len(resp.ToolCalls) == 0 {
+			return resp, allToolResults, nil
+		}
+
+		log.Printf("[ai] round %d: LLM requested %d tool call(s)", round+1, len(resp.ToolCalls))
+
+		// Append the assistant message with tool_calls to the conversation.
+		assistantMsg := ai.Message{
+			Role:      "assistant",
+			ToolCalls: resp.ToolCalls,
+		}
+		messages = append(messages, assistantMsg)
+
+		// Execute each tool call and append tool results as "tool" role messages.
+		for _, tc := range resp.ToolCalls {
+			log.Printf("[ai] executing tool: %s (call_id=%s) args=%s", tc.Function.Name, tc.ID, tc.Function.Arguments)
+
+			// Parse the function arguments from JSON string.
+			var args map[string]interface{}
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+				log.Printf("[ai] failed to parse tool args for %s: %v", tc.Function.Name, err)
+				args = map[string]interface{}{}
+			}
+
+			// Execute via MCP service (which handles create_booking, mock tools, etc.)
+			toolResult, execErr := s.mcp.Execute(sessionID, tc.Function.Name, args)
+			if execErr != nil {
+				log.Printf("[ai] tool execution error for %s: %v", tc.Function.Name, execErr)
+				toolResult = ToolResult{
+					Tool:   tc.Function.Name,
+					Status: "failed",
+					Data:   map[string]interface{}{"error": execErr.Error()},
+				}
+			}
+
+			allToolResults = append(allToolResults, toolResult)
+
+			// Serialize the tool result and append as a "tool" role message
+			// so the LLM knows the actual outcome.
+			resultJSON, _ := json.Marshal(toolResult)
+			log.Printf("[ai] tool result for %s: %s", tc.Function.Name, string(resultJSON))
+
+			messages = append(messages, ai.Message{
+				Role:       "tool",
+				Content:    string(resultJSON),
+				ToolCallID: tc.ID,
+				Name:       tc.Function.Name,
+			})
+		}
+
+		// Continue the loop — the LLM will receive tool results and either
+		// make more tool calls or generate a final text response.
+	}
+
+	// If we exhausted all rounds, force a final call without tools so the LLM
+	// generates a text response.
+	log.Printf("[ai] exhausted %d tool call rounds, forcing final text response", ai.MaxToolCallRounds)
+	resp, err := s.client.Generate(ctx, ai.CompletionRequest{Messages: messages})
+	return resp, allToolResults, err
+}
+
+// buildMessages constructs the initial message array for the LLM, including
+// system prompt, package catalog, memory summary, workflow context, and recent
+// conversation history.
+func (s *AIService) buildMessages(sessionID uuid.UUID, prompt string, workflow []ToolResult, packages []models.Trip) []ai.Message {
 	messages := []ai.Message{
 		{
 			Role: "system",
@@ -126,10 +226,13 @@ func (s *AIService) generateWithAI(sessionID uuid.UUID, prompt string, workflow 
 				"2. Number of children (if any) " +
 				"3. Travel date " +
 				"4. Contact information (Email OR WhatsApp number). Explain that this is needed so the team can follow up. " +
-				"Call the `update_order_draft` tool every time you gather new information so the UI can update the order summary. " +
-				"Once ALL the required information has been collected, call the `create_booking` tool to automatically finalize the order. " +
+				"You have access to tools. Call the `update_order_draft` tool every time you gather new information so the UI can update the order summary. " +
+				"Once ALL the required information has been collected, call the `create_booking` tool to finalize the order. " +
+				"CRITICAL: You MUST wait for the tool result before telling the customer anything about the order status. " +
+				"If `create_booking` returns status=success, THEN tell the customer their order has been created. " +
+				"If `create_booking` returns status=failed, tell the customer there was a problem and ask them to try again. NEVER claim the order was created if the tool failed or was not called. " +
 				"Use natural, customer-facing language. NEVER expose internal order statuses (like NEW, PENDING, PROCESSING), and never explain backend workflows, database, or admin processes. " +
-				"Instead of technical steps, suggest the next step naturally: e.g., 'Silakan pilih paket yang Anda inginkan.', ask 'Berapa orang yang ikut?', or say 'Pesanan Anda sudah berhasil dibuat. Tim kami akan segera menghubungi Anda.'. " +
+				"Instead of technical steps, suggest the next step naturally: e.g., 'Silakan pilih paket yang Anda inginkan.', ask 'Berapa orang yang ikut?', or say 'Pesanan Anda sudah berhasil dibuat. Tim kami akan segera menghubungi Anda.' (only after tool success). " +
 				"Payments are temporarily disabled, so never mention DOKU, QRIS, virtual accounts, checkout links, payment sessions, payment instructions, or paying now. " +
 				"Do not use Markdown formatting, bold markers, asterisks, headings, or decorative symbols. Use plain text and simple hyphen bullets only when a list is helpful.",
 		},
@@ -141,28 +244,19 @@ func (s *AIService) generateWithAI(sessionID uuid.UUID, prompt string, workflow 
 	if err == nil && session.MemorySummary != "" {
 		messages = append(messages, ai.Message{Role: "system", Content: "Conversation memory summary: " + session.MemorySummary})
 	}
-	// Token optimization: send a compact workflow summary (tool + status) as a
-	// system message BEFORE the conversation tail, instead of the full dummy
-	// tool payloads.
 	messages = append(messages, ai.Message{
 		Role:    "system",
 		Content: "Latest travel workflow context: " + summarizeWorkflow(workflow),
 	})
-	// Recent messages already end with the user's latest prompt (persisted by
-	// Chat() before this call), so we do NOT append the prompt again — that would
-	// duplicate it and waste tokens.
 	recent, _ := s.repo.ListRecentChatMessages(sessionID, s.cfg.AIRecentMessages)
 	for _, message := range recent {
 		messages = append(messages, ai.Message{Role: message.Role, Content: message.Content})
 	}
-	// Fallback only if, for some reason, the tail could not be loaded.
 	if len(recent) == 0 {
 		messages = append(messages, ai.Message{Role: "user", Content: prompt})
 	}
 
-	return s.client.Generate(ctx, ai.CompletionRequest{
-		Messages: messages,
-	})
+	return messages
 }
 
 // summarizeWorkflow renders only the tool name and status of each MCP step as
@@ -264,6 +358,57 @@ func selectRecommendedPackages(text string, packages []models.Trip) []models.Tri
 	return recommended
 }
 
+func hasSuccessfulCreateBooking(results []ToolResult) bool {
+	for _, result := range results {
+		if result.Tool == "create_booking" && result.Status == "success" {
+			return true
+		}
+	}
+	return false
+}
+
+func responseClaimsOrderCreated(response string) bool {
+	lower := strings.ToLower(response)
+	if strings.Contains(lower, "belum berhasil") || strings.Contains(lower, "tidak berhasil") || strings.Contains(lower, "gagal") {
+		return false
+	}
+	phrases := []string{
+		"pesanan anda berhasil dibuat",
+		"pesanan anda sudah dibuat",
+		"pesanan anda telah dibuat",
+		"pesanan sudah berhasil dibuat",
+		"pesanan berhasil dibuat",
+		"pemesanan anda berhasil",
+		"pemesanan berhasil",
+		"booking anda berhasil",
+		"reservasi anda berhasil",
+		"order has been successfully created",
+		"order successfully created",
+		"order anda berhasil",
+		"booking has been successfully created",
+		"booking successfully created",
+		"berhasil saya buatkan",
+	}
+	for _, phrase := range phrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	orderWords := []string{"pesanan", "pemesanan", "order", "booking", "reservasi"}
+	successWords := []string{"berhasil dibuat", "sudah dibuat", "telah dibuat", "successfully created", "created successfully"}
+	for _, orderWord := range orderWords {
+		if !strings.Contains(lower, orderWord) {
+			continue
+		}
+		for _, successWord := range successWords {
+			if strings.Contains(lower, successWord) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *AIService) refreshMemorySummary(sessionID uuid.UUID) error {
 	count, err := s.repo.CountChatMessages(sessionID)
 	if err != nil || count < int64(s.cfg.AIMemorySummaryAfter) {
@@ -273,10 +418,6 @@ func (s *AIService) refreshMemorySummary(sessionID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	// Only fetch the tail of the conversation instead of ALL messages.
-	// We estimate how many recent messages are needed to fill AIMemoryMaxChars.
-	// A conservative heuristic: ~200 chars per message, so fetch enough to exceed
-	// the max. This avoids loading thousands of rows for long sessions.
 	tailLimit := s.cfg.AIMemoryMaxChars / 200
 	if tailLimit < 20 {
 		tailLimit = 20

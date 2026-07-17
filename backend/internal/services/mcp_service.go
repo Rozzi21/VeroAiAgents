@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/json"
+	"log"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,14 +29,20 @@ type ToolResult struct {
 func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error) {
 	start := time.Now()
 	var result ToolResult
+	log.Printf("[mcp] tool selected session=%s tool=%s payload=%+v", sessionID, toolName, payload)
 	switch toolName {
 	case "create_payment":
 		// DOKU/payment tools are temporarily disabled. Keep the tool name blocked
 		// here as a defense-in-depth guard even if a caller bypasses AIService.Chat.
 		result = ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "payment tools are temporarily disabled"}}
-	case "create_booking":
+	case "create_booking", "create_order":
 		// Execute actual booking logic
 		result = s.executeCreateBooking(payload)
+	case "update_order_draft":
+		result = ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+			"success": true,
+			"draft":   payload,
+		}}
 	default:
 		for attempt := 1; attempt <= 3; attempt++ {
 			result = s.mock(toolName, payload)
@@ -45,6 +52,7 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 		}
 	}
+	log.Printf("[mcp] tool executed session=%s tool=%s status=%s duration_ms=%d", sessionID, toolName, result.Status, time.Since(start).Milliseconds())
 
 	payloadJSON, _ := json.Marshal(payload)
 	resultJSON, _ := json.Marshal(result)
@@ -133,16 +141,19 @@ func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 }
 
 func (s *MCPService) executeCreateBooking(payload map[string]interface{}) ToolResult {
+	log.Printf("[mcp] create_booking called args=%+v", payload)
 	// Get guest user
 	guestUser, err := s.auth.GuestUser()
 	if err != nil {
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": err.Error()}}
+		log.Printf("[mcp] create_booking failed guest_user error=%v", err)
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
 	}
 
 	tripIDStr, _ := payload["trip_id"].(string)
 	tripID, err := uuid.Parse(tripIDStr)
 	if err != nil {
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": "invalid trip_id"}}
+		log.Printf("[mcp] create_booking failed invalid_trip_id trip_id=%q", tripIDStr)
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": "invalid trip_id"}}
 	}
 
 	adultPax := 1
@@ -173,17 +184,25 @@ func (s *MCPService) executeCreateBooking(payload map[string]interface{}) ToolRe
 		req.ContactName = "Guest"
 	}
 	if req.ContactEmail == "" && req.ContactPhone == "" {
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": "contact_email or contact_phone is required"}}
+		log.Printf("[mcp] create_booking failed missing_contact trip_id=%s", tripID)
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": "contact_email or contact_phone is required"}}
 	}
 
+	log.Printf("[mcp] create_booking saving trip_id=%s adult_pax=%d child_pax=%d contact_email=%q contact_phone=%q travel_date=%q", req.TripID, req.AdultPax, req.ChildPax, req.ContactEmail, req.ContactPhone, req.TravelDate)
 	booking, err := s.bookings.Create(guestUser.ID, req)
 	if err != nil {
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"error": err.Error()}}
+		log.Printf("[mcp] create_booking save failed error=%v", err)
+		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
 	}
+	log.Printf("[mcp] create_booking saved booking_id=%s status=%s payment_status=%s total=%.2f", booking.ID, booking.BookingStatus, booking.PaymentStatus, booking.TotalPrice)
 
 	return ToolResult{Tool: "create_booking", Status: "success", Data: map[string]interface{}{
+		"success":        true,
+		"order_id":       booking.ID.String(),
+		"status":         booking.BookingStatus,
 		"booking_id":     booking.ID.String(),
 		"booking_status": booking.BookingStatus,
+		"payment_status": booking.PaymentStatus,
 		"total_price":    booking.TotalPrice,
 	}}
 }

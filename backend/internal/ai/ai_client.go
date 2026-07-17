@@ -15,6 +15,11 @@ import (
 // maxAIResponseBytes caps the AI provider response body we will decode (SEC-9).
 const maxAIResponseBytes = 1 << 20 // 1 MiB
 
+// MaxToolCallRounds limits how many tool-call round-trips we allow before
+// forcing a final text response. This prevents infinite loops if the LLM keeps
+// requesting tool calls.
+const MaxToolCallRounds = 5
+
 type Client struct {
 	APIKey      string
 	BaseURL     string
@@ -24,16 +29,47 @@ type Client struct {
 }
 
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	Name       string     `json:"name,omitempty"`
+}
+
+// ToolCall represents an OpenAI-compatible function call from the LLM.
+type ToolCall struct {
+	ID       string       `json:"id"`
+	Type     string       `json:"type"`
+	Function FunctionCall `json:"function"`
+}
+
+// FunctionCall holds the function name and JSON-encoded arguments.
+type FunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// ToolDef is the OpenAI-compatible tool definition sent in the request.
+type ToolDef struct {
+	Type     string       `json:"type"`
+	Function FunctionSpec `json:"function"`
+}
+
+// FunctionSpec describes a function available to the LLM.
+type FunctionSpec struct {
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Parameters  interface{} `json:"parameters"`
 }
 
 type CompletionRequest struct {
 	Messages []Message `json:"messages"`
+	Tools    []ToolDef `json:"tools,omitempty"`
 }
 
 type CompletionResponse struct {
 	Text      string                 `json:"text"`
+	ToolCalls []ToolCall             `json:"tool_calls,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 	RawStatus int                    `json:"raw_status"`
 }
@@ -70,11 +106,15 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 		}, nil
 	}
 
-	body, err := json.Marshal(map[string]interface{}{
+	payload := map[string]interface{}{
 		"model":       c.Model,
 		"messages":    req.Messages,
 		"temperature": c.Temperature,
-	})
+	}
+	if len(req.Tools) > 0 {
+		payload["tools"] = req.Tools
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return CompletionResponse{}, err
 	}
@@ -102,16 +142,67 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 
 	out := CompletionResponse{
 		Text:      extractText(raw),
+		ToolCalls: extractToolCalls(raw),
 		Metadata:  raw,
 		RawStatus: res.StatusCode,
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return out, fmt.Errorf("ai provider returned status %d", res.StatusCode)
 	}
-	if out.Text == "" {
+	if len(out.ToolCalls) == 0 && out.Text == "" {
 		out.Text = "AI provider returned an empty text response."
 	}
 	return out, nil
+}
+
+// extractToolCalls parses tool_calls from an OpenAI-compatible response.
+func extractToolCalls(raw map[string]interface{}) []ToolCall {
+	choices, ok := raw["choices"].([]interface{})
+	if !ok || len(choices) == 0 {
+		return nil
+	}
+	choice, ok := choices[0].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	message, ok := choice["message"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+	toolCallsRaw, ok := message["tool_calls"].([]interface{})
+	if !ok || len(toolCallsRaw) == 0 {
+		return nil
+	}
+
+	var calls []ToolCall
+	for _, tcRaw := range toolCallsRaw {
+		tcMap, ok := tcRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		tc := ToolCall{
+			ID:   getStr(tcMap, "id"),
+			Type: getStr(tcMap, "type"),
+		}
+		if fnMap, ok := tcMap["function"].(map[string]interface{}); ok {
+			tc.Function = FunctionCall{
+				Name:      getStr(fnMap, "name"),
+				Arguments: getStr(fnMap, "arguments"),
+			}
+		}
+		if tc.Function.Name != "" {
+			calls = append(calls, tc)
+			log.Printf("[ai] tool_call: id=%s function=%s", tc.ID, tc.Function.Name)
+		}
+	}
+	return calls
+}
+
+func getStr(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
 }
 
 // extractText extracts the final assistant text from an OpenAI-compatible
