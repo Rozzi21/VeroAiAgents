@@ -25,6 +25,45 @@ type ContextMenuState = {
   y: number;
 };
 
+const TRIPS_CACHE_TTL_MS = 60_000;
+
+let tripsCache: { data: TripPackage[]; expiresAt: number } | null = null;
+let tripsRequest: Promise<TripPackage[]> | null = null;
+
+function hasFreshTripsCache() {
+  return Boolean(tripsCache && tripsCache.expiresAt > Date.now());
+}
+
+function cacheTrips(data: TripPackage[]) {
+  tripsCache = {
+    data,
+    expiresAt: Date.now() + TRIPS_CACHE_TTL_MS,
+  };
+}
+
+async function fetchTripsOnce() {
+  if (hasFreshTripsCache() && tripsCache) {
+    return tripsCache.data;
+  }
+
+  if (!tripsRequest) {
+    tripsRequest = apiFetch<TripPackage[]>("/api/v1/admin/packages", {}, true)
+      .then((data) => {
+        cacheTrips(data);
+        return data;
+      })
+      .finally(() => {
+        tripsRequest = null;
+      });
+  }
+
+  return tripsRequest;
+}
+
+export function invalidateTripsCache() {
+  tripsCache = null;
+}
+
 export function useTripsList() {
   const router = useRouter();
   const pathname = typeof window !== "undefined" ? window.location.pathname : "";
@@ -35,8 +74,8 @@ export function useTripsList() {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");
   const [modal, setModal] = useState<ModalType>(null);
-  const [packages, setPackages] = useState<TripPackage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [packages, setPackages] = useState<TripPackage[]>(() => tripsCache?.data ?? []);
+  const [loading, setLoading] = useState(() => !hasFreshTripsCache());
   const [error, setError] = useState("");
   const [toast, setToast] = useState<ToastState | null>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
@@ -44,19 +83,20 @@ export function useTripsList() {
   const [pendingTripId, setPendingTripId] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError("");
-    const params = new URLSearchParams();
-    if (category !== "all") {
-      params.set("category", category);
+    if (activePanel !== "trips") {
+      return;
     }
-    if (query) {
-      params.set("search", query);
-    }
-    const path = `/api/v1/admin/packages?${params.toString()}`;
 
-    apiFetch<TripPackage[]>(path, {}, true)
+    let cancelled = false;
+    setError("");
+    if (hasFreshTripsCache() && tripsCache) {
+      setPackages(tripsCache.data);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    fetchTripsOnce()
       .then((data) => {
         if (!cancelled) {
           setPackages(data);
@@ -76,7 +116,7 @@ export function useTripsList() {
     return () => {
       cancelled = true;
     };
-  }, [category, query]);
+  }, [activePanel]);
 
   const handleTripContextMenu = useCallback(
     (event: React.MouseEvent, trip: TripPackage) => {
@@ -124,17 +164,23 @@ export function useTripsList() {
     try {
       if (confirmAction.type === "delete") {
         await deleteTripPackage(trip.id);
-        setPackages((current) => current.filter((item) => item.id !== trip.id));
+        setPackages((current) => {
+          const updated = current.filter((item) => item.id !== trip.id);
+          cacheTrips(updated);
+          return updated;
+        });
         setToast({ type: "success", text: getDeleteSuccessMessage() });
       } else {
         const updated = await updateTripStatus(trip.id, confirmAction.targetStatus);
-        setPackages((current) =>
-          current.map((item) =>
+        setPackages((current) => {
+          const nextPackages = current.map((item) =>
             item.id === trip.id
               ? { ...item, ...updated, status: updated.status }
               : item
-          )
-        );
+          );
+          cacheTrips(nextPackages);
+          return nextPackages;
+        });
         setToast({
           type: "success",
           text: getStatusChangeSuccessMessage(confirmAction.targetStatus),

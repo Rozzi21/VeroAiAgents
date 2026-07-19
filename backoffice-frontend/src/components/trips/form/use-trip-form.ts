@@ -19,6 +19,7 @@ import {
   TripCategory,
   UploadedMedia,
 } from "./types";
+import { invalidateTripsCache } from "../list/use-trips-list";
 
 const EMPTY_DEFAULTS: TripFormStaticDefaults = {
   title: "",
@@ -440,6 +441,7 @@ export function useTripForm() {
           ? `Trip berhasil diperbarui sebagai ${statusLabel}.`
           : `Trip berhasil ditambahkan sebagai ${statusLabel}.`,
       });
+      invalidateTripsCache();
 
       if (!isEdit) {
         formElement.reset();

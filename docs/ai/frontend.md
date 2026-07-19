@@ -88,7 +88,7 @@ Struktur komponen `trips/`:
 | Folder/Komponen | Path | Fungsi |
 |---|---|---|
 | List screen | `backoffice-frontend/src/components/trips/list/trips-list-screen.tsx` | Layar daftar paket + panel dashboard ("On Development") |
-| List hook | `backoffice-frontend/src/components/trips/list/use-trips-list.ts` | Fetch `GET /admin/packages?category=&search=`, state list |
+| List hook | `backoffice-frontend/src/components/trips/list/use-trips-list.ts` | Fetch `GET /admin/packages`, cache in-memory 60 detik + deduplikasi request paralel; filter kategori/search berjalan lokal agar interaksi UI tidak memanggil server berulang |
 | Trip card | `backoffice-frontend/src/components/trips/list/trip-card.tsx` | Kartu paket di list |
 | Form screen | `backoffice-frontend/src/components/trips/form/trip-form-screen.tsx` | Form create/edit paket |
 | Form hook | `backoffice-frontend/src/components/trips/form/use-trip-form.ts` | Logika form: create (`POST`), update (`PUT`), upload media (`POST /admin/uploads`) |
@@ -121,7 +121,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 ### Fitur yang BELUM aktif (placeholder/mock)
 
 - Dashboard = panel "On Development" (`on-development-panel.tsx`).
-- `/settings`, `/trips/[id]` placeholder. `/orders` sudah memiliki layout lengkap (Order Management) dengan statistik, pencarian, filter, dan order detail drawer. Mendukung update status manual via `PUT /api/v1/bookings/:id`.
+- `/settings`, `/trips/[id]` placeholder. `/orders` sudah memiliki layout lengkap (Order Management) melalui `backoffice-frontend/src/components/orders/orders-panel.tsx`: statistik status, pencarian, filter dengan jumlah order, refresh manual, urutan prioritas status, kartu status pembayaran, detail drawer, kontak WhatsApp/email, serta konfirmasi sebelum pembatalan. Mendukung update status manual via `PUT /api/v1/bookings/:id`.
 - Mock data di `lib/data.ts` tidak dirender.
 - Tidak ada UI pembayaran, tidak ada fetch bookings/logs/analytics.
 
