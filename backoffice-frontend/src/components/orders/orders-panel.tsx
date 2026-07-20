@@ -102,7 +102,8 @@ function customerName(order: BookingOrder) {
 }
 
 function customerEmail(order: BookingOrder) {
-  return order.contact_email || order.user?.email || "";
+  const raw = order.contact_email || order.user?.email || "";
+  return sanitizeEmail(raw);
 }
 
 function packageName(order: BookingOrder) {
@@ -160,9 +161,19 @@ function travelers(order: BookingOrder) {
   return children > 0 ? `${adultLabel}, ${childLabel}` : adultLabel;
 }
 
-function whatsappUrl(phone: string) {
+function sanitizePhone(phone: string) {
   const normalized = phone.replace(/[^0-9]/g, "").replace(/^0/, "62");
+  return /^[0-9]{7,15}$/.test(normalized) ? normalized : "";
+}
+
+function whatsappUrl(phone: string) {
+  const normalized = sanitizePhone(phone);
   return normalized ? `https://wa.me/${normalized}` : "";
+}
+
+function sanitizeEmail(email: string) {
+  const trimmed = email.trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed) ? trimmed : "";
 }
 
 function paymentStatus(order: BookingOrder) {

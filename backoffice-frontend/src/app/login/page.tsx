@@ -51,7 +51,15 @@ export default function LoginPage() {
       const redirectPath = new URLSearchParams(window.location.search).get(
         "redirect"
       );
-      window.location.href = redirectPath?.startsWith("/") ? redirectPath : "/";
+      const allowedPaths = ["/", "/trips", "/orders", "/settings"];
+      const target =
+        redirectPath &&
+        redirectPath.startsWith("/") &&
+        !redirectPath.startsWith("//") &&
+        allowedPaths.some((prefix) => redirectPath === prefix || redirectPath.startsWith(`${prefix}/`))
+          ? redirectPath
+          : "/";
+      window.location.href = target;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Login failed");
     }

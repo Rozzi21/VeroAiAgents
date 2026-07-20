@@ -305,7 +305,8 @@ export function useTripForm() {
     const duration =
       days > 0 || nights > 0 ? `${days} Days / ${nights} Nights` : "";
     const summary = String(form.get("summary") || "").trim();
-    const basePrice = Number(form.get("base_price") || 0);
+    const basePrice = Number(form.get("base_price") ?? 0);
+    const basePriceRaw = String(form.get("base_price") ?? "").trim();
     const packageStartDate = String(form.get("package_start") || "").trim();
     const packageEndDate = String(form.get("package_end") || "").trim();
     const publishStartDate = visibilityEnabled
@@ -330,7 +331,7 @@ export function useTripForm() {
       });
       return;
     }
-    if (!title || !location || !duration || !summary || !basePrice) {
+    if (!title || !location || !duration || !summary || basePriceRaw === "") {
       setToast({
         type: "error",
         text: "Lengkapi field wajib: Trip Name, Location, Duration, Summary, dan Base Price.",

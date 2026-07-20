@@ -234,29 +234,17 @@ Aritmetika `float64` rawan galat presisi untuk nominal uang. DB sudah `numeric`,
 
 ---
 
-### 14. Backoffice: Error Handling Mengasumsi Response Selalu JSON
+### 14. ✅ Backoffice: Error Response HTML Saat JSON Diharapkan (FIXED)
 
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `request()` & `refreshAccessToken()`
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `parseJsonEnvelope()`, `request()`.
 
-```ts
-const payload = (await response.json()) as Envelope<T>;
-```
+Request sekarang memeriksa `Content-Type` dan membungkus `response.json()` dalam try-catch. Jika backend membalas HTML (502/504/nginx timeout) atau JSON rusak, client mendapat pesan user-friendly: "Server merespons dengan format yang tidak dikenal" / "Gagal membaca respons dari server".
 
-Response dipaksa parse JSON tanpa try-catch. Jika backend membalas HTML (nginx 502, proxy timeout), `response.json()` throw `SyntaxError` yang tidak ramah user.
+### 15. ✅ Backoffice: Refresh Token Promise Tanpa Timeout (FIXED)
 
-> Catatan: customer frontend (`frontend/src/lib/api.ts`) **sudah** membungkus `response.json()` dalam try-catch — pola ini tinggal diterapkan ke backoffice.
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `refreshAccessToken()`.
 
-**Saran:** cek `Content-Type` sebelum parse, atau bungkus try-catch → pesan user-friendly.
-
----
-
-### 15. Backoffice: Refresh Token Promise Shared Tanpa Timeout
-
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `refreshAccessToken()`
-
-`refreshPromise` di-share antar pemanggil, tapi `fetch` refresh tidak punya timeout. Jika endpoint refresh hang (backend mati), promise tidak pernah resolve dan semua request yang menunggu ikut hang.
-
-**Saran:** tambahkan `AbortController` + timeout (mis. 10 detik) yang me-reject promise.
+Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. Jika backend hang, refresh akan abort dan request menunggu dapat reject, sehingga tidak menggantung seluruh antrean request.
 
 ---
 
@@ -269,7 +257,6 @@ Response dipaksa parse JSON tanpa try-catch. Jika backend membalas HTML (nginx 5
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
-| 🟡 Sedang | #14/#15 Backoffice api.ts (JSON & timeout) | Error/hang tidak tertangani |
 | Rendah | #13 Uang float64 | Presisi (makin relevan setelah harga server-side SEC-3) |
 | Rendah | #10 LLM summarization memory | Masih truncation string |
 
@@ -288,6 +275,8 @@ Response dipaksa parse JSON tanpa try-catch. Jika backend membalas HTML (nginx 5
 | SEC-9 AI body tanpa limit | ✅ `io.LimitReader` 1 MiB |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |
+| #14 Error HTML Saat JSON | ✅ Cek `Content-Type` + try-catch di `api.ts` |
+| #15 Refresh Promise Timeout | ✅ AbortController 10s di `refreshAccessToken` |
 
 > Catatan: item lama (pagination list endpoint & async logging MCP + retry) sudah selesai lebih dulu: `dto.ListQuery.Normalize()` (default 50, maks 200) dan audit log + single retry di `MCPService.Execute()`.
 

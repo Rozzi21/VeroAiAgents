@@ -19,6 +19,8 @@ const FALLBACK_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
 // backend default JWT_ACCESS_TTL_MINUTES (15 minutes) so the proactive refresh
 // schedule stays accurate even if the server omits expires_in.
 const DEFAULT_ACCESS_TTL_SECONDS = 900;
+// Abort refresh requests that hang so queued callers do not block forever.
+const REFRESH_TIMEOUT_MS = 10_000;
 // Name of the cross-tab coordination channel for auth refresh.
 const AUTH_CHANNEL_NAME = "vero_auth";
 
@@ -262,13 +264,16 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 
   refreshPromise = (async () => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS);
     try {
       const response = await fetch(`${resolveApiBase()}/api/v1/auth/refresh`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
       });
-      const payload = (await response.json()) as Envelope<AuthTokens>;
+      const payload = await parseJsonEnvelope<AuthTokens>(response);
       if (!response.ok || !payload.success) {
         return null;
       }
@@ -295,6 +300,7 @@ async function refreshAccessToken(): Promise<string | null> {
     } catch {
       return null;
     } finally {
+      clearTimeout(timeoutId);
       refreshPromise = null;
     }
   })();
@@ -374,6 +380,18 @@ export async function fetchCurrentUser() {
   return apiFetch<AuthUser>("/api/v1/auth/me", {}, true);
 }
 
+async function parseJsonEnvelope<T>(response: Response): Promise<Envelope<T>> {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    throw new Error("Server merespons dengan format yang tidak dikenal.");
+  }
+  try {
+    return (await response.json()) as Envelope<T>;
+  } catch {
+    throw new Error("Gagal membaca respons dari server.");
+  }
+}
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -399,7 +417,7 @@ async function request<T>(
     headers,
     credentials: "include",
   });
-  const payload = (await response.json()) as Envelope<T>;
+  const payload = await parseJsonEnvelope<T>(response);
 
   if (response.status === 401 && auth) {
     const authError = new Error(payload.message || "Unauthorized");
