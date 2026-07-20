@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -46,8 +47,11 @@ func (h *Handler) Health(c *gin.Context) {
 func (h *Handler) DatabaseHealth(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
+	// SEC-15: do not leak raw DB errors (DSN fragments, connection details) on a
+	// public endpoint; log server-side instead.
 	if err := h.Database.Health(ctx); err != nil {
-		utils.Error(c, http.StatusServiceUnavailable, "Database disconnected", gin.H{"detail": err.Error()})
+		log.Printf("[health] database check failed: %v", err)
+		utils.Error(c, http.StatusServiceUnavailable, "Database disconnected", gin.H{})
 		return
 	}
 	utils.Success(c, http.StatusOK, "Database connected", gin.H{"database": "connected"})
@@ -60,7 +64,10 @@ func (h *Handler) Register(c *gin.Context) {
 	}
 	result, err := h.Services.Auth.Register(req, authRequestMeta(c))
 	if err != nil {
-		utils.BadRequest(c, "Registration failed", gin.H{"detail": err.Error()})
+		// SEC-15: hide raw service/DB errors (e.g. duplicate-email constraint)
+		// from the client; log server-side.
+		log.Printf("[register] failed: %v", err)
+		utils.BadRequest(c, "Registration failed", gin.H{})
 		return
 	}
 	respondAuthIssue(c, h.Services.Config, http.StatusCreated, "Registered", result)
@@ -118,7 +125,8 @@ func (h *Handler) AdminCreateUser(c *gin.Context) {
 	}
 	user, err := h.Services.Auth.CreateStaff(req, authRequestMeta(c))
 	if err != nil {
-		utils.BadRequest(c, "Create user failed", gin.H{"detail": err.Error()})
+		log.Printf("[admin-create-user] failed: %v", err)
+		utils.BadRequest(c, "Create user failed", gin.H{})
 		return
 	}
 	utils.Success(c, http.StatusCreated, "User created", user)
@@ -335,7 +343,7 @@ func (h *Handler) UpdateBooking(c *gin.Context) {
 			utils.NotFound(c, "Booking not found")
 			return
 		}
-		utils.BadRequest(c, "Update booking failed", gin.H{"detail": err.Error()})
+		utils.BadRequest(c, "Update booking failed", gin.H{})
 		return
 	}
 	utils.Success(c, http.StatusOK, "Booking updated", booking)
@@ -372,7 +380,10 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 	}
 	payment, err := h.Services.Payments.Webhook(req)
 	if err != nil {
-		utils.BadRequest(c, "Webhook failed", gin.H{"detail": err.Error()})
+		// SEC-15: do not echo internal/payment errors to an unauthenticated
+		// caller; log server-side.
+		log.Printf("[payment-webhook] rejected: %v", err)
+		utils.BadRequest(c, "Webhook failed", gin.H{})
 		return
 	}
 	utils.Success(c, http.StatusOK, "Payment updated", payment)
@@ -444,7 +455,7 @@ const maxUploadBytes = 5 << 20 // 5 MiB
 func (h *Handler) UploadTripMedia(c *gin.Context) {
 	file, err := c.FormFile("file")
 	if err != nil {
-		utils.BadRequest(c, "Upload failed", gin.H{"detail": err.Error()})
+		utils.BadRequest(c, "Upload failed: multipart file field 'file' is required", gin.H{})
 		return
 	}
 
@@ -464,7 +475,8 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 	// SEC-5: verify the real content type from the file's magic bytes instead of
 	// trusting the filename extension alone.
 	if detected, err := detectImageContentType(file); err != nil {
-		utils.BadRequest(c, "Unable to read file", gin.H{"detail": err.Error()})
+		log.Printf("[upload] unable to read file: %v", err)
+		utils.BadRequest(c, "Unable to read file", gin.H{})
 		return
 	} else if !strings.HasPrefix(detected, "image/") {
 		utils.BadRequest(c, "File content is not a valid image", gin.H{"detected": detected})

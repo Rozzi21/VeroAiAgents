@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) — SEC-11 SUDAH DIPERBAIKI (21 Jul 2026), sisanya (SEC-10, SEC-12..SEC-21) BELUM — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) — SEC-11 & SEC-15 SUDAH DIPERBAIKI (21 Jul 2026), sisanya (SEC-10, SEC-12..SEC-14, SEC-16..SEC-21) BELUM — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
 
 ---
 
@@ -55,13 +55,18 @@ Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH diha
 
 **Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
 
-### SEC-15. 🟠 SEDANG — Kebocoran Detail Error Internal ke Client
+### SEC-15. ✅ SEDANG — Kebocoran Detail Error Internal ke Client (FIXED 21 Jul 2026)
 
-**Lokasi:** `backend/internal/utils/response.go` → `ServerError()` (mengirim `err.Error()`); `handlers.go` banyak `gin.H{"detail": err.Error()}`; `DatabaseHealth()` membalas error DB mentah di endpoint publik `/health/database`.
+**Lokasi:** `backend/internal/utils/response.go` → `ServerError()`; `backend/internal/handlers/handlers.go`.
 
-Respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint, DSN fragment, path file). Membantu penyerang memetakan skema DB & internal. `/health/database` publik tanpa auth membocorkan detail koneksi DB saat down.
+Dulu respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint, DSN fragment). Kini:
 
-**Perbaikan:** `ServerError` membalas pesan generik + log detail ke server; batasi `/health/database` (auth/internal) atau hilangkan `detail`.
+1. `ServerError()` membalas pesan generik `"Internal server error"` dengan `error: {}`; error asli di-`log.Printf` ke server bersama `request_id`, method, path.
+2. `/health/database` (`DatabaseHealth`) tidak lagi mengirim `detail` — error DB di-log server-side, client hanya menerima `"Database disconnected"`.
+3. BadRequest yang membawa error service internal disapukan ke pesan statis + log server: `Register`, `AdminCreateUser`, `UpdateBooking`, `PaymentWebhook`, `UploadTripMedia` (form file + read file).
+4. Disengaja dipertahankan: `bind()` (error validasi JSON per-field) dan `parseID()` (error parse UUID) masih mengirim `detail` — itu error input klien, bukan internal; berguna untuk UX form. `Login` tetap membalas `err.Error()` via `Unauthorized` (pesan kredensial-salah yang memang ditujukan ke user, bukan error DB).
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-16. 🟠 SEDANG — Prompt Chat Tanpa Batas Ukuran (Biaya LLM / DoS)
 
@@ -364,7 +369,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|---|
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
-| 🟠 Sedang | SEC-13..SEC-17 abuse/kebocoran | Spam order, memory DoS limiter, error mentah, prompt raksasa, lintas-sesi |
+| 🟠 Sedang | SEC-13/14/16/17 abuse/kebocoran | Spam order, memory DoS limiter, prompt raksasa, lintas-sesi |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
@@ -378,6 +383,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-1 Privilege escalation `/auth/register` | ✅ Register paksa `RoleUser` + endpoint `admin/users` |
 | SEC-2 IDOR booking/payment | ✅ `Find(id,userID,isStaff)` + repo scoped per-owner |
 | SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
+| SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | SEC-3 Tampering harga/amount | ✅ Harga & amount dihitung server-side |
 | SEC-4 Webhook dipalsukan | ✅ Signature wajib + `DOKU_SECRET` prod + idempotency |
 | SEC-5 Upload tanpa batas + MIME ekstensi | ✅ Batas 5 MiB + sniff `DetectContentType` |

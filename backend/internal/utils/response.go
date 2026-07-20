@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -45,8 +46,11 @@ func NotFound(c *gin.Context, message string) {
 	Error(c, http.StatusNotFound, message, gin.H{})
 }
 
+// ServerError logs the real error server-side and returns a generic message to
+// the client (SEC-15). Raw Go/GORM errors (table names, constraints, DSN
+// fragments, file paths) must never reach the client.
 func ServerError(c *gin.Context, err error) {
-	Error(c, http.StatusInternalServerError, "Internal server error", gin.H{
-		"detail": err.Error(),
-	})
+	log.Printf("[server-error] request_id=%s method=%s path=%s error=%v",
+		c.GetString("request_id"), c.Request.Method, c.Request.URL.Path, err)
+	Error(c, http.StatusInternalServerError, "Internal server error", gin.H{})
 }

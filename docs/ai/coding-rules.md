@@ -39,6 +39,8 @@ utils.ServerError(c, err)
 
 Bentuk envelope: `{ success, message, data, error }`. Frontend bergantung pada bentuk ini (lihat `Envelope<T>` di kedua `lib/api.ts`).
 
+**Kebocoran error (SEC-15):** JANGAN mengirim `err.Error()` dari error internal (DB/GORM/service) ke client — baik via `ServerError` (sudah generik + log server) maupun `gin.H{"detail": err.Error()}` di `BadRequest` untuk endpoint publik/service. Log detail ke server (`log.Printf` + `request_id`), balas pesan statis ke client. Pengecualian yang disengaja: `bind()` (error validasi JSON per-field) dan `parseID()` (parse UUID) boleh mengirim `detail` karena itu error input klien, berguna untuk UX form.
+
 ### 1.4 Validasi Input via DTO
 
 Request divalidasi lewat struct tag binding di `backend/internal/dto/dto.go`, bukan manual di handler.
