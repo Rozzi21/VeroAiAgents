@@ -178,7 +178,7 @@ Query `TripListQuery`: `category`, `status`, `search`, `published_only`, `limit`
 > - Harga booking & amount payment **dihitung server-side**, tidak menerima nominal dari client (SEC-3).
 > - `webhook` menolak request tanpa signature valid bila `DOKU_SECRET` ter-set; di production `DOKU_SECRET` wajib hanya saat `PAYMENTS_ENABLED=true` (SEC-4).
 
-- `booking` request: `{trip_id, adult_pax?, child_pax?}` (DTO `BookingRequest`). `total_price` **dihapus** — total dihitung server-side dari harga paket (menghormati diskon) × pax. Bila pax tidak diisi, default 1 dewasa.
+- `booking` request: `{trip_id, adult_pax?, child_pax?}` (DTO `BookingRequest`). `total_price` **dihapus** — total dihitung server-side dari harga paket (menghormati diskon) × pax. Bila pax tidak diisi, default 1 dewasa. Pax dibatasi `0..20` (`binding gte=0,lte=20` + guard `dto.MaxBookingPax` di service, SEC-11); nilai di luar rentang ditolak.
 - `payment create` request: `{booking_id, payment_method(oneof QRIS|VA|VIRTUAL_ACCOUNT)}` (DTO `PaymentCreateRequest`). `amount` **dihapus** — diambil dari `Booking.TotalPrice`.
 - `webhook` request: `{external_id, status, signature?, amount?}`. Signature juga bisa via header `X-Doku-Signature`. Verifikasi: `HMAC-SHA256(external_id + status, DOKU_SECRET)`. Bila `amount` dikirim, harus cocok dengan payment. Idempotency: status `paid`/`settlement` tidak bisa diturunkan/diproses ulang.
 - Saat status `paid`/`settlement`: publish event `booking_confirmed` + trigger webhook N8N.

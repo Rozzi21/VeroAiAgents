@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) yang BELUM diperbaiki — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) — SEC-11 SUDAH DIPERBAIKI (21 Jul 2026), sisanya (SEC-10, SEC-12..SEC-21) BELUM — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
 
 ---
 
@@ -20,13 +20,16 @@ Handler memanggil `Repo.ListChatMessages(id)` tanpa memverifikasi bahwa session 
 
 **Perbaikan:** tambah filter ownership (`FindChatSession(id)` → cocokkan `UserID`, atau query messages join session dengan `user_id = ?`), staff boleh akses semua.
 
-### SEC-11. 🔴 TINGGI — Validasi Pax Negatif pada Booking (Harga Bisa Negatif)
+### SEC-11. ✅ TINGGI — Validasi Pax Negatif pada Booking (FIXED 21 Jul 2026)
 
-**Lokasi:** `backend/internal/services/booking_service.go` → `Create()` (baris ~27-32), `dto.go` → `BookingRequest`.
+**Lokasi:** `backend/internal/services/booking_service.go` → `Create()`, `dto.go` → `BookingRequest` + konstanta `MaxBookingPax`.
 
-`BookingRequest.AdultPax`/`ChildPax` bertipe `int` tanpa binding `gte=0`. Guard hanya `if adultPax <= 0 && childPax <= 0 { adultPax = 1 }` — sehingga `{"adult_pax": 1, "child_pax": -100}` lolos dan `total = adultPrice*1 + childPrice*(-100)` menghasilkan `TotalPrice` negatif/nol. Tidak ada batas atas pax (bisa `adult_pax: 1<<40` → overflow float / tagihan absurd). Berlaku untuk `POST /bookings`, `POST /orders` (publik!), dan tool MCP `create_booking` (`mcp_service.go` cast `int(v)` tanpa clamp).
+Dulu `AdultPax`/`ChildPax` tanpa batas: nilai negatif menghasilkan `TotalPrice` negatif/nol dan nilai raksasa berisiko overflow. Kini dua lapis pertahanan:
 
-**Perbaikan:** validasi `0 <= pax <= maxWajar` (mis. 20) di DTO binding + clamp di service; tolak nilai negatif.
+1. DTO binding `gte=0,lte=20` pada `AdultPax`/`ChildPax` — menolak request HTTP (`POST /bookings`, `POST /orders`) di luar rentang.
+2. Guard server-side di `BookingService.Create()`: tolak `pax < 0` atau `pax > dto.MaxBookingPax` (20). Menutup jalur non-HTTP yang bypass binding (tool MCP `create_booking` di `mcp_service.go` — cast `int(v)` tanpa clamp kini tertahan guard ini dan mengembalikan error ke tool result).
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-12. 🔴 TINGGI — Replay Webhook Pembayaran (Tanpa Timestamp/Nonce)
 
@@ -126,6 +129,8 @@ Seluruh sembilan temuan di bawah sudah diperbaiki dan diverifikasi `go build`/`g
 **Lokasi:** `booking_service.go`/`payment_service.go` (`Find(id, userID, isStaff)`), `repositories.go` (`FindBookingForUser`, `FindPaymentForUser`), `handlers.go` (`isStaff(c)`).
 
 `Find` kini menerima `userID` + `isStaff`. Caller non-staff hanya bisa mengambil record miliknya (query difilter `user_id`; payment via join ke `bookings`). Staff (operator/admin) tetap bisa mengakses semua. Record milik user lain membalas not found.
+
+> Verifikasi ulang 21 Jul 2026: fix utuh, tidak ada regresi. Rute `GET /bookings/:id` & `GET /payments/:id` tetap di grup protected (JWT); handler membalas 404 generik; `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-3. ✅ TINGGI — Tampering Harga Booking & Jumlah Pembayaran (FIXED)
 
@@ -358,7 +363,6 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | Prioritas | Item | Alasan |
 |---|---|---|
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
-| 🔴 **Tinggi** | SEC-11 Pax negatif booking | Total harga bisa negatif/nol, endpoint publik |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
 | 🟠 Sedang | SEC-13..SEC-17 abuse/kebocoran | Spam order, memory DoS limiter, error mentah, prompt raksasa, lintas-sesi |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
@@ -373,6 +377,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|
 | SEC-1 Privilege escalation `/auth/register` | ✅ Register paksa `RoleUser` + endpoint `admin/users` |
 | SEC-2 IDOR booking/payment | ✅ `Find(id,userID,isStaff)` + repo scoped per-owner |
+| SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
 | SEC-3 Tampering harga/amount | ✅ Harga & amount dihitung server-side |
 | SEC-4 Webhook dipalsukan | ✅ Signature wajib + `DOKU_SECRET` prod + idempotency |
 | SEC-5 Upload tanpa batas + MIME ekstensi | ✅ Batas 5 MiB + sniff `DetectContentType` |

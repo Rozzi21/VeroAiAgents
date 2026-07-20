@@ -24,8 +24,15 @@ func (s *BookingService) Create(userID uuid.UUID, req dto.BookingRequest) (model
 	if err != nil {
 		return models.Booking{}, errors.New("trip not found")
 	}
+	// SEC-11: enforce sane pax bounds server-side too, not only via DTO binding,
+	// because non-HTTP callers (MCP create_booking) bypass request binding.
+	// Negative pax would yield negative/zero totals; huge pax risks float
+	// overflow and absurd bills.
 	adultPax := req.AdultPax
 	childPax := req.ChildPax
+	if adultPax < 0 || childPax < 0 || adultPax > dto.MaxBookingPax || childPax > dto.MaxBookingPax {
+		return models.Booking{}, fmt.Errorf("pax must be between 0 and %d", dto.MaxBookingPax)
+	}
 	if adultPax <= 0 && childPax <= 0 {
 		adultPax = 1
 	}

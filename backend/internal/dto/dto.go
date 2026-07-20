@@ -127,16 +127,24 @@ type UploadResponse struct {
 	Size     int64  `json:"size"`
 }
 
+// MaxBookingPax bounds adult/child pax per booking (SEC-11). Keep in sync with
+// the binding tag on BookingRequest below.
+const MaxBookingPax = 20
+
 // BookingRequest no longer accepts a client-supplied price (SEC-3). The total
 // is computed server-side from the trip catalog price and the requested pax.
 type BookingRequest struct {
-	TripID       uuid.UUID `json:"trip_id" binding:"required"`
-	AdultPax     int       `json:"adult_pax"`
-	ChildPax     int       `json:"child_pax"`
-	ContactName  string    `json:"contact_name"`
-	ContactEmail string    `json:"contact_email"`
-	ContactPhone string    `json:"contact_phone"`
-	TravelDate   string    `json:"travel_date"`
+	TripID uuid.UUID `json:"trip_id" binding:"required"`
+	// SEC-11: pax must stay within a sane range. Negative values would produce
+	// negative/zero totals, and unbounded values risk float overflow/absurd
+	// bills. The service layer re-enforces the same bounds for non-HTTP callers
+	// (e.g. MCP create_booking) that bypass request binding.
+	AdultPax     int    `json:"adult_pax" binding:"gte=0,lte=20"`
+	ChildPax     int    `json:"child_pax" binding:"gte=0,lte=20"`
+	ContactName  string `json:"contact_name"`
+	ContactEmail string `json:"contact_email"`
+	ContactPhone string `json:"contact_phone"`
+	TravelDate   string `json:"travel_date"`
 }
 
 // PaymentCreateRequest no longer accepts a client-supplied amount (SEC-3). The
