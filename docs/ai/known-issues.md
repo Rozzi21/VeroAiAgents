@@ -4,13 +4,13 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) — SEC-11 & SEC-15 SUDAH DIPERBAIKI (21 Jul 2026), sisanya (SEC-10, SEC-12..SEC-14, SEC-16..SEC-21) BELUM — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11 & SEC-15 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12..SEC-14, SEC-16..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
-## A2. Celah Keamanan & Bug BARU — BELUM DIPERBAIKI (Batch Audit 21 Jul 2026)
+## A.1 Celah Keamanan & Bug — BELUM DIPERBAIKI (Batch Audit 21 Jul 2026)
 
-Temuan hasil audit ulang seluruh kode. Diurutkan berdasarkan severity.
+Temuan hasil audit ulang seluruh kode yang masih terbuka. Diurutkan berdasarkan severity.
 
 ### SEC-10. 🔴 TINGGI — IDOR pada `GET /chat/:id/messages`
 
@@ -19,17 +19,6 @@ Temuan hasil audit ulang seluruh kode. Diurutkan berdasarkan severity.
 Handler memanggil `Repo.ListChatMessages(id)` tanpa memverifikasi bahwa session milik `currentUserID(c)`. Siapa pun dengan JWT valid (user biasa) dapat membaca SELURUH isi pesan sesi milik user lain dengan menebak/menyalin UUID session. Parah dikombinasikan dengan #8 (semua guest berbagi user `guest@vero.local`): semua riwayat chat tamu bisa dibaca satu akun.
 
 **Perbaikan:** tambah filter ownership (`FindChatSession(id)` → cocokkan `UserID`, atau query messages join session dengan `user_id = ?`), staff boleh akses semua.
-
-### SEC-11. ✅ TINGGI — Validasi Pax Negatif pada Booking (FIXED 21 Jul 2026)
-
-**Lokasi:** `backend/internal/services/booking_service.go` → `Create()`, `dto.go` → `BookingRequest` + konstanta `MaxBookingPax`.
-
-Dulu `AdultPax`/`ChildPax` tanpa batas: nilai negatif menghasilkan `TotalPrice` negatif/nol dan nilai raksasa berisiko overflow. Kini dua lapis pertahanan:
-
-1. DTO binding `gte=0,lte=20` pada `AdultPax`/`ChildPax` — menolak request HTTP (`POST /bookings`, `POST /orders`) di luar rentang.
-2. Guard server-side di `BookingService.Create()`: tolak `pax < 0` atau `pax > dto.MaxBookingPax` (20). Menutup jalur non-HTTP yang bypass binding (tool MCP `create_booking` di `mcp_service.go` — cast `int(v)` tanpa clamp kini tertahan guard ini dan mengembalikan error ke tool result).
-
-Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-12. 🔴 TINGGI — Replay Webhook Pembayaran (Tanpa Timestamp/Nonce)
 
@@ -54,19 +43,6 @@ Endpoint order publik tanpa auth. Hanya dilindungi `RateLimit()` global 20 req/s
 Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
 
 **Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
-
-### SEC-15. ✅ SEDANG — Kebocoran Detail Error Internal ke Client (FIXED 21 Jul 2026)
-
-**Lokasi:** `backend/internal/utils/response.go` → `ServerError()`; `backend/internal/handlers/handlers.go`.
-
-Dulu respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint, DSN fragment). Kini:
-
-1. `ServerError()` membalas pesan generik `"Internal server error"` dengan `error: {}`; error asli di-`log.Printf` ke server bersama `request_id`, method, path.
-2. `/health/database` (`DatabaseHealth`) tidak lagi mengirim `detail` — error DB di-log server-side, client hanya menerima `"Database disconnected"`.
-3. BadRequest yang membawa error service internal disapukan ke pesan statis + log server: `Register`, `AdminCreateUser`, `UpdateBooking`, `PaymentWebhook`, `UploadTripMedia` (form file + read file).
-4. Disengaja dipertahankan: `bind()` (error validasi JSON per-field) dan `parseID()` (error parse UUID) masih mengirim `detail` — itu error input klien, bukan internal; berguna untuk UX form. `Login` tetap membalas `err.Error()` via `Unauthorized` (pesan kredensial-salah yang memang ditujukan ke user, bukan error DB).
-
-Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-16. 🟠 SEDANG — Prompt Chat Tanpa Batas Ukuran (Biaya LLM / DoS)
 
@@ -119,7 +95,37 @@ Access token disimpan di `localStorage` → bisa dicuri payload XSS apa pun. Bro
 
 ---
 
-## A. Celah Keamanan — SELESAI (Batch 25 Jun 2026)
+## A.2 Celah Keamanan — SELESAI (Batch 21 Jul 2026)
+
+Dua temuan dari batch audit 21 Jul 2026 yang sudah diperbaiki pada hari yang sama dan diverifikasi `go build`/`go vet`/`gofmt`.
+
+### SEC-11. ✅ TINGGI — Validasi Pax Negatif pada Booking (FIXED 21 Jul 2026)
+
+**Lokasi:** `backend/internal/services/booking_service.go` → `Create()`, `dto.go` → `BookingRequest` + konstanta `MaxBookingPax`.
+
+Dulu `AdultPax`/`ChildPax` tanpa batas: nilai negatif menghasilkan `TotalPrice` negatif/nol dan nilai raksasa berisiko overflow. Kini dua lapis pertahanan:
+
+1. DTO binding `gte=0,lte=20` pada `AdultPax`/`ChildPax` — menolak request HTTP (`POST /bookings`, `POST /orders`) di luar rentang.
+2. Guard server-side di `BookingService.Create()`: tolak `pax < 0` atau `pax > dto.MaxBookingPax` (20). Menutup jalur non-HTTP yang bypass binding (tool MCP `create_booking` di `mcp_service.go` — cast `int(v)` tanpa clamp kini tertahan guard ini dan mengembalikan error ke tool result).
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-15. ✅ SEDANG — Kebocoran Detail Error Internal ke Client (FIXED 21 Jul 2026)
+
+**Lokasi:** `backend/internal/utils/response.go` → `ServerError()`; `backend/internal/handlers/handlers.go`.
+
+Dulu respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint, DSN fragment). Kini:
+
+1. `ServerError()` membalas pesan generik `"Internal server error"` dengan `error: {}`; error asli di-`log.Printf` ke server bersama `request_id`, method, path.
+2. `/health/database` (`DatabaseHealth`) tidak lagi mengirim `detail` — error DB di-log server-side, client hanya menerima `"Database disconnected"`.
+3. BadRequest yang membawa error service internal disapukan ke pesan statis + log server: `Register`, `AdminCreateUser`, `UpdateBooking`, `PaymentWebhook`, `UploadTripMedia` (form file + read file).
+4. Disengaja dipertahankan: `bind()` (error validasi JSON per-field) dan `parseID()` (error parse UUID) masih mengirim `detail` — itu error input klien, bukan internal; berguna untuk UX form. `Login` tetap membalas `err.Error()` via `Unauthorized` (pesan kredensial-salah yang memang ditujukan ke user, bukan error DB).
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+---
+
+## A.3 Celah Keamanan — SELESAI (Batch 25 Jun 2026)
 
 Seluruh sembilan temuan di bawah sudah diperbaiki dan diverifikasi `go build`/`go vet`. Dicatat di sini sebagai jejak audit + acuan regresi (lihat juga `#3` soal kebutuhan automated test untuk mengunci perbaikan ini).
 
@@ -382,8 +388,6 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|
 | SEC-1 Privilege escalation `/auth/register` | ✅ Register paksa `RoleUser` + endpoint `admin/users` |
 | SEC-2 IDOR booking/payment | ✅ `Find(id,userID,isStaff)` + repo scoped per-owner |
-| SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
-| SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | SEC-3 Tampering harga/amount | ✅ Harga & amount dihitung server-side |
 | SEC-4 Webhook dipalsukan | ✅ Signature wajib + `DOKU_SECRET` prod + idempotency |
 | SEC-5 Upload tanpa batas + MIME ekstensi | ✅ Batas 5 MiB + sniff `DetectContentType` |
@@ -391,6 +395,8 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-7 Rate limiter global | ✅ Per-IP + `AuthRateLimit` ketat untuk `/auth` |
 | SEC-8 CORS hardcoded | ✅ Dari env `CORS_ALLOWED_ORIGINS` |
 | SEC-9 AI body tanpa limit | ✅ `io.LimitReader` 1 MiB |
+| SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
+| SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |
 | #14 Error HTML Saat JSON | ✅ Cek `Content-Type` + try-catch di `api.ts` |
