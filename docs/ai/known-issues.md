@@ -4,7 +4,110 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 25 Jun 2026 (analisis keamanan + optimasi lintas-komponen). Seluruh temuan keamanan SEC-1..SEC-9 hasil audit tersebut **sudah diperbaiki** pada batch 25 Jun 2026 — lihat bagian A (status: SELESAI) untuk ringkasan implementasinya.
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh). Audit menemukan **12 temuan BARU** (SEC-10..SEC-21) yang BELUM diperbaiki — lihat bagian A2. Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A).
+
+---
+
+## A2. Celah Keamanan & Bug BARU — BELUM DIPERBAIKI (Batch Audit 21 Jul 2026)
+
+Temuan hasil audit ulang seluruh kode. Diurutkan berdasarkan severity.
+
+### SEC-10. 🔴 TINGGI — IDOR pada `GET /chat/:id/messages`
+
+**Lokasi:** `backend/internal/handlers/handlers.go` → `ChatMessages()` (baris ~167) + `routes.go`.
+
+Handler memanggil `Repo.ListChatMessages(id)` tanpa memverifikasi bahwa session milik `currentUserID(c)`. Siapa pun dengan JWT valid (user biasa) dapat membaca SELURUH isi pesan sesi milik user lain dengan menebak/menyalin UUID session. Parah dikombinasikan dengan #8 (semua guest berbagi user `guest@vero.local`): semua riwayat chat tamu bisa dibaca satu akun.
+
+**Perbaikan:** tambah filter ownership (`FindChatSession(id)` → cocokkan `UserID`, atau query messages join session dengan `user_id = ?`), staff boleh akses semua.
+
+### SEC-11. 🔴 TINGGI — Validasi Pax Negatif pada Booking (Harga Bisa Negatif)
+
+**Lokasi:** `backend/internal/services/booking_service.go` → `Create()` (baris ~27-32), `dto.go` → `BookingRequest`.
+
+`BookingRequest.AdultPax`/`ChildPax` bertipe `int` tanpa binding `gte=0`. Guard hanya `if adultPax <= 0 && childPax <= 0 { adultPax = 1 }` — sehingga `{"adult_pax": 1, "child_pax": -100}` lolos dan `total = adultPrice*1 + childPrice*(-100)` menghasilkan `TotalPrice` negatif/nol. Tidak ada batas atas pax (bisa `adult_pax: 1<<40` → overflow float / tagihan absurd). Berlaku untuk `POST /bookings`, `POST /orders` (publik!), dan tool MCP `create_booking` (`mcp_service.go` cast `int(v)` tanpa clamp).
+
+**Perbaikan:** validasi `0 <= pax <= maxWajar` (mis. 20) di DTO binding + clamp di service; tolak nilai negatif.
+
+### SEC-12. 🔴 TINGGI — Replay Webhook Pembayaran (Tanpa Timestamp/Nonce)
+
+**Lokasi:** `backend/internal/services/payment_service.go` → `Webhook()` (baris ~75), `dto.go` → `PaymentWebhookRequest`.
+
+Signature diverifikasi terhadap pesan `ExternalID + Status` yang statis. Payload webhook valid bisa di-replay kapan pun (tidak ada timestamp, nonce, atau expiry). Meski idempotency mencegah downgrade `paid`→status lain, transisi status non-terminal (mis. `pending`→`failed`, lalu replay `pending`→`paid` lama) masih mungkin, dan replay memicu ulang `bus.Publish` + `triggerN8N` (notifikasi duplikat). Selain itu skema HMAC ini bukan skema asli DOKU (yang menandatangani digest body + headers) — integrasi nyata akan gagal verifikasi.
+
+**Perbaikan:** saat payments diaktifkan, implementasi skema signature DOKU resmi (digest SHA-256 body + header timestamp), tolak request tanpa timestamp segar (±5 menit), catat nonce.
+
+### SEC-13. 🟠 SEDANG — Endpoint Publik `POST /orders` Tanpa Proteksi Abuse
+
+**Lokasi:** `routes.go` (baris 25), `handlers.go` → `GuestCreateOrder()`.
+
+Endpoint order publik tanpa auth. Hanya dilindungi `RateLimit()` global 20 req/s per-IP — cukup untuk spam ribuan booking palsu ke DB (tiap request = 1 INSERT + SELECT trip + publish event). Dikombinasikan SEC-11, penyerang juga bisa membuat order bernilai negatif/nol. Tidak ada CAPTCHA/honeypot.
+
+**Perbaikan:** rate limit khusus lebih ketat untuk `/orders` + `/chat` (mis. 5 req/menit per-IP), validasi pax (SEC-11), pertimbangkan Turnstile/CAPTCHA.
+
+### SEC-14. 🟠 SEDANG — Rate Limiter `sync.Map` Tumbuh Tak Terbatas (Memory DoS)
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `ipRateLimiter` (baris ~77-105).
+
+Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
+
+**Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
+
+### SEC-15. 🟠 SEDANG — Kebocoran Detail Error Internal ke Client
+
+**Lokasi:** `backend/internal/utils/response.go` → `ServerError()` (mengirim `err.Error()`); `handlers.go` banyak `gin.H{"detail": err.Error()}`; `DatabaseHealth()` membalas error DB mentah di endpoint publik `/health/database`.
+
+Respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint, DSN fragment, path file). Membantu penyerang memetakan skema DB & internal. `/health/database` publik tanpa auth membocorkan detail koneksi DB saat down.
+
+**Perbaikan:** `ServerError` membalas pesan generik + log detail ke server; batasi `/health/database` (auth/internal) atau hilangkan `detail`.
+
+### SEC-16. 🟠 SEDANG — Prompt Chat Tanpa Batas Ukuran (Biaya LLM / DoS)
+
+**Lokasi:** `dto.go` → `ChatRequest` (`Prompt` hanya `binding:"required,min=2"`); `ai_service.go` → `Chat()`.
+
+Tidak ada `max=` pada prompt. Request publik `/chat` bisa mengirim prompt ratusan KB → tiap kirim = 4 tool MCP + 1..5 round LLM (token cost) + tulis DB. Dikombinasikan rate limit 20/s, ini vektor pemborosan biaya API LLM.
+
+**Perbaikan:** batasi `binding:"required,min=2,max=4000"`, batasi body size global (`http.MaxBytesReader`/middleware), rate limit ketat `/chat`.
+
+### SEC-17. 🟠 SEDANG — Session ID Asing Diterima di Chat (Lintas-Sesi Tamu)
+
+**Lokasi:** `backend/internal/services/ai_service.go` → `Chat()` (baris ~36-49).
+
+Jika caller mengirim `session_id` milik sesi lain, service langsung `AddChatMessage` ke sesi itu tanpa cek kepemilikan. Karena semua guest memakai user yang sama, tamu A yang mengetahui `session_id` tamu B (bocor via SSE `mcp_tool_executed` yang broadcast payload berisi `session_id`, atau via SEC-10) bisa menitipkan pesan ke konteks B — prompt injection lintas sesi + polusi memory summary.
+
+**Perbaikan:** `FindChatSession(sessionID)` → verifikasi `UserID == userID` sebelum menulis.
+
+### SEC-18. 🟡 RENDAH — Event Bus Broadcast Data Sensitif ke Semua Subscriber SSE
+
+**Lokasi:** `backend/internal/services/ai_service.go` (`bus.Publish(step.event, ...{"prompt": req.Prompt})`), `payment_service.go` (payload payment lengkap), `handlers.go` → `EventStream` (hanya butuh JWT apapun).
+
+Setiap subscriber `/events/stream` (user biasa pun bisa) menerima SEMUA event: prompt mentah user lain, session_id, data payment (external_id, amount). Tidak ada kanal per-user/filter.
+
+**Perbaikan:** batasi SSE ke role staff, atau kanal per-user; jangan publish prompt/payload penuh.
+
+### SEC-19. 🟡 RENDAH — Token Backoffice di `localStorage` + BroadcastChannel Tanpa Verifikasi Origin
+
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` (`localStorage.setItem(ACCESS_TOKEN_KEY, ...)`, `getAuthChannel().onmessage` tanpa cek `event.origin`).
+
+Access token disimpan di `localStorage` → bisa dicuri payload XSS apa pun. BroadcastChannel meneruskan token antar-tab tanpa validasi pesan (meski BroadcastChannel same-origin, satu XSS di origin = token tersebar). Refresh token untungnya tetap cookie HttpOnly — risiko terbatas pada access token 15 menit.
+
+**Perbaikan:** terima risiko (dokumentasikan) atau pindah access token ke cookie HttpOnly + BFF; tambah CSP ketat di `next.config.mjs` (belum ada header security di kedua frontend).
+
+### SEC-20. 🟡 RENDAH — Docker/Deploy: Root User, `network_mode: host`, Credential Dev Ter-commit
+
+**Lokasi:** `backend/Dockerfile` (tanpa `USER`, jalan sebagai root), `backend/docker-compose.yml` (`POSTGRES_PASSWORD: password_aman`, `network_mode: host`), `backend/.env.example` (JWT secret default ter-commit — diperlukan untuk dev, tapi pastikan tak pernah dipakai prod; `Config.Validate` sudah menjaga JWT), `backend/uploads/` file gambar ter-commit ke git (bloat; harusnya volume + `.gitignore`).
+
+**Perbaikan:** tambah `USER nonroot` di Dockerfile, hindari `network_mode: host` di compose produksi, `.gitignore` `backend/uploads/`, dokumentasikan rotasi credential.
+
+### SEC-21. 🟡 RENDAH — Bug Kecil Tersebar
+
+- `handlers.go` → `UpdateBooking()`: membandingkan error dengan string `err.Error() == "Booking not found"` — rapuh; pakai sentinel error/`errors.Is`.
+- `booking_service.go` → `UpdateStatus()`: `booking, _ = s.Find(...)` mengabaikan error re-fetch → bisa mengembalikan struct kosong ke client.
+- `trip_service.go` → `Create()`: `bus.Publish("trip_created", trip)` dipanggil meski `err != nil` (event palsu untuk trip gagal dibuat).
+- `ai_service.go` → `refreshMemorySummary()`: `summary[len(summary)-maxChars:]` memotong byte, bisa merusak rune UTF-8 multi-byte (karakter Indonesia/emoji) di batas potong.
+- `mcp_service.go` → goroutine async persist menangkap variabel loop aman, tapi tanpa batas — flood chat = ledakan goroutine (minor, dibatasi rate limit).
+- `frontend` & `backoffice`: `next@14.2.35` — ada beberapa CVE Next.js 14.x yang di-patch di rilis lebih baru; jadwalkan upgrade minor terbaru + `npm audit` berkala.
+- `auth_service.go` → `Register()` membalas error DB mentah (`CreateUser` duplicate email → `err.Error()` ke client via `detail`) — user enumeration tipis + bocor skema (terkait SEC-15).
+- `audit.go`/`LogSecurity`: periksa kebijakan retensi log keamanan (belum ada rotasi).
 
 ---
 
@@ -254,6 +357,10 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 
 | Prioritas | Item | Alasan |
 |---|---|---|
+| 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
+| 🔴 **Tinggi** | SEC-11 Pax negatif booking | Total harga bisa negatif/nol, endpoint publik |
+| 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
+| 🟠 Sedang | SEC-13..SEC-17 abuse/kebocoran | Spam order, memory DoS limiter, error mentah, prompt raksasa, lintas-sesi |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
