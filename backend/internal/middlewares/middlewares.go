@@ -124,6 +124,15 @@ func PublicWriteRateLimit() gin.HandlerFunc {
 	return newIPRateLimiter(rate.Every(12*time.Second), 5).middleware()
 }
 
+// RequestBodyLimit caps request bodies on JSON endpoints exposed to guests
+// (SEC-16). Upload routes keep their separate multipart limit in main.go.
+func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
+}
+
 func Auth(jwtService *auth.JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")

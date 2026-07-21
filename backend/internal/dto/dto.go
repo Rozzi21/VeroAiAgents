@@ -38,7 +38,7 @@ type AuthResponse struct {
 
 type ChatRequest struct {
 	SessionID *uuid.UUID `json:"session_id"`
-	Prompt    string     `json:"prompt" binding:"required,min=2"`
+	Prompt    string     `json:"prompt" binding:"required,min=2,max=4000"`
 	Stream    bool       `json:"stream"`
 }
 
