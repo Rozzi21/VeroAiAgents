@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15 & SEC-17 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-16, SEC-18..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16 & SEC-17 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -35,14 +35,6 @@ Signature diverifikasi terhadap pesan `ExternalID + Status` yang statis. Payload
 Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
 
 **Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
-
-### SEC-16. 🟠 SEDANG — Prompt Chat Tanpa Batas Ukuran (Biaya LLM / DoS)
-
-**Lokasi:** `dto.go` → `ChatRequest` (`Prompt` hanya `binding:"required,min=2"`); `ai_service.go` → `Chat()`.
-
-Tidak ada `max=` pada prompt. Request publik `/chat` bisa mengirim prompt ratusan KB → tiap kirim = 4 tool MCP + 1..5 round LLM (token cost) + tulis DB. Dikombinasikan rate limit 20/s, ini vektor pemborosan biaya API LLM.
-
-**Perbaikan:** batasi `binding:"required,min=2,max=4000"`, batasi body size global (`http.MaxBytesReader`/middleware), rate limit ketat `/chat`.
 
 ### SEC-18. 🟡 RENDAH — Event Bus Broadcast Data Sensitif ke Semua Subscriber SSE
 
@@ -120,6 +112,14 @@ Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 **Lokasi:** `backend/internal/services/ai_service.go` → `Chat()`.
 
 Dulu `session_id` dari body diterima mentah — pesan langsung ditulis ke sesi itu tanpa cek kepemilikan (lintas-sesi tamu: prompt injection + polusi memory summary). Kini `Chat()` memverifikasi dulu: `FindChatSession(*req.SessionID)` dan hanya memakai sesi itu bila `existing.UserID == userID`. Sesi asing atau tidak ditemukan **jatuh ke pembuatan sesi baru** milik caller (bukan error) — perilaku UX tidak berubah untuk alur normal, tapi injeksi lintas sesi tertutup.
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-16. ✅ SEDANG — Prompt Chat Tanpa Batas Ukuran (FIXED 21 Jul 2026)
+
+**Lokasi:** `backend/internal/dto/dto.go` → `ChatRequest`; `backend/internal/middlewares/middlewares.go` → `RequestBodyLimit()`; `backend/internal/routes/routes.go`.
+
+Dulu prompt chat tidak memiliki batas panjang dan request publik tidak memiliki batas body khusus. Kini `ChatRequest.Prompt` dibatasi `2..4000` karakter. Endpoint publik `POST /chat` dan `POST /orders` memakai `RequestBodyLimit(64 << 10)` (64 KiB) sebelum binding JSON; rate limit SEC-13 tetap aktif. Ini membatasi payload besar, biaya token LLM, alokasi memory, dan write workload dari request tunggal.
 
 Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
@@ -375,7 +375,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|---|
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
-| 🟠 Sedang | SEC-14/16 abuse | Memory DoS limiter, prompt raksasa tanpa batas |
+| 🟠 Sedang | SEC-14 abuse | Memory DoS limiter |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
@@ -398,6 +398,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
 | SEC-13 Spam order/chat publik | ✅ `PublicWriteRateLimit` 5 req/menit per-IP untuk `/orders` + `/chat` |
 | SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
+| SEC-16 Prompt chat tanpa batas | ✅ Prompt `max=4000` + body limit 64 KiB untuk `/chat` dan `/orders` |
 | SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |

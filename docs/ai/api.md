@@ -44,6 +44,7 @@ Diterapkan ke semua request via `router.Use(...)` di [backend/cmd/server/main.go
 
 - `AuthRateLimit` — grup `/auth`: 5 req/detik per-IP (anti brute force).
 - `PublicWriteRateLimit` — `POST /chat` & `POST /orders`: 5 req/**menit** per-IP, bucket terpisah per route (SEC-13, anti spam order & abuse biaya LLM).
+- `RequestBodyLimit` — `POST /chat` & `POST /orders`: body JSON maksimum 64 KiB (SEC-16).
 - `Auth(jwt)` — wajib `Authorization: Bearer <access_token>`. Memvalidasi audience `access`. Jika refresh token dipakai sebagai access, dicatat sebagai event audit `refresh_token_used_as_access`. Set `user_id`, `role`, `email` ke context.
 - `Role(roles...)` — RBAC; harus dijalankan SETELAH `Auth`. Membandingkan `role` di context dengan daftar role yang diizinkan.
 
@@ -127,7 +128,7 @@ Request penting:
 |---|---|---|---|
 | POST | `/api/v1/orders` | 🔓 (rate limit 5/menit per-IP, SEC-13) | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
 
-- `chat` request: `{prompt(min 2), session_id?, stream?}` (DTO `ChatRequest`). `session_id` hanya dipakai bila milik caller; ID sesi asing/tidak ditemukan diabaikan dan request dibuat pada sesi baru milik caller (SEC-17).
+- `chat` request: `{prompt(min 2, max 4000), session_id?, stream?}` (DTO `ChatRequest`). Body maksimum 64 KiB. `session_id` hanya dipakai bila milik caller; ID sesi asing/tidak ditemukan diabaikan dan request dibuat pada sesi baru milik caller (SEC-17).
 - `chat` response data: `{session_id, message, workflow[], recommended_packages[]}` (lihat `ChatResult`).
 
 ### Packages (publik) & Trips (terproteksi)
