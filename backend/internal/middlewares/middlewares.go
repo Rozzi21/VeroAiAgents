@@ -115,6 +115,15 @@ func AuthRateLimit() gin.HandlerFunc {
 	return newIPRateLimiter(rate.Every(time.Second), 5).middleware()
 }
 
+// PublicWriteRateLimit throttles expensive unauthenticated write endpoints
+// (POST /chat, POST /orders) to 5 req/min per-IP (SEC-13). The global 20 req/s
+// limit was enough to spam thousands of fake bookings / LLM-cost-heavy chats;
+// a per-minute budget keeps normal usage working while making bulk abuse
+// impractical.
+func PublicWriteRateLimit() gin.HandlerFunc {
+	return newIPRateLimiter(rate.Every(12*time.Second), 5).middleware()
+}
+
 func Auth(jwtService *auth.JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
