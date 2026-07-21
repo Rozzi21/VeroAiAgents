@@ -36,12 +36,14 @@ Diterapkan ke semua request via `router.Use(...)` di [backend/cmd/server/main.go
 | `RequestID` | Set/teruskan `X-Request-ID` per request | [middlewares.go](../../backend/internal/middlewares/middlewares.go) |
 | `SecureHeaders` | `X-Content-Type-Options`, `X-Frame-Options`, dll | sda |
 | `CORS` | Izinkan origin `localhost:3000/3001/5173`, `AllowCredentials=true` | sda |
-| `RateLimit` | 20 req/detik global (token bucket) | sda |
+| `RateLimit` | 20 req/detik global per-IP (token bucket) | sda |
 | `gin.Logger` | Log akses | gin |
 | `Recovery` | Tangani panic -> 500 envelope | sda |
 
 ## Middleware Per-Rute
 
+- `AuthRateLimit` — grup `/auth`: 5 req/detik per-IP (anti brute force).
+- `PublicWriteRateLimit` — `POST /chat` & `POST /orders`: 5 req/**menit** per-IP, bucket terpisah per route (SEC-13, anti spam order & abuse biaya LLM).
 - `Auth(jwt)` — wajib `Authorization: Bearer <access_token>`. Memvalidasi audience `access`. Jika refresh token dipakai sebagai access, dicatat sebagai event audit `refresh_token_used_as_access`. Set `user_id`, `role`, `email` ke context.
 - `Role(roles...)` — RBAC; harus dijalankan SETELAH `Auth`. Membandingkan `role` di context dengan daftar role yang diizinkan.
 
@@ -114,7 +116,7 @@ Request penting:
 
 | Method | Path | Akses | Fungsi |
 |---|---|---|---|
-| POST | `/api/v1/chat` | 🔓 guest | Jalankan workflow AI; balas message + recommended_packages |
+| POST | `/api/v1/chat` | 🔓 guest (rate limit 5/menit per-IP, SEC-13) | Jalankan workflow AI; balas message + recommended_packages |
 | GET | `/api/v1/chat/sessions` | 🔒 | Daftar sesi chat milik user |
 | GET | `/api/v1/chat/:id/messages` | 🔒 | Pesan dalam satu sesi |
 | GET | `/api/v1/events/stream` | 🔒 | SSE stream event workflow/payment/log |
@@ -123,9 +125,9 @@ Request penting:
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/api/v1/orders` | 🔓 | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
+| POST | `/api/v1/orders` | 🔓 (rate limit 5/menit per-IP, SEC-13) | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
 
-- `chat` request: `{prompt(min 2), session_id?, stream?}` (DTO `ChatRequest`).
+- `chat` request: `{prompt(min 2), session_id?, stream?}` (DTO `ChatRequest`). `session_id` hanya dipakai bila milik caller; ID sesi asing/tidak ditemukan diabaikan dan request dibuat pada sesi baru milik caller (SEC-17).
 - `chat` response data: `{session_id, message, workflow[], recommended_packages[]}` (lihat `ChatResult`).
 
 ### Packages (publik) & Trips (terproteksi)

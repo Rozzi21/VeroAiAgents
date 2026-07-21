@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11 & SEC-15 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12..SEC-14, SEC-16..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15 & SEC-17 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-16, SEC-18..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -28,14 +28,6 @@ Signature diverifikasi terhadap pesan `ExternalID + Status` yang statis. Payload
 
 **Perbaikan:** saat payments diaktifkan, implementasi skema signature DOKU resmi (digest SHA-256 body + header timestamp), tolak request tanpa timestamp segar (±5 menit), catat nonce.
 
-### SEC-13. 🟠 SEDANG — Endpoint Publik `POST /orders` Tanpa Proteksi Abuse
-
-**Lokasi:** `routes.go` (baris 25), `handlers.go` → `GuestCreateOrder()`.
-
-Endpoint order publik tanpa auth. Hanya dilindungi `RateLimit()` global 20 req/s per-IP — cukup untuk spam ribuan booking palsu ke DB (tiap request = 1 INSERT + SELECT trip + publish event). Dikombinasikan SEC-11, penyerang juga bisa membuat order bernilai negatif/nol. Tidak ada CAPTCHA/honeypot.
-
-**Perbaikan:** rate limit khusus lebih ketat untuk `/orders` + `/chat` (mis. 5 req/menit per-IP), validasi pax (SEC-11), pertimbangkan Turnstile/CAPTCHA.
-
 ### SEC-14. 🟠 SEDANG — Rate Limiter `sync.Map` Tumbuh Tak Terbatas (Memory DoS)
 
 **Lokasi:** `backend/internal/middlewares/middlewares.go` → `ipRateLimiter` (baris ~77-105).
@@ -51,14 +43,6 @@ Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH diha
 Tidak ada `max=` pada prompt. Request publik `/chat` bisa mengirim prompt ratusan KB → tiap kirim = 4 tool MCP + 1..5 round LLM (token cost) + tulis DB. Dikombinasikan rate limit 20/s, ini vektor pemborosan biaya API LLM.
 
 **Perbaikan:** batasi `binding:"required,min=2,max=4000"`, batasi body size global (`http.MaxBytesReader`/middleware), rate limit ketat `/chat`.
-
-### SEC-17. 🟠 SEDANG — Session ID Asing Diterima di Chat (Lintas-Sesi Tamu)
-
-**Lokasi:** `backend/internal/services/ai_service.go` → `Chat()` (baris ~36-49).
-
-Jika caller mengirim `session_id` milik sesi lain, service langsung `AddChatMessage` ke sesi itu tanpa cek kepemilikan. Karena semua guest memakai user yang sama, tamu A yang mengetahui `session_id` tamu B (bocor via SSE `mcp_tool_executed` yang broadcast payload berisi `session_id`, atau via SEC-10) bisa menitipkan pesan ke konteks B — prompt injection lintas sesi + polusi memory summary.
-
-**Perbaikan:** `FindChatSession(sessionID)` → verifikasi `UserID == userID` sebelum menulis.
 
 ### SEC-18. 🟡 RENDAH — Event Bus Broadcast Data Sensitif ke Semua Subscriber SSE
 
@@ -97,7 +81,7 @@ Access token disimpan di `localStorage` → bisa dicuri payload XSS apa pun. Bro
 
 ## A.2 Celah Keamanan — SELESAI (Batch 21 Jul 2026)
 
-Dua temuan dari batch audit 21 Jul 2026 yang sudah diperbaiki pada hari yang sama dan diverifikasi `go build`/`go vet`/`gofmt`.
+Temuan batch audit 21 Jul 2026 yang sudah diperbaiki pada hari yang sama dan diverifikasi `go build`/`go vet`/`gofmt`.
 
 ### SEC-11. ✅ TINGGI — Validasi Pax Negatif pada Booking (FIXED 21 Jul 2026)
 
@@ -120,6 +104,22 @@ Dulu respons 500/400 membawa pesan error Go/GORM mentah (nama tabel, constraint,
 2. `/health/database` (`DatabaseHealth`) tidak lagi mengirim `detail` — error DB di-log server-side, client hanya menerima `"Database disconnected"`.
 3. BadRequest yang membawa error service internal disapukan ke pesan statis + log server: `Register`, `AdminCreateUser`, `UpdateBooking`, `PaymentWebhook`, `UploadTripMedia` (form file + read file).
 4. Disengaja dipertahankan: `bind()` (error validasi JSON per-field) dan `parseID()` (error parse UUID) masih mengirim `detail` — itu error input klien, bukan internal; berguna untuk UX form. `Login` tetap membalas `err.Error()` via `Unauthorized` (pesan kredensial-salah yang memang ditujukan ke user, bukan error DB).
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-13. ✅ SEDANG — Endpoint Publik `POST /orders` & `/chat` Tanpa Proteksi Abuse (FIXED 21 Jul 2026)
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `PublicWriteRateLimit()`; `backend/internal/routes/routes.go`.
+
+Dulu `POST /orders` (publik) dan `POST /chat` hanya dilindungi `RateLimit()` global 20 req/s per-IP — cukup untuk spam ribuan booking palsu dan membakar biaya LLM. Kini keduanya dilewati middleware baru `PublicWriteRateLimit()` per-route: **5 request/menit per-IP** (`rate.Every(12*time.Second)`, burst 5), memakai `ipRateLimiter` yang sama dengan `RateLimit()`/`AuthRateLimit()`. Dikombinasikan SEC-11 (pax divalidasi), nilai order tidak bisa lagi negatif/nol. Catatan: masing-masing route punya bucket limiter sendiri (5/menit per route, bukan gabungan). CAPTCHA/Turnstile belum ada — opsional bila abuse berlanjut.
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-17. ✅ SEDANG — Session ID Asing Diterima di Chat (FIXED 21 Jul 2026)
+
+**Lokasi:** `backend/internal/services/ai_service.go` → `Chat()`.
+
+Dulu `session_id` dari body diterima mentah — pesan langsung ditulis ke sesi itu tanpa cek kepemilikan (lintas-sesi tamu: prompt injection + polusi memory summary). Kini `Chat()` memverifikasi dulu: `FindChatSession(*req.SessionID)` dan hanya memakai sesi itu bila `existing.UserID == userID`. Sesi asing atau tidak ditemukan **jatuh ke pembuatan sesi baru** milik caller (bukan error) — perilaku UX tidak berubah untuk alur normal, tapi injeksi lintas sesi tertutup.
 
 Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
@@ -375,7 +375,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|---|
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
-| 🟠 Sedang | SEC-13/14/16/17 abuse/kebocoran | Spam order, memory DoS limiter, prompt raksasa, lintas-sesi |
+| 🟠 Sedang | SEC-14/16 abuse | Memory DoS limiter, prompt raksasa tanpa batas |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
@@ -396,7 +396,9 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-8 CORS hardcoded | ✅ Dari env `CORS_ALLOWED_ORIGINS` |
 | SEC-9 AI body tanpa limit | ✅ `io.LimitReader` 1 MiB |
 | SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
+| SEC-13 Spam order/chat publik | ✅ `PublicWriteRateLimit` 5 req/menit per-IP untuk `/orders` + `/chat` |
 | SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
+| SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |
 | #14 Error HTML Saat JSON | ✅ Cek `Content-Type` + try-catch di `api.ts` |

@@ -33,10 +33,16 @@ type ChatResult struct {
 }
 
 func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, error) {
+	// SEC-17: a client-supplied session_id must belong to the caller. Foreign or
+	// unknown sessions fall through to a fresh session instead of letting one
+	// guest inject messages into another guest's conversation context.
 	sessionID := uuid.Nil
 	if req.SessionID != nil {
-		sessionID = *req.SessionID
-	} else {
+		if existing, err := s.repo.FindChatSession(*req.SessionID); err == nil && existing.UserID == userID {
+			sessionID = existing.ID
+		}
+	}
+	if sessionID == uuid.Nil {
 		session := models.ChatSession{UserID: userID, Title: summarizePrompt(req.Prompt)}
 		if err := s.repo.CreateChatSession(&session); err != nil {
 			return ChatResult{}, err
