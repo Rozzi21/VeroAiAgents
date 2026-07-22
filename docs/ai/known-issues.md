@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16 & SEC-17 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18..SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17 & SEC-19 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18, SEC-20 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -44,13 +44,6 @@ Setiap subscriber `/events/stream` (user biasa pun bisa) menerima SEMUA event: p
 
 **Perbaikan:** batasi SSE ke role staff, atau kanal per-user; jangan publish prompt/payload penuh.
 
-### SEC-19. 🟡 RENDAH — Token Backoffice di `localStorage` + BroadcastChannel Tanpa Verifikasi Origin
-
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` (`localStorage.setItem(ACCESS_TOKEN_KEY, ...)`, `getAuthChannel().onmessage` tanpa cek `event.origin`).
-
-Access token disimpan di `localStorage` → bisa dicuri payload XSS apa pun. BroadcastChannel meneruskan token antar-tab tanpa validasi pesan (meski BroadcastChannel same-origin, satu XSS di origin = token tersebar). Refresh token untungnya tetap cookie HttpOnly — risiko terbatas pada access token 15 menit.
-
-**Perbaikan:** terima risiko (dokumentasikan) atau pindah access token ke cookie HttpOnly + BFF; tambah CSP ketat di `next.config.mjs` (belum ada header security di kedua frontend).
 
 ### SEC-20. 🟡 RENDAH — Docker/Deploy: Root User, `network_mode: host`, Credential Dev Ter-commit
 
@@ -122,6 +115,19 @@ Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 Dulu prompt chat tidak memiliki batas panjang dan request publik tidak memiliki batas body khusus. Kini `ChatRequest.Prompt` dibatasi `2..4000` karakter. Endpoint publik `POST /chat` dan `POST /orders` memakai `RequestBodyLimit(64 << 10)` (64 KiB) sebelum binding JSON; rate limit SEC-13 tetap aktif. Ini membatasi payload besar, biaya token LLM, alokasi memory, dan write workload dari request tunggal.
 
 Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-19. ✅ RENDAH — Token Backoffice di `localStorage` + BroadcastChannel Tanpa Verifikasi Origin (FIXED 22 Jul 2026)
+
+**Lokasi:** `backoffice-frontend/src/lib/api.ts` (`getAuthChannel().onmessage`), `backoffice-frontend/next.config.mjs`, `frontend/next.config.mjs`.
+
+Dua lapis perbaikan:
+
+1. `getAuthChannel().onmessage` kini memvalidasi pesan secara ketat sebelum mengadopsi token: pesan harus object, `type === "token_refreshed"`, `access_token` string non-kosong, dan `expires_at` number finite > 0. Pesan crafted dari tab terkompromosi ditolak, sehingga localStorage tab lain tidak bisa disuntik token palsu.
+2. Kedua `next.config.mjs` kini mengirim header keamanan di semua route: `Content-Security-Policy` (default-src 'self'; script/style 'unsafe-inline' untuk kompatibilitas Next.js; img/connect-src mengizinkan backend `:8080`; object-src 'none'; frame-ancestors 'none'), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, dan `Permissions-Policy` (camera/mic/geo off). CSP mempersempit permukaan XSS yang bisa mencuri access token dari `localStorage`.
+
+Catatan: access token masih di `localStorage` (trade-off DX vs keamanan; refresh token tetap cookie HttpOnly). Migrasi penuh ke cookie HttpOnly + BFF tetap menjadi opsi hardening lanjutan.
+
+Verifikasi: `tsc --noEmit` bersih di kedua frontend (`backoffice-frontend` exit 0, `frontend` exit 0).
 
 ---
 
@@ -400,6 +406,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | SEC-16 Prompt chat tanpa batas | ✅ Prompt `max=4000` + body limit 64 KiB untuk `/chat` dan `/orders` |
 | SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |
+| SEC-19 Token backoffice + BroadcastChannel | ✅ Validasi pesan channel + CSP/security headers di kedua `next.config.mjs` |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |
 | #14 Error HTML Saat JSON | ✅ Cek `Content-Type` + try-catch di `api.ts` |

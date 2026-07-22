@@ -146,8 +146,21 @@ function getAuthChannel(): BroadcastChannel | null {
   if (!authChannel) {
     authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
     authChannel.onmessage = (event: MessageEvent<AuthBroadcast>) => {
+      // Strict validation of cross-tab token messages. BroadcastChannel is
+      // same-origin, but a compromised tab could otherwise inject a crafted
+      // token into this tab's localStorage.
       const data = event.data;
-      if (!data || data.type !== "token_refreshed" || !data.access_token) {
+      if (!data || typeof data !== "object") {
+        return;
+      }
+      if (
+        data.type !== "token_refreshed" ||
+        typeof data.access_token !== "string" ||
+        data.access_token.length === 0 ||
+        typeof data.expires_at !== "number" ||
+        !Number.isFinite(data.expires_at) ||
+        data.expires_at <= 0
+      ) {
         return;
       }
       adoptBroadcastToken(data.access_token, data.expires_at);
