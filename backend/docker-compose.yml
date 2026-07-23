@@ -6,7 +6,9 @@ services:
     container_name: vero-travel-postgres
     environment:
       POSTGRES_USER: vero_user
-      POSTGRES_PASSWORD: password_aman
+      # Dev fallback is intentionally non-secret. Override POSTGRES_PASSWORD in
+      # shell/.env before running docker-db profile; rotate old demo password.
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-change_me_dev_password}
       POSTGRES_DB: vero_travel
     ports:
       - "5433:5432"
@@ -24,9 +26,23 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: vero-travel-api
-    network_mode: host
+    # SEC-20: no host networking; publish only API port to the host.
+    ports:
+      - "8080:8080"
+    # Default bridge network can reach host services via host.docker.internal.
+    # If using docker-db profile, set DATABASE_HOST=postgres in backend/.env.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - .env
+    environment:
+      # Override .env host-style defaults inside the container. For docker-db
+      # profile set DOCKER_DATABASE_HOST=postgres (or DOCKER_DATABASE_URL).
+      DATABASE_HOST: ${DOCKER_DATABASE_HOST:-host.docker.internal}
+      DATABASE_PORT: ${DOCKER_DATABASE_PORT:-5432}
+      DATABASE_URL: ${DOCKER_DATABASE_URL:-}
+    volumes:
+      - uploads_data:/app/uploads
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
@@ -36,3 +52,4 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:

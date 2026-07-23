@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 DB_USER="${DATABASE_USER:-vero_user}"
-DB_PASS="${DATABASE_PASSWORD:-password_aman}"
+DB_PASS="${DATABASE_PASSWORD:-change_me_dev_password}"
 DB_NAME="${DATABASE_NAME:-vero_travel}"
 DB_PORT="${DATABASE_PORT:-5432}"
 

@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 21 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17 & SEC-19 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18, SEC-20 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 23 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17, SEC-19 & SEC-20 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -44,12 +44,6 @@ Setiap subscriber `/events/stream` (user biasa pun bisa) menerima SEMUA event: p
 
 **Perbaikan:** batasi SSE ke role staff, atau kanal per-user; jangan publish prompt/payload penuh.
 
-
-### SEC-20. 🟡 RENDAH — Docker/Deploy: Root User, `network_mode: host`, Credential Dev Ter-commit
-
-**Lokasi:** `backend/Dockerfile` (tanpa `USER`, jalan sebagai root), `backend/docker-compose.yml` (`POSTGRES_PASSWORD: password_aman`, `network_mode: host`), `backend/.env.example` (JWT secret default ter-commit — diperlukan untuk dev, tapi pastikan tak pernah dipakai prod; `Config.Validate` sudah menjaga JWT), `backend/uploads/` file gambar ter-commit ke git (bloat; harusnya volume + `.gitignore`).
-
-**Perbaikan:** tambah `USER nonroot` di Dockerfile, hindari `network_mode: host` di compose produksi, `.gitignore` `backend/uploads/`, dokumentasikan rotasi credential.
 
 ### SEC-21. 🟡 RENDAH — Bug Kecil Tersebar
 
@@ -128,6 +122,23 @@ Dua lapis perbaikan:
 Catatan: access token masih di `localStorage` (trade-off DX vs keamanan; refresh token tetap cookie HttpOnly). Migrasi penuh ke cookie HttpOnly + BFF tetap menjadi opsi hardening lanjutan.
 
 Verifikasi: `tsc --noEmit` bersih di kedua frontend (`backoffice-frontend` exit 0, `frontend` exit 0).
+
+### SEC-20. ✅ RENDAH — Docker/Deploy: Root User, `network_mode: host`, Credential Dev Ter-commit (FIXED 23 Jul 2026)
+
+**Lokasi:** `backend/Dockerfile`, `backend/docker-compose.yml`, `backend/.dockerignore`, `.gitignore`, `backend/.env.example`, `backend/internal/config/config.go`.
+
+Perbaikan:
+
+1. `backend/Dockerfile` runtime sekarang memakai user non-root `app`; uploads dir dibuat dan dimiliki `app`.
+2. `backend/docker-compose.yml` menghapus `network_mode: host`, memakai bridge network + `ports: "8080:8080"`, `host.docker.internal` untuk DB host lokal, named volume `uploads_data`, dan placeholder password via env.
+3. `backend/.dockerignore` mencegah `.env`, uploads, git metadata, log/temp masuk build context; Dockerfile tidak lagi menyalin `.env.example` ke image.
+4. `.gitignore` mengabaikan isi `backend/uploads/*` dan hanya mempertahankan `backend/uploads/.gitkeep`; file uploads lama dihapus dari index Git tanpa menghapus file lokal.
+5. `backend/.env.example` mengganti password dev lama `password_aman` menjadi placeholder `change_me_dev_password` dan menghapus typo `ds`.
+6. `backend/internal/config/config.go` menolak `DATABASE_PASSWORD` kosong/placeholder (termasuk bila placeholder ada di `DATABASE_URL`) saat `APP_ENV=production`.
+
+Catatan: password/secret production tetap wajib dirotasi setelah deploy pertama.
+
+Verifikasi: `gofmt`, `go build ./...`, dan `docker compose config` bersih.
 
 ---
 
@@ -309,7 +320,7 @@ Backend punya endpoint `POST /api/v1/bookings`, `POST /api/v1/payments/create`, 
 
 **Lokasi:** `backend/.env.example`
 
-`DATABASE_PASSWORD=password_aman`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev. `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default; sejak DOKU disabled, `DOKU_SECRET` hanya wajib non-kosong di production saat `PAYMENTS_ENABLED=true`. `DATABASE_PASSWORD` masih **belum** divalidasi.
+`DATABASE_PASSWORD=change_me_dev_password`, `JWT_SECRET=super_secret_vero_travel` adalah nilai dev/placeholder. `Config.Validate()` menolak start bila `APP_ENV=production` dan `JWT_SECRET` kosong/default, `DATABASE_PASSWORD` kosong/placeholder (termasuk di `DATABASE_URL`), atau `DOKU_SECRET` kosong saat `PAYMENTS_ENABLED=true`.
 
 **Catatan:** `.env` aktual developer berisi AI key nyata. Jangan commit `.env`.
 
@@ -407,6 +418,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-16 Prompt chat tanpa batas | ✅ Prompt `max=4000` + body limit 64 KiB untuk `/chat` dan `/orders` |
 | SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |
 | SEC-19 Token backoffice + BroadcastChannel | ✅ Validasi pesan channel + CSP/security headers di kedua `next.config.mjs` |
+| SEC-20 Docker/deploy hardening | ✅ Runtime non-root, no host network, uploads volume/gitignore, env placeholder guard |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |
 | #12 Duplikasi prompt LLM | ✅ Urutan pesan dirapikan + workflow diringkas |
 | #14 Error HTML Saat JSON | ✅ Cek `Content-Type` + try-catch di `api.ts` |

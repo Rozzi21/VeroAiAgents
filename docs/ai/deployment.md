@@ -27,7 +27,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `DATABASE_HOST` | `localhost` | Host PostgreSQL |
 | `DATABASE_PORT` | `5432` | Port |
 | `DATABASE_USER` | `vero_user` | User |
-| `DATABASE_PASSWORD` | _(kosong)_ | Wajib diisi |
+| `DATABASE_PASSWORD` | _(kosong)_ | Wajib diisi; production menolak kosong/placeholder |
 | `DATABASE_NAME` | `vero_travel` | Nama DB |
 | `DATABASE_SSLMODE` | `disable` | Mode SSL |
 | `DATABASE_URL` | _(kosong)_ | DSN penuh; jika kosong dirakit dari field di atas. Jika mengandung `YOUR_PASSWORD` juga dirakit ulang |
@@ -82,14 +82,14 @@ go run ./cmd/server        # atau: go build -o vero-travel-api ./cmd/server
 ```
 
 ### Backend (Docker)
-`backend/Dockerfile` adalah multi-stage build (CGO_ENABLED=0, binary statis). `backend/docker-compose.yml` menjalankan API saja; **default dev memakai PostgreSQL lokal di host `:5432`** (via `host.docker.internal`):
+`backend/Dockerfile` adalah multi-stage build (CGO_ENABLED=0, binary statis) dengan runtime non-root user `app`. `backend/docker-compose.yml` menjalankan API saja; **default dev memakai PostgreSQL lokal di host `:5432`** (via `host.docker.internal`):
 
 ```bash
 cd backend
 docker compose up --build
 ```
 
-Pastikan Postgres lokal sudah jalan di `:5432` dan kredensial di `.env` cocok. API container memakai `network_mode: host` (Linux) sehingga `localhost:5432` di `.env` langsung terbaca — Postgres lokal yang hanya bind `127.0.0.1` tetap bisa diakses.
+Pastikan Postgres lokal sudah jalan di `:5432` dan kredensial di `.env` cocok. API container memakai bridge network dan memetakan `8080:8080`; compose mengatur default `DATABASE_HOST=host.docker.internal`. Jangan gunakan `network_mode: host`.
 
 Jika ingin Postgres bawaan Docker (port host `:5433`), jalankan dengan profile:
 
@@ -97,7 +97,7 @@ Jika ingin Postgres bawaan Docker (port host `:5433`), jalankan dengan profile:
 docker compose --profile docker-db up --build
 ```
 
-Lalu override env API ke service `postgres` (lihat komentar di `docker-compose.yml`).
+Lalu jalankan dengan `DOCKER_DATABASE_HOST=postgres` dan `DATABASE_PASSWORD` yang sama dengan password Postgres. Compose meneruskan `DOCKER_DATABASE_HOST` ke API. API menyimpan uploads di named volume `uploads_data`.
 
 ### Backend (server / systemd)
 Panduan lengkap di `backend/docs/server-deploy.md`:
@@ -164,5 +164,6 @@ flowchart LR
 4. `DOKU_SECRET` **wajib** diisi di production saat `PAYMENTS_ENABLED=true` (backend menolak start bila kosong); webhook tanpa signature valid ditolak (SEC-4). Default `PAYMENTS_ENABLED=false` untuk flow order manual.
 5. HTTPS via reverse proxy; set `JWT_COOKIE_SECURE=true`.
 6. Jika frontend beda domain dari API: `JWT_COOKIE_SAME_SITE=None` (otomatis Secure) + tambahkan origin ke CORS.
-7. Volume persisten untuk `uploads/`.
-8. Ganti semua nilai dev default di `.env.example`.
+7. Volume persisten untuk `uploads/`; Docker image berjalan sebagai non-root user `app`.
+8. Ganti semua nilai dev placeholder di `.env.example`; jangan menyalin `.env` atau `.env.example` ke image.
+9. Rotasi password database dan secret setelah deployment pertama.

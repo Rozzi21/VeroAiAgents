@@ -15,6 +15,10 @@ import (
 // production; Config.Validate enforces this.
 const defaultJWTSecret = "super_secret_vero_travel"
 
+// defaultDatabasePassword is a documented development placeholder. Production
+// must provide a real database password so Docker/.env examples are never reused.
+const defaultDatabasePassword = "change_me_dev_password"
+
 type Config struct {
 	AppEnv string
 	Port   string
@@ -111,6 +115,12 @@ func Load() Config {
 // webhooks cannot be forged (SEC-4).
 func (c Config) Validate() error {
 	if c.AppEnv == "production" {
+		databaseURLProvided := strings.TrimSpace(c.DatabaseURL) != ""
+		databaseURLUnsafe := strings.Contains(c.DatabaseURL, defaultDatabasePassword) || strings.Contains(c.DatabaseURL, "password_aman") || strings.Contains(c.DatabaseURL, "YOUR_PASSWORD")
+		databasePasswordUnsafe := c.DatabasePassword == "" || c.DatabasePassword == defaultDatabasePassword
+		if (databasePasswordUnsafe && !databaseURLProvided) || databaseURLUnsafe {
+			return errors.New("DATABASE_PASSWORD must be set to a strong, non-default value when APP_ENV=production")
+		}
 		if c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret {
 			return errors.New("JWT_SECRET must be set to a strong, non-default value when APP_ENV=production")
 		}

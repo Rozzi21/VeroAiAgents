@@ -37,3 +37,5 @@ coverage/
 
 # Go
 backend/bin/
+backend/uploads/*
+!backend/uploads/.gitkeep
