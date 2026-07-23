@@ -13,7 +13,12 @@ import {
 } from "lucide-react";
 import RecommendationCard from "../cards/RecommendationCard";
 import { TripPriceBlock } from "../pricing/TripPriceBlock";
-import { apiFetch, assetURL, TripPackage } from "@/lib/api";
+import {
+  apiFetch,
+  assetURL,
+  TripPackage,
+  ChatResponse,
+} from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 
 type ChatMessage = {
@@ -21,6 +26,8 @@ type ChatMessage = {
   content: string;
   workflow?: Record<string, unknown>[];
   packages?: TripPackage[];
+  showRecommendations?: boolean;
+  recommendationReason?: "initial" | "alternative" | "";
   shouldAnimate?: boolean;
 };
 
@@ -66,11 +73,7 @@ export default function ChatInterface() {
         payload.session_id = sessionID;
       }
 
-      const data = await apiFetch<{
-        session_id: string;
-        message: string;
-        recommended_packages?: TripPackage[];
-      }>(
+      const data = await apiFetch<ChatResponse>(
         "/api/v1/chat",
         {
           method: "POST",
@@ -87,6 +90,8 @@ export default function ChatInterface() {
             role: "assistant",
             content: data.message,
             packages: data.recommended_packages ?? [],
+            showRecommendations: data.show_recommendations,
+            recommendationReason: data.recommendation_reason,
             shouldAnimate: true,
           },
         ];
@@ -148,14 +153,16 @@ export default function ChatInterface() {
                       <p className="whitespace-pre-wrap">{message.content}</p>
                     )}
                   </div>
-                  {message.packages &&
+                  {message.showRecommendations &&
+                    message.packages &&
                     message.packages.length > 0 &&
                     completedTyping[index] && (
-                    <PackageRecommendations
-                      packages={message.packages}
-                      onSelect={setSelectedPackage}
-                    />
-                  )}
+                      <PackageRecommendations
+                        packages={message.packages}
+                        reason={message.recommendationReason}
+                        onSelect={setSelectedPackage}
+                      />
+                    )}
                 </div>
               </div>
             )
@@ -268,15 +275,21 @@ function TypingText({
 
 function PackageRecommendations({
   packages,
+  reason,
   onSelect,
 }: {
   packages: TripPackage[];
+  reason?: "initial" | "alternative" | "";
   onSelect: (trip: TripPackage) => void;
 }) {
+  const heading =
+    reason === "alternative"
+      ? "Alternatif paket lain dari Vero"
+      : "Paket yang direkomendasikan Vero";
   return (
     <div className="space-y-4">
       <h2 className="text-sm font-bold uppercase tracking-wider text-slate-500">
-        Paket yang direkomendasikan Vero
+        {heading}
       </h2>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
         {packages.map((trip) => (

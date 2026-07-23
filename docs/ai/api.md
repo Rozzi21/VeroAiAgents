@@ -129,7 +129,10 @@ Request penting:
 | POST | `/api/v1/orders` | 🔓 (rate limit 5/menit per-IP, SEC-13) | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
 
 - `chat` request: `{prompt(min 2, max 4000), session_id?, stream?}` (DTO `ChatRequest`). Body maksimum 64 KiB. `session_id` hanya dipakai bila milik caller; ID sesi asing/tidak ditemukan diabaikan dan request dibuat pada sesi baru milik caller (SEC-17).
-- `chat` response data: `{session_id, message, workflow[], recommended_packages[]}` (lihat `ChatResult`).
+- `chat` response data: `{session_id, message, workflow[], show_recommendations, recommendation_reason, recommended_packages[]}` (lihat `ChatResult`).
+  - `show_recommendations` boolean: apakah frontend harus menampilkan daftar rekomendasi.
+  - `recommendation_reason`: `"initial"` (rekomendasi pertama), `"alternative"` (user meminta alternatif), atau `""` (tidak ada rekomendasi).
+  - `recommended_packages` hanya berisi hasil tool `search_trips`; backend tidak lagi melakukan scoring otomatis setelah LLM selesai menjawab.
 
 ### Packages (publik) & Trips (terproteksi)
 
@@ -202,7 +205,7 @@ Query `ListQuery` (bookings, logs, tool-calls): `limit` (default 50, maks 200), 
 Endpoint `GET /api/v1/events/stream` (👮 operator/admin saja — SEC-18) menstream event dari event bus in-memory. Handler: `EventStream` di [handlers.go](../../backend/internal/handlers/handlers.go), bus: [backend/internal/events/bus.go](../../backend/internal/events/bus.go). Payload event disanitasi di sisi publish: tidak ada prompt mentah, PII kontak booking, maupun external_id/amount payment.
 
 Event yang dipublikasikan:
-- Workflow chat: `ai_thinking`, `searching_destination`, `calculating_budget`, `generating_itinerary`, `ai_response`, `workflow_completed`
+- Workflow chat: `ai_thinking`, `search_trips`, `select_package`, `collect_order_detail`, `ai_response`, `workflow_completed`
 - Tool & data: `mcp_tool_executed`, `trip_created`, `booking_created`
 - Payment: `payment_created`, `payment_updated`, `booking_confirmed`
 - Keep-alive: `heartbeat` (tiap 25 detik)

@@ -42,6 +42,15 @@ type ChatRequest struct {
 	Stream    bool       `json:"stream"`
 }
 
+// ChatRecommendationReason describes why recommended packages are returned.
+// Valid values: "initial", "alternative", or empty.
+type ChatRecommendationReason string
+
+const (
+	ChatRecommendationReasonInitial     ChatRecommendationReason = "initial"
+	ChatRecommendationReasonAlternative ChatRecommendationReason = "alternative"
+)
+
 type TripRequest struct {
 	Title                string             `json:"title" binding:"required"`
 	Slug                 string             `json:"slug"`

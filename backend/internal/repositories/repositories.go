@@ -51,6 +51,16 @@ func (r *Repository) UpdateChatSession(session *models.ChatSession) error {
 	return r.DB.Save(session).Error
 }
 
+func (r *Repository) UpdateChatSessionSelectedTrip(sessionID uuid.UUID, tripID *uuid.UUID) error {
+	return r.DB.Model(&models.ChatSession{}).Where("id = ?", sessionID).Update("selected_trip_id", tripID).Error
+}
+
+func (r *Repository) FindBookingBySession(sessionID uuid.UUID) (models.Booking, error) {
+	var booking models.Booking
+	err := r.DB.Order("created_at desc").First(&booking, "session_id = ?", sessionID).Error
+	return booking, err
+}
+
 func (r *Repository) ListChatSessions(userID uuid.UUID) ([]models.ChatSession, error) {
 	var sessions []models.ChatSession
 	err := r.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&sessions).Error

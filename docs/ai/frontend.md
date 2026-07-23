@@ -27,6 +27,15 @@ Antarmuka chat AI untuk tamu. Tidak ada login, tidak ada auth. Efektif hanya dua
 | `TripPriceBlock` | `frontend/src/components/pricing/TripPriceBlock.tsx` | Blok harga paket (base/discount/child) |
 | `Sidebar` | `frontend/src/components/layout/Sidebar.tsx` | Navigasi kiri (sebagian link masih placeholder `href="#"`) |
 
+### Mekanisme Rekomendasi
+
+Response `POST /api/v1/chat` sekarang mengandung field:
+- `show_recommendations` (boolean): menentukan apakah daftar rekomendasi harus ditampilkan.
+- `recommendation_reason` (`"initial"` | `"alternative"` | `""`): menjelaskan konteks rekomendasi.
+- `recommended_packages` (array, optional): daftar paket hasil tool `search_trips`.
+
+Frontend hanya merender `PackageRecommendations` bila `show_recommendations === true`. Jika user sudah memilih paket atau sedang proses booking, field ini `false` sehingga kartu rekomendasi tidak muncul berulang. Label heading berubah menjadi "Alternatif paket lain dari Vero" ketika `recommendation_reason === "alternative"`.
+
 ### Lib / Helper
 
 | File | Fungsi |

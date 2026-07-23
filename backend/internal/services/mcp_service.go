@@ -3,12 +3,14 @@ package services
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/mcp"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
@@ -30,19 +32,25 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 	start := time.Now()
 	var result ToolResult
 	log.Printf("[mcp] tool selected session=%s tool=%s payload=%+v", sessionID, toolName, payload)
+
 	switch toolName {
-	case "create_payment":
-		// DOKU/payment tools are temporarily disabled. Keep the tool name blocked
-		// here as a defense-in-depth guard even if a caller bypasses AIService.Chat.
+	case mcp.ToolCreatePayment:
+		// DOKU/payment tools are temporarily disabled.
 		result = ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "payment tools are temporarily disabled"}}
-	case "create_booking", "create_order":
-		// Execute actual booking logic
+
+	case mcp.ToolSearchTrips, "search_destination", "search_hotels", "calculate_budget", "generate_itinerary":
+		// Unify legacy recommendation-like calls into search_trips behavior.
+		result = s.executeSearchTrips(sessionID, payload)
+
+	case mcp.ToolSelectPackage:
+		result = s.executeSelectPackage(sessionID, payload)
+
+	case mcp.ToolCollectOrderDetail, mcp.ToolUpdateOrderDraft:
+		result = s.executeCollectOrderDetail(toolName, payload)
+
+	case mcp.ToolCreateBooking, mcp.ToolCreateOrder:
 		result = s.executeCreateBooking(payload)
-	case "update_order_draft":
-		result = ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"success": true,
-			"draft":   payload,
-		}}
+
 	default:
 		for attempt := 1; attempt <= 3; attempt++ {
 			result = s.mock(toolName, payload)
@@ -52,6 +60,7 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 			time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
 		}
 	}
+
 	log.Printf("[mcp] tool executed session=%s tool=%s status=%s duration_ms=%d", sessionID, toolName, result.Status, time.Since(start).Milliseconds())
 
 	payloadJSON, _ := json.Marshal(payload)
@@ -72,8 +81,7 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 		Response:      string(resultJSON),
 	}
 	// Persist tool call + AI log asynchronously to avoid blocking the chat
-	// workflow with ~8 synchronous DB writes per request. Errors are logged to
-	// the audit log and retried once to prevent silent data loss.
+	// workflow. Errors are logged to the audit log and retried once.
 	go func() {
 		if err := s.repo.CreateToolCall(&toolCall); err != nil {
 			auth.LogSecurity("tool_call_persist_failed", map[string]any{
@@ -81,7 +89,6 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 				"tool_name":  toolName,
 				"error":      err.Error(),
 			})
-			// Single retry in case of transient DB issue
 			time.Sleep(500 * time.Millisecond)
 			_ = s.repo.CreateToolCall(&toolCall)
 		}
@@ -92,47 +99,214 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 				"tool_name":  toolName,
 				"error":      err.Error(),
 			})
-			// Single retry in case of transient DB issue
 			time.Sleep(500 * time.Millisecond)
 			_ = s.repo.CreateAILog(&aiLog)
 		}
 	}()
-	// SEC-18: broadcast only tool name + status; ToolResult.Data may carry
-	// booking PII (create_booking) or prompt-derived payloads.
+
+	// SEC-18: broadcast only tool name + status.
 	s.bus.Publish("mcp_tool_executed", map[string]interface{}{"tool": result.Tool, "status": result.Status})
 	return result, nil
 }
 
+func (s *MCPService) executeSearchTrips(sessionID uuid.UUID, payload map[string]interface{}) ToolResult {
+	query := getString(payload, "query")
+	if query == "" {
+		query = getString(payload, "prompt")
+	}
+
+	session, err := s.repo.FindChatSession(sessionID)
+	if err != nil {
+		log.Printf("[mcp] search_trips failed session lookup error=%v", err)
+		return ToolResult{Tool: mcp.ToolSearchTrips, Status: "failed", Data: map[string]interface{}{"error": "session not found"}}
+	}
+
+	alternative := false
+	if v, ok := payload["alternative"].(string); ok {
+		alternative = strings.EqualFold(v, "true") || v == "1"
+	}
+	if v, ok := payload["alternative"].(bool); ok {
+		alternative = v
+	}
+
+	// Validator: if user already selected a package and is not explicitly asking
+	// for alternatives, refuse to search to avoid recommendation spam.
+	if session.SelectedTripID != nil && !alternative {
+		return ToolResult{Tool: mcp.ToolSearchTrips, Status: "failed", Data: map[string]interface{}{
+			"error":               "a package is already selected",
+			"selected_trip_id":    session.SelectedTripID.String(),
+			"require_alternative": true,
+		}}
+	}
+
+	packages, err := s.repo.ListTrips(dto.TripListQuery{PublishedOnly: true, Limit: 20})
+	if err != nil {
+		log.Printf("[mcp] search_trips failed list trips error=%v", err)
+		return ToolResult{Tool: mcp.ToolSearchTrips, Status: "failed", Data: map[string]interface{}{"error": err.Error()}}
+	}
+
+	scored := scoreTrips(query, packages)
+	if len(scored) == 0 && len(packages) > 0 {
+		scored = packages[:min(3, len(packages))]
+	}
+
+	results := make([]map[string]interface{}, 0, len(scored))
+	for _, trip := range scored {
+		results = append(results, map[string]interface{}{
+			"id":          trip.ID.String(),
+			"title":       trip.Title,
+			"slug":        trip.Slug,
+			"destination": trip.Destination,
+			"location":    trip.Location,
+			"category":    trip.Category,
+			"duration":    trip.Duration,
+			"summary":     trip.Summary,
+			"price":       firstNonZero(trip.BasePrice, trip.EstimatedPrice),
+			"highlights":  trip.Highlights,
+			"image_url":   trip.ImageURL,
+		})
+	}
+
+	reason := "initial"
+	if alternative {
+		reason = "alternative"
+	}
+
+	return ToolResult{Tool: mcp.ToolSearchTrips, Status: "success", Data: map[string]interface{}{
+		"packages": results,
+		"count":    len(results),
+		"reason":   reason,
+		"query":    query,
+	}}
+}
+
+func (s *MCPService) executeSelectPackage(sessionID uuid.UUID, payload map[string]interface{}) ToolResult {
+	tripIDStr := getString(payload, "trip_id")
+	tripID, err := uuid.Parse(tripIDStr)
+	if err != nil {
+		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "invalid trip_id"}}
+	}
+
+	if _, err := s.repo.FindTrip(tripID); err != nil {
+		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "trip not found"}}
+	}
+
+	if err := s.repo.UpdateChatSessionSelectedTrip(sessionID, &tripID); err != nil {
+		log.Printf("[mcp] select_package failed update session error=%v", err)
+		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "failed to update session"}}
+	}
+
+	return ToolResult{Tool: mcp.ToolSelectPackage, Status: "success", Data: map[string]interface{}{
+		"success": true,
+		"trip_id": tripID.String(),
+	}}
+}
+
+func (s *MCPService) executeCollectOrderDetail(toolName string, payload map[string]interface{}) ToolResult {
+	tripIDStr := getString(payload, "trip_id")
+	tripID, err := uuid.Parse(tripIDStr)
+	if err != nil {
+		return ToolResult{Tool: toolName, Status: "failed", Data: map[string]interface{}{"error": "invalid trip_id"}}
+	}
+
+	getDefault := func(key string, fallback string) string {
+		if v := getString(payload, key); v != "" {
+			return v
+		}
+		return fallback
+	}
+
+	detail := map[string]interface{}{
+		"trip_id":       tripID.String(),
+		"adult_pax":     parsePax(payload, "adult_pax", 1),
+		"child_pax":     parsePax(payload, "child_pax", 0),
+		"travel_date":   getDefault("travel_date", ""),
+		"contact_name":  getDefault("contact_name", ""),
+		"contact_email": getDefault("contact_email", ""),
+		"contact_phone": getDefault("contact_phone", ""),
+	}
+
+	return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
+		"success": true,
+		"draft":   detail,
+	}}
+}
+
+func scoreTrips(query string, packages []models.Trip) []models.Trip {
+	if len(packages) == 0 {
+		return nil
+	}
+	if query == "" {
+		return packages[:min(3, len(packages))]
+	}
+
+	query = strings.ToLower(strings.TrimSpace(query))
+	type scoredTrip struct {
+		trip  models.Trip
+		score int
+	}
+	scored := make([]scoredTrip, 0, len(packages))
+	for _, trip := range packages {
+		score := 0
+		for _, token := range []string{trip.Title, trip.Destination, trip.Location, trip.Category, trip.Slug} {
+			token = strings.ToLower(strings.TrimSpace(token))
+			if token != "" && strings.Contains(query, token) {
+				score += 3
+			}
+			if token != "" && strings.Contains(token, query) {
+				score += 1
+			}
+		}
+		for _, highlight := range trip.Highlights {
+			highlight = strings.ToLower(strings.TrimSpace(highlight))
+			if highlight != "" && strings.Contains(query, highlight) {
+				score++
+			}
+		}
+		scored = append(scored, scoredTrip{trip: trip, score: score})
+	}
+
+	for i := 0; i < len(scored)-1; i++ {
+		for j := i + 1; j < len(scored); j++ {
+			if scored[i].score < scored[j].score {
+				scored[i], scored[j] = scored[j], scored[i]
+			}
+		}
+	}
+
+	result := make([]models.Trip, 0, 3)
+	for _, item := range scored {
+		if item.score == 0 && len(result) > 0 {
+			break
+		}
+		result = append(result, item.trip)
+		if len(result) == 3 {
+			break
+		}
+	}
+	return result
+}
+
+func parsePax(payload map[string]interface{}, key string, fallback int) int {
+	if v, ok := payload[key].(float64); ok {
+		return int(v)
+	}
+	if v, ok := payload[key].(string); ok {
+		return parseIntFallback(v, fallback)
+	}
+	return fallback
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 	switch toolName {
-	case "search_destination":
-		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"destinations": []string{"Tokyo", "Kyoto", "Osaka", "Bali"},
-			"match":        0.96,
-		}}
-	case "search_hotels":
-		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"hotels": []string{"Aman Kyoto", "Hoshinoya Tokyo", "Bali Ocean Villa"},
-			"count":  18,
-		}}
-	case "calculate_budget":
-		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"estimated_total": 5400,
-			"currency":        "USD",
-			"confidence":      0.92,
-		}}
-	case "generate_itinerary":
-		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-			"days": []string{"Arrival and coastal relaxation", "Culture and food route", "Checkout and transfer"},
-		}}
-	// Fitur create_payment dimatikan sementara — mock QRIS tidak dijalankan di workflow chat.
-	// case "create_payment":
-	//	return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
-	//		"method":      "QRIS",
-	//		"external_id": "DOKU-" + uuid.NewString(),
-	//		"expires_in":  "15m",
-	//	}}
-	case "send_whatsapp":
+	case mcp.ToolSendWhatsApp:
 		return ToolResult{Tool: toolName, Status: "success", Data: map[string]interface{}{
 			"delivered": true,
 			"channel":   "whatsapp",
@@ -144,38 +318,23 @@ func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 
 func (s *MCPService) executeCreateBooking(payload map[string]interface{}) ToolResult {
 	log.Printf("[mcp] create_booking called args=%+v", payload)
-	// Get guest user
 	guestUser, err := s.auth.GuestUser()
 	if err != nil {
 		log.Printf("[mcp] create_booking failed guest_user error=%v", err)
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
+		return ToolResult{Tool: mcp.ToolCreateBooking, Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
 	}
 
 	tripIDStr, _ := payload["trip_id"].(string)
 	tripID, err := uuid.Parse(tripIDStr)
 	if err != nil {
 		log.Printf("[mcp] create_booking failed invalid_trip_id trip_id=%q", tripIDStr)
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": "invalid trip_id"}}
-	}
-
-	adultPax := 1
-	if v, ok := payload["adult_pax"].(float64); ok {
-		adultPax = int(v)
-	} else if v, ok := payload["adult_pax"].(string); ok {
-		adultPax = parseIntFallback(v, 1)
-	}
-
-	childPax := 0
-	if v, ok := payload["child_pax"].(float64); ok {
-		childPax = int(v)
-	} else if v, ok := payload["child_pax"].(string); ok {
-		childPax = parseIntFallback(v, 0)
+		return ToolResult{Tool: mcp.ToolCreateBooking, Status: "failed", Data: map[string]interface{}{"success": false, "error": "invalid trip_id"}}
 	}
 
 	req := dto.BookingRequest{
 		TripID:       tripID,
-		AdultPax:     adultPax,
-		ChildPax:     childPax,
+		AdultPax:     parsePax(payload, "adult_pax", 1),
+		ChildPax:     parsePax(payload, "child_pax", 0),
 		ContactName:  getString(payload, "contact_name"),
 		ContactEmail: getString(payload, "contact_email"),
 		ContactPhone: getString(payload, "contact_phone"),
@@ -187,18 +346,18 @@ func (s *MCPService) executeCreateBooking(payload map[string]interface{}) ToolRe
 	}
 	if req.ContactEmail == "" && req.ContactPhone == "" {
 		log.Printf("[mcp] create_booking failed missing_contact trip_id=%s", tripID)
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": "contact_email or contact_phone is required"}}
+		return ToolResult{Tool: mcp.ToolCreateBooking, Status: "failed", Data: map[string]interface{}{"success": false, "error": "contact_email or contact_phone is required"}}
 	}
 
 	log.Printf("[mcp] create_booking saving trip_id=%s adult_pax=%d child_pax=%d contact_email=%q contact_phone=%q travel_date=%q", req.TripID, req.AdultPax, req.ChildPax, req.ContactEmail, req.ContactPhone, req.TravelDate)
 	booking, err := s.bookings.Create(guestUser.ID, req)
 	if err != nil {
 		log.Printf("[mcp] create_booking save failed error=%v", err)
-		return ToolResult{Tool: "create_booking", Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
+		return ToolResult{Tool: mcp.ToolCreateBooking, Status: "failed", Data: map[string]interface{}{"success": false, "error": err.Error()}}
 	}
 	log.Printf("[mcp] create_booking saved booking_id=%s status=%s payment_status=%s total=%.2f", booking.ID, booking.BookingStatus, booking.PaymentStatus, booking.TotalPrice)
 
-	return ToolResult{Tool: "create_booking", Status: "success", Data: map[string]interface{}{
+	return ToolResult{Tool: mcp.ToolCreateBooking, Status: "success", Data: map[string]interface{}{
 		"success":        true,
 		"order_id":       booking.ID.String(),
 		"status":         booking.BookingStatus,

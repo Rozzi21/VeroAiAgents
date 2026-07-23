@@ -57,6 +57,15 @@ export type BookingOrder = {
   trip?: TripPackage;
 };
 
+export type ChatResponse = {
+  session_id: string;
+  message: string;
+  workflow?: Record<string, unknown>[];
+  show_recommendations: boolean;
+  recommendation_reason: "initial" | "alternative" | "";
+  recommended_packages?: TripPackage[];
+};
+
 type Envelope<T> = {
   success: boolean;
   message: string;

@@ -61,19 +61,14 @@ Poin penting:
 `AIService.Chat()` adalah jantung platform. Alur (lihat `services.go`):
 
 1. Buat/lanjutkan `ChatSession`, simpan pesan user.
-2. Jalankan pipeline workflow MCP berurutan, tiap langkah publish event SSE:
-   - `ai_thinking` -> `search_destination`
-   - `searching_destination` -> `search_hotels`
-   - `calculating_budget` -> `calculate_budget`
-   - `generating_itinerary` -> `generate_itinerary`
-   - `create_payment` SENGAJA DINONAKTIFKAN (lihat known-issues.md)
-3. Ambil katalog paket published dari DB (`publishedPackagesForAI`, limit 20).
-4. Kirim ke LLM via `generateWithToolLoop()` dengan urutan pesan `system → catalog → memory → workflow_context → recent_messages`, plus OpenAI-compatible `tools` dari `mcp.OpenAITools()`.
+2. Jalankan tool loop via `generateWithToolLoop()`. LLM memutuskan tool mana yang perlu dipanggil dari katalog minimal yang aktif (`search_trips`, `select_package`, `collect_order_detail`, `create_booking`).
+3. `search_trips` adalah satu-satunya sumber rekomendasi paket. Tool ini mengambil katalog published dari DB, melakukan scoring lokal, dan mengembalikan hingga 3 paket ke LLM serta ke frontend.
+4. `select_package(trip_id)` menyimpan `SelectedTripID` pada `ChatSession`, menandakan user sudah memilih paket.
 5. Bila LLM mengembalikan `tool_calls`, backend parse arguments, eksekusi via `MCPService.Execute()`, append hasil sebagai role `tool`, lalu panggil LLM lagi sampai ada final text response atau `MaxToolCallRounds` tercapai.
 6. `create_booking` hanya boleh dianggap berhasil bila tool result `status=success`; jika model mengklaim pesanan dibuat tanpa hasil tersebut, backend mengganti response dengan pesan gagal aman.
 7. Bila AI gagal/empty -> fallback response lokal, log kegagalan.
 8. Simpan pesan assistant, refresh memory summary, publish `workflow_completed`.
-9. `selectRecommendedPackages()` memilih hingga 3 paket via scoring kata kunci.
+9. Response `ChatResult` mengandung `show_recommendations` dan `recommendation_reason` — diturunkan dari hasil tool `search_trips` dan keberadaan `SelectedTripID`. Tidak ada lagi `selectRecommendedPackages()` otomatis setelah LLM menjawab.
 
 Memory management: `refreshMemorySummary()` membuat ringkasan percakapan setelah >= `AI_MEMORY_SUMMARY_AFTER` (default 12) pesan, dibatasi `AI_MEMORY_MAX_CHARS` (default 1800). Alih-alih memuat SEMUA pesan sesi, method ini memakai `TailChatMessages()` untuk mengambil hanya pesan terakhir (estimasi berdasarkan `AIMemoryMaxChars / 200`), lalu memotong string ke maksimum karakter. Ini menghindari loading ribuan row pada sesi panjang.
 
@@ -82,10 +77,12 @@ Memory management: `refreshMemorySummary()` membuat ringkasan percakapan setelah
 `Execute()` menjalankan tool, mencatat log tool selected/called/arguments/execution/result, lalu publish event `mcp_tool_executed`. Persistensi `ToolCall` + `AILog` dilakukan **asinkron** via goroutine agar tidak memblokir workflow chat. Goroutine ini melakukan **error logging via audit log** (`auth.LogSecurity` dengan event `tool_call_persist_failed` / `ai_log_persist_failed`) dan **single retry** (500ms delay) bila persistensi gagal.
 
 Tool status saat ini:
+- `search_trips` nyata: satu-satunya sumber rekomendasi paket. Menerima `query` dan `alternative`. Jika user sudah memilih paket (`SelectedTripID` terisi) tetapi tidak meminta alternatif, backend menolak tool ini untuk menghindari spam rekomendasi.
+- `select_package(trip_id)` nyata: menyimpan paket terpilih ke `ChatSession.SelectedTripID`.
+- `collect_order_detail` nyata: menyimpan draft detail booking (pax, tanggal, kontak) tanpa membuat booking.
 - `create_booking` nyata: memanggil `BookingService.Create()` dan menyimpan booking ke DB. Response sukses memuat `{success:true, order_id, status, booking_id, booking_status, payment_status, total_price}`.
-- `create_order` aktif sebagai alias aman dari `create_booking` untuk kompatibilitas istilah order/booking.
-- `update_order_draft` lightweight: mengembalikan draft payload agar tool call valid dan tidak menjadi `unknown tool`.
-- `search_destination`, `search_hotels`, `calculate_budget`, `generate_itinerary` masih mock (`mock()` mengembalikan data dummy).
+- `create_order` aktif sebagai alias aman dari `create_booking`.
+- Tool lama `search_destination`, `search_hotels`, `calculate_budget`, `generate_itinerary`, dan `update_order_draft` dinonaktifkan dari katalog OpenAI.
 - `create_payment` diblok karena DOKU/payment disabled.
 
 Katalog di `mcp/tools.go` punya field `Enabled` per-tool; `ActiveCatalog()` mengembalikan tool aktif, dan `OpenAITools()` mengubahnya menjadi schema OpenAI tool calling.

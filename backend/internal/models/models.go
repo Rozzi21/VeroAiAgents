@@ -51,11 +51,12 @@ type AuthSession struct {
 
 type ChatSession struct {
 	BaseModel
-	UserID        uuid.UUID     `json:"user_id" gorm:"type:uuid;index;not null"`
-	User          User          `json:"-" gorm:"foreignKey:UserID"`
-	Title         string        `json:"title" gorm:"size:180;not null"`
-	MemorySummary string        `json:"memory_summary" gorm:"type:text"`
-	Messages      []ChatMessage `json:"messages,omitempty" gorm:"foreignKey:SessionID"`
+	UserID         uuid.UUID     `json:"user_id" gorm:"type:uuid;index;not null"`
+	User           User          `json:"-" gorm:"foreignKey:UserID"`
+	Title          string        `json:"title" gorm:"size:180;not null"`
+	MemorySummary  string        `json:"memory_summary" gorm:"type:text"`
+	SelectedTripID *uuid.UUID    `json:"selected_trip_id" gorm:"type:uuid;index"`
+	Messages       []ChatMessage `json:"messages,omitempty" gorm:"foreignKey:SessionID"`
 }
 
 type ChatMessage struct {

@@ -52,7 +52,7 @@ Menyimpan sesi refresh token untuk memungkinkan **revocation**.
 
 ### ChatSession & ChatMessage ([models.go](../../backend/internal/models/models.go))
 Percakapan AI.
-- `ChatSession` punya `Title` (ringkasan prompt pertama) dan `MemorySummary` (ringkasan memori jangka panjang, text).
+- `ChatSession` punya `Title` (ringkasan prompt pertama), `MemorySummary` (ringkasan memori jangka panjang, text), dan `SelectedTripID` (nullable, UUID index). `SelectedTripID` digunakan untuk menandai bahwa user sudah memilih satu paket, sehingga rekomendasi tidak dikirim berulang.
 - `ChatMessage` menyimpan `Role` (`user`/`assistant`) + `Content`. `has many` di bawah session (`foreignKey:SessionID`).
 
 ### Trip ([models.go](../../backend/internal/models/models.go))
@@ -127,6 +127,8 @@ File:
 | `ReplaceTripItineraries` | **Hapus lalu buat ulang** semua itinerary trip dalam satu transaksi (pola replace-all, bukan upsert) |
 | `ListRecentChatMessages(id, limit)` | N pesan terakhir untuk konteks AI |
 | `TailChatMessages(id, limit)` | N pesan terakhir (oldest-first) untuk refresh memory summary — efisien untuk sesi panjang |
+| `UpdateChatSessionSelectedTrip(sessionID, tripID)` | Update paket terpilih pada session |
+| `FindBookingBySession(sessionID)` | Cek booking terakhir yang terkait dengan session (opsional) |
 | `CreateAuthSession` | Simpan sesi refresh saat login/refresh |
 | `FindActiveSessionByJTI` | Sesi yang belum revoked & belum expired |
 | `RevokeSessionByJTI` | Revoke satu sesi (rotation saat refresh) |
