@@ -64,31 +64,71 @@ type Envelope<T> = {
   error?: unknown;
 };
 
+// Abort requests that hang so the UI does not stay in a loading state forever.
+const REQUEST_TIMEOUT_MS = 35_000; // slightly above the max AI workflow timeout
+
+async function parseJsonEnvelope<T>(response: Response): Promise<Envelope<T>> {
+  const contentType = response.headers.get("content-type") || "";
+  // Proxy errors (e.g. 502/504 from Next.js rewrite or nginx) often return HTML.
+  // Detect that early and surface a clearer message instead of "invalid JSON".
+  const raw = await response.text();
+  if (!contentType.includes("application/json") || !raw.trim().startsWith("{")) {
+    // eslint-disable-next-line no-console
+    console.error("[api] non-JSON response", {
+      status: response.status,
+      contentType,
+      preview: raw.slice(0, 200),
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Server mengalami gangguan (${response.status}). Coba beberapa saat lagi.`
+      );
+    }
+    throw new Error("Server merespons dengan format yang tidak dikenal.");
+  }
+  try {
+    return JSON.parse(raw) as Envelope<T>;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[api] failed to parse JSON response", {
+      status: response.status,
+      preview: raw.slice(0, 200),
+      error: err,
+    });
+    throw new Error("Gagal membaca respons dari server. Coba refresh halaman.");
+  }
+}
+
 export async function apiFetch<T>(path: string, options: RequestInit = {}) {
   const headers = new Headers(options.headers);
   if (!(options.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
   let response: Response;
   try {
     response = await fetch(`${resolveApiBase()}${path}`, {
       ...options,
       headers,
+      signal: controller.signal,
     });
-  } catch {
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error(
+        "Server terlalu lama merespons. Pastikan backend berjalan dan coba lagi."
+      );
+    }
     throw new Error(
       "Tidak dapat terhubung ke server. Pastikan backend berjalan di http://localhost:8080."
     );
+  } finally {
+    clearTimeout(timeoutId);
   }
 
-  let payload: Envelope<T>;
-  try {
-    payload = (await response.json()) as Envelope<T>;
-  } catch {
-    throw new Error("Respons server tidak valid. Coba refresh halaman.");
-  }
-
+  const payload = await parseJsonEnvelope<T>(response);
   if (!response.ok || !payload.success) {
     throw new Error(payload.message || "Request failed");
   }

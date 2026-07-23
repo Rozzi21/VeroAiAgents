@@ -31,7 +31,7 @@ Antarmuka chat AI untuk tamu. Tidak ada login, tidak ada auth. Efektif hanya dua
 
 | File | Fungsi |
 |---|---|
-| `frontend/src/lib/api.ts` | `apiFetch()` envelope-aware, `assetURL()`, tipe `TripPackage`. Base URL kosong di browser (proxy), `NEXT_PUBLIC_API_BASE_URL` di server |
+| `frontend/src/lib/api.ts` | `apiFetch()` envelope-aware, memeriksa `Content-Type`, menangani respons HTML/proxy error, timeout 35 s via `AbortController`, serta `assetURL()` + tipe `TripPackage`. Base URL kosong di browser (proxy), `NEXT_PUBLIC_API_BASE_URL` di server |
 | `frontend/src/lib/format.ts` | Format harga (`formatIDR`, `getDiscountMeta`, `getTripAdultPrice`/`getTripChildPrice`). `formatIDR` memformat angka termasuk `0` sebagai Rp 0; `"TBD"` hanya untuk `null`/`undefined`/`NaN` |
 | `frontend/src/lib/format-trip-pax.ts` | Format jumlah pax (dewasa/anak) |
 | `frontend/src/lib/utils.ts` | Util umum (mis. `cn()` untuk className) |

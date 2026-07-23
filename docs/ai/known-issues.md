@@ -388,11 +388,13 @@ Aritmetika `float64` rawan galat presisi untuk nominal uang. DB sudah `numeric`,
 
 ---
 
-### 14. ✅ Backoffice: Error Response HTML Saat JSON Diharapkan (FIXED)
+### 14. ✅ Frontend & Backoffice: Error Response HTML Saat JSON Diharapkan (FIXED)
 
-**Lokasi:** `backoffice-frontend/src/lib/api.ts` → `parseJsonEnvelope()`, `request()`.
+**Lokasi:**
+- `backoffice-frontend/src/lib/api.ts` → `parseJsonEnvelope()`, `request()`.
+- `frontend/src/lib/api.ts` → `parseJsonEnvelope()`, `apiFetch()`.
 
-Request sekarang memeriksa `Content-Type` dan membungkus `response.json()` dalam try-catch. Jika backend membalas HTML (502/504/nginx timeout) atau JSON rusak, client mendapat pesan user-friendly: "Server merespons dengan format yang tidak dikenal" / "Gagal membaca respons dari server".
+Request kini memeriksa `Content-Type` dan membungkus pembacaan respons dalam try-catch. Jika backend/proxy membalas HTML (502/504/nginx timeout, Next.js error page, dll) atau JSON rusak, client mendapat pesan user-friendly: "Server merespons dengan format yang tidak dikenal" / "Gagal membaca respons dari server". Versi customer (`frontend`) juga menambahkan timeout 35 detik via `AbortController` agar workflow AI yang lambat tidak membuat UI menggantung.
 
 ### 15. ✅ Backoffice: Refresh Token Promise Tanpa Timeout (FIXED)
 
