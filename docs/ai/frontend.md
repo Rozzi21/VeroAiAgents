@@ -117,7 +117,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 - Refresh token HANYA di cookie HttpOnly (tak tersentuh JS).
 - Refresh proaktif ~5 menit sebelum expiry (`scheduleProactiveRefresh`), plus retry otomatis saat 401 di `apiFetch`.
 - `BroadcastChannel("vero_auth")` menyiarkan token baru ke tab lain (mencegah race rotasi refresh token). Sejak SEC-19, pesan channel divalidasi ketat (type/access_token/expires_at) sebelum diadopsi.
-- Sejak SEC-19, kedua `next.config.mjs` mengirim header keamanan (CSP, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) di semua route untuk mempersempit permukaan XSS pencurian token.
+- Sejak SEC-19, kedua `next.config.mjs` mengirim header keamanan (`Content-Security-Policy` dengan `script-src 'self' 'unsafe-inline' 'unsafe-eval'` dan `connect-src` ke backend + WebSocket localhost, tanpa `upgrade-insecure-requests`; serta `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`) di semua route untuk mempersempit permukaan XSS pencurian token sambil tetap kompatibel dengan dev lokal HTTP.
 
 ### Fitur yang BELUM aktif (placeholder/mock)
 
