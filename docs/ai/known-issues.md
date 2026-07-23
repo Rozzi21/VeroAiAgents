@@ -410,6 +410,27 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 
 ---
 
+## E. Production Readiness & Operasional Gaps
+
+Berdasarkan Production Readiness Review (PRR), implementasi saat ini sudah layak menjadi fondasi production, namun ada beberapa hutang operasional yang perlu dibereskan:
+
+### 16. Ketiadaan Metrik Observability (Prometheus)
+Backend saat ini tidak mengekspor metrik operasional (latensi endpoint, QPS, tingkat error, penggunaan memori/goroutine).
+**Dampak:** Buta visibilitas saat insiden production.
+**Rekomendasi:** Tambahkan middleware `gin-prometheus` dan ekspos rute `/metrics`.
+
+### 17. Duplikasi Kode Shared Frontend
+Tipe data (seperti `TripPackage`) dan fungsi utilitas (`formatIDR`) disalin secara manual (duplikat) di `frontend/` dan `backoffice-frontend/`.
+**Dampak:** Risiko inkonsistensi saat salah satu codebase diperbarui tanpa memperbarui yang lain.
+**Rekomendasi:** Ekstrak kode bersama ke folder shared (monorepo workspace/lokal package).
+
+### 18. Cleanup Job via Ticker Internal
+Job `CleanupExpiredChatSessions` dipicu via `time.Ticker` internal di `main.go`. Pada skenario multi-instance (horizontal scaling), setiap instance akan menjalankan job yang sama dan saling berpacu (race condition), membebani database.
+**Dampak:** Beban DB ganda dan potensi konflik transaksi.
+**Rekomendasi:** Matikan ticker internal di mode prod, delegasikan eksekusi `CleanupExpiredChatSessions` ke Kubernetes CronJob atau scheduler eksternal lain.
+
+---
+
 ## Ringkasan Prioritas
 
 **Sisa pekerjaan (belum selesai):**
@@ -419,10 +440,15 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
+| 🟠 **Tinggi** | #7 Event bus in-memory | SSE realtime putus di arsitektur load balancer; ganti ke Redis Pub/Sub |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
+| 🟡 Sedang | #16 Metrik Observability | Tambah metrik Prometheus untuk production visibilitas |
+| 🟡 Sedang | #1 MCP Tools masih mock | Ubah integrasi tool dari data dummy ke kueri nyata |
 | Rendah | #13 Uang float64 | Presisi (makin relevan setelah harga server-side SEC-3) |
-| Rendah | #10 LLM summarization memory | Masih truncation string |
+| Rendah | #10 LLM summarization memory | Masih truncation string (termasuk risiko patah byte UTF-8 dari SEC-21) |
+| Rendah | #17 Duplikasi frontend shared | Ekstrak tipe dan utils ke shared package |
+| Rendah | #18 Cleanup via internal ticker | Pindahkan job ticker ke Kubernetes CronJob |
 
 **Sudah selesai (jejak audit):**
 
