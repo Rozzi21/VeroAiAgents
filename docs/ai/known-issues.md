@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 23 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17, SEC-18, SEC-19 & SEC-20 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 23 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-14, SEC-15, SEC-16, SEC-17, SEC-18, SEC-19 & SEC-20 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -28,14 +28,6 @@ Signature diverifikasi terhadap pesan `ExternalID + Status` yang statis. Payload
 
 **Perbaikan:** saat payments diaktifkan, implementasi skema signature DOKU resmi (digest SHA-256 body + header timestamp), tolak request tanpa timestamp segar (±5 menit), catat nonce.
 
-### SEC-14. 🟠 SEDANG — Rate Limiter `sync.Map` Tumbuh Tak Terbatas (Memory DoS)
-
-**Lokasi:** `backend/internal/middlewares/middlewares.go` → `ipRateLimiter` (baris ~77-105).
-
-Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
-
-**Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
-
 ### SEC-21. 🟡 RENDAH — Bug Kecil Tersebar
 
 - `handlers.go` → `UpdateBooking()`: membandingkan error dengan string `err.Error() == "Booking not found"` — rapuh; pakai sentinel error/`errors.Is`.
@@ -52,6 +44,24 @@ Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH diha
 ## A.2 Celah Keamanan — SELESAI (Batch 21 Jul 2026)
 
 Temuan batch audit 21 Jul 2026 yang sudah diperbaiki pada hari yang sama dan diverifikasi `go build`/`go vet`/`gofmt`.
+
+### SEC-14. ✅ SEDANG — Rate Limiter `sync.Map` Tumbuh Tak Terbatas (Memory DoS) (FIXED 23 Jul 2026)
+
+**Lokasi:** `backend/internal/middlewares/middlewares.go` → `ipRateLimiter`; `backend/cmd/server/main.go`; `backend/internal/config/config.go`; `backend/.env.example`.
+
+Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
+
+Kini dua lapis pertahanan:
+
+1. **Memory-bounded rate limiter**:
+   - `maxRateLimiterEntries = 10_000` — ketika map sudah penuh, IP baru tetap mendapat limiter anonim sementara (tidak disimpan) sehingga attacker tidak bisa membanjiri memori.
+   - **Janitor** berjalan tiap 30 detik, menghapus limiter yang idle ≥ 1 menit (tidak pernah kehabisan token = tidak ada request). Konsekuensinya jika prod attack: jumlah entry tidak akan melampaui ~10k.
+2. **Trusted proxy explicit**:
+   - `Config.TrustedProxies` di-load dari env `TRUSTED_PROXIES` (CSV CIDR/IP).
+   - `main.go`: dev default `SetTrustedProxies(nil)` — server tidak percaya `X-Forwarded-For` sama sekali. Production wajib set `TRUSTED_PROXIES` ke CIDR reverse proxy (cloud load balancer, nginx, dll).
+   - `.env.example` menambahkan contoh `TRUSTED_PROXIES`.
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
 ### SEC-11. ✅ TINGGI — Validasi Pax Negatif pada Booking (FIXED 21 Jul 2026)
 
@@ -400,7 +410,6 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 |---|---|---|
 | 🔴 **Tinggi** | SEC-10 IDOR chat messages | Semua chat tamu/user bisa dibaca lintas akun |
 | 🔴 **Tinggi** | SEC-12 Replay webhook | Wajib beres sebelum `PAYMENTS_ENABLED=true` |
-| 🟠 Sedang | SEC-14 abuse | Memory DoS limiter |
 | 🟠 **Tinggi** | #3 Test auth/payment/AI | Tidak ada safety net untuk kode sensitif (kini juga untuk mengunci SEC-1..SEC-4) |
 | 🟡 Sedang | #4 Re-enable payment UI saat siap | Alur revenue/payment belum jalan dari UI (ikuti kontrak baru pasca SEC-3 dan set `PAYMENTS_ENABLED=true`) |
 | 🟡 Sedang | #8 Isolasi guest user | Privasi antar-tamu |
@@ -422,6 +431,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-9 AI body tanpa limit | ✅ `io.LimitReader` 1 MiB |
 | SEC-11 Pax negatif booking | ✅ DTO `gte=0,lte=20` + guard `MaxBookingPax` di service |
 | SEC-13 Spam order/chat publik | ✅ `PublicWriteRateLimit` 5 req/menit per-IP untuk `/orders` + `/chat` |
+| SEC-14 Memory-bounded rate limiter | ✅ `maxRateLimiterEntries=10_000` + janitor + `TRUSTED_PROXIES` di production |
 | SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | SEC-16 Prompt chat tanpa batas | ✅ Prompt `max=4000` + body limit 64 KiB untuk `/chat` dan `/orders` |
 | SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |

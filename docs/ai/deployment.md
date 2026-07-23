@@ -62,6 +62,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `DOKU_SECRET` | _(kosong)_ | Secret verifikasi signature webhook HMAC-SHA256. **Wajib di production hanya saat `PAYMENTS_ENABLED=true`** — `Config.Validate()` menolak start bila kosong saat DOKU diaktifkan (SEC-4) |
 | `N8N_WEBHOOK` | _(kosong)_ | URL webhook N8N untuk otomasi pasca-pembayaran |
 | `CORS_ALLOWED_ORIGINS` | _(localhost dev)_ | Daftar origin diizinkan CORS, dipisah koma (mis. `https://app.vero.com,https://admin.vero.com`). Fallback ke `http://localhost:3000,:3001,:5173` bila kosong (SEC-8) |
+| `TRUSTED_PROXIES` | _(kosong)_ | Daftar CIDR reverse proxy tepercaya untuk resolusi IP klien via `X-Forwarded-For`. Kosong berarti tidak mempercayai proxy sama sekali (default dev). Wajib diisi CIDR load balancer/nginx di production agar rate limit per-IP tidak di-bypass (SEC-14) |
 
 
 ### Environment Variables (Frontend)
@@ -166,4 +167,5 @@ flowchart LR
 6. Jika frontend beda domain dari API: `JWT_COOKIE_SAME_SITE=None` (otomatis Secure) + tambahkan origin ke CORS.
 7. Volume persisten untuk `uploads/`; Docker image berjalan sebagai non-root user `app`.
 8. Ganti semua nilai dev placeholder di `.env.example`; jangan menyalin `.env` atau `.env.example` ke image.
-9. Rotasi password database dan secret setelah deployment pertama.
+9. Set `TRUSTED_PROXIES` ke CIDR reverse proxy yang sah (load balancer/nginx/Caddy) agar `c.ClientIP()` akurat dan rate limit per-IP efektif (SEC-14). Kosongkan hanya jika API langsung terpapar ke internet tanpa proxy.
+10. Rotasi password database dan secret setelah deployment pertama.

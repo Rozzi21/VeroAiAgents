@@ -71,6 +71,11 @@ DATABASE_URL=
 
 JWT_SECRET=change_this_to_a_long_random_secret
 
+# Set CIDR reverse proxy yang sah. Jika API di-deploy di belakang Nginx/Caddy
+# di server yang sama, gunakan 127.0.0.1. Biarkan kosong hanya jika API langsung
+# terpapar ke internet tanpa proxy (SEC-14).
+TRUSTED_PROXIES=127.0.0.1
+
 AI_API_KEY=your_provider_key
 AI_BASE_URL=https://api.openai.com/v1
 AI_MODEL=gpt-4o-mini

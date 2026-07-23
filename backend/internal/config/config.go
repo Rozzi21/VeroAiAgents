@@ -53,6 +53,12 @@ type Config struct {
 	DOKUSecret         string
 	N8NWebhook         string
 	CORSAllowedOrigins []string
+
+	// TrustedProxies is the list of reverse proxies that are trusted when
+	// resolving the real client IP (X-Forwarded-For). Empty disables proxy
+	// trust, which is the safest default for dev. Set to the real reverse proxy
+	// CIDR(s) in production (SEC-14).
+	TrustedProxies []string
 }
 
 func Load() Config {
@@ -91,6 +97,7 @@ func Load() Config {
 		DOKUSecret:           os.Getenv("DOKU_SECRET"),
 		N8NWebhook:           os.Getenv("N8N_WEBHOOK"),
 		CORSAllowedOrigins:   parseCSVEnv("CORS_ALLOWED_ORIGINS", []string{"http://localhost:3000", "http://localhost:3001", "http://localhost:5173"}),
+		TrustedProxies:       parseCSVEnv("TRUSTED_PROXIES", nil),
 	}
 
 	if cfg.DatabaseURL == "" || strings.Contains(cfg.DatabaseURL, "YOUR_PASSWORD") {

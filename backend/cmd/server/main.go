@@ -54,6 +54,15 @@ func main() {
 	router := gin.New()
 	// Limit multipart memory buffering for uploads (SEC-5).
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
+	// SEC-14: in dev, trust no proxy so X-Forwarded-For cannot be spoofed. In
+	// production, trust only the configured reverse proxy CIDR(s).
+	if cfg.AppEnv == "production" {
+		if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+			log.Fatalf("invalid TRUSTED_PROXIES: %v", err)
+		}
+	} else {
+		router.SetTrustedProxies(nil)
+	}
 	router.Use(
 		middlewares.RequestID(),
 		middlewares.SecureHeaders(),
