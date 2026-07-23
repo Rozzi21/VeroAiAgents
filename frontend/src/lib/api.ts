@@ -66,6 +66,13 @@ export type ChatResponse = {
   recommended_packages?: TripPackage[];
 };
 
+export type GuestChatHistoryResponse = {
+  messages: Array<{
+    role: "user" | "assistant";
+    content: string;
+  }>;
+};
+
 type Envelope<T> = {
   success: boolean;
   message: string;
@@ -122,6 +129,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}) {
     response = await fetch(`${resolveApiBase()}${path}`, {
       ...options,
       headers,
+      credentials: options.credentials ?? "include",
       signal: controller.signal,
     });
   } catch (err) {

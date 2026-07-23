@@ -49,8 +49,10 @@ Frontend hanya merender `PackageRecommendations` bila `show_recommendations === 
 
 Murni React lokal (`useState`/`useEffect`) di `ChatInterface`. Tidak ada Redux/Zustand/Context global. State penting:
 - `messages` — array pesan chat
-- `sessionID` — dipertahankan agar percakapan berlanjut (dikirim balik ke `POST /api/v1/chat`)
+- session identifier tidak disimpan di React/localStorage; browser mengelola cookie HttpOnly `vero_chat_session`
 - `recommendedPackages` — dari respons chat
+
+Saat mount, `ChatInterface` memanggil `GET /api/v1/chat/history` dengan credentials browser untuk memulihkan message guest. Request chat mengirim prompt saja; cookie otomatis menjadi ownership proof. Cookie berlaku sliding 7 hari dan session expired memulai percakapan baru.
 
 Catatan: efek mengetik (`TypingText`) adalah animasi client-side; respons chat datang sekaligus (bukan streaming/SSE).
 

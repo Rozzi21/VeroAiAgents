@@ -2,6 +2,7 @@ package repositories
 
 import (
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
@@ -55,6 +56,13 @@ func (r *Repository) UpdateChatSessionSelectedTrip(sessionID uuid.UUID, tripID *
 	return r.DB.Model(&models.ChatSession{}).Where("id = ?", sessionID).Update("selected_trip_id", tripID).Error
 }
 
+func (r *Repository) UpdateChatSessionActivity(sessionID uuid.UUID, expiresAt, lastActivityAt time.Time) error {
+	return r.DB.Model(&models.ChatSession{}).Where("id = ?", sessionID).Updates(map[string]interface{}{
+		"expires_at":       expiresAt,
+		"last_activity_at": lastActivityAt,
+	}).Error
+}
+
 func (r *Repository) FindBookingBySession(sessionID uuid.UUID) (models.Booking, error) {
 	var booking models.Booking
 	err := r.DB.Order("created_at desc").First(&booking, "session_id = ?", sessionID).Error
@@ -65,6 +73,17 @@ func (r *Repository) ListChatSessions(userID uuid.UUID) ([]models.ChatSession, e
 	var sessions []models.ChatSession
 	err := r.DB.Where("user_id = ?", userID).Order("created_at desc").Find(&sessions).Error
 	return sessions, err
+}
+
+func (r *Repository) DeleteExpiredChatSessions(before time.Time) (int64, error) {
+	result := r.DB.Where("expires_at IS NOT NULL AND expires_at < ?", before).Delete(&models.ChatSession{})
+	return result.RowsAffected, result.Error
+}
+
+func (r *Repository) CountExpiredChatSessions(before time.Time) (int64, error) {
+	var count int64
+	err := r.DB.Model(&models.ChatSession{}).Where("expires_at IS NOT NULL AND expires_at < ?", before).Count(&count).Error
+	return count, err
 }
 
 func (r *Repository) AddChatMessage(message *models.ChatMessage) error {

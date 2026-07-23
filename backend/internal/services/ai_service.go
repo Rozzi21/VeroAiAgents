@@ -3,8 +3,10 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/ai"
@@ -25,7 +27,7 @@ type AIService struct {
 }
 
 type ChatResult struct {
-	SessionID            uuid.UUID     `json:"session_id"`
+	SessionID            uuid.UUID     `json:"-"`
 	Message              string        `json:"message"`
 	Workflow             []ToolResult  `json:"workflow"`
 	ShowRecommendations  bool          `json:"show_recommendations"`
@@ -33,20 +35,37 @@ type ChatResult struct {
 	RecommendedPackages  []models.Trip `json:"recommended_packages"`
 }
 
-func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, error) {
-	// SEC-17: a client-supplied session_id must belong to the caller.
-	sessionID := uuid.Nil
-	if req.SessionID != nil {
-		if existing, err := s.repo.FindChatSession(*req.SessionID); err == nil && existing.UserID == userID {
-			sessionID = existing.ID
-		}
-	}
+// CleanupExpiredChatSessions is intentionally a small service operation so an
+// in-process ticker can be replaced by cron/systemd/Kubernetes later without
+// duplicating cleanup SQL outside the repository.
+func (s *AIService) CleanupExpiredChatSessions(now time.Time) (int64, error) {
+	return s.repo.DeleteExpiredChatSessions(now)
+}
+
+func (s *AIService) Chat(chatCtx ChatContext, req dto.ChatRequest) (ChatResult, error) {
+	sessionID := chatCtx.SessionID
 	if sessionID == uuid.Nil {
-		session := models.ChatSession{UserID: userID, Title: summarizePrompt(req.Prompt)}
-		if err := s.repo.CreateChatSession(&session); err != nil {
-			return ChatResult{}, err
-		}
-		sessionID = session.ID
+		return ChatResult{}, errors.New("chat session is required")
+	}
+
+	session, err := s.repo.FindChatSession(sessionID)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	if !sessionOwnedByContext(session, chatCtx) {
+		return ChatResult{}, errors.New("chat session not found")
+	}
+	now := time.Now()
+	if session.ExpiresAt != nil && !session.ExpiresAt.After(now) {
+		return ChatResult{}, errors.New("chat session expired")
+	}
+	if session.ExpiresAt == nil {
+		expiresAt := now.Add(s.cfg.GuestSessionTTL)
+		session.ExpiresAt = &expiresAt
+	}
+	session.LastActivityAt = &now
+	if err := s.repo.UpdateChatSessionActivity(session.ID, *session.ExpiresAt, now); err != nil {
+		return ChatResult{}, err
 	}
 
 	if err := s.repo.AddChatMessage(&models.ChatMessage{SessionID: sessionID, Role: "user", Content: req.Prompt}); err != nil {
@@ -134,6 +153,13 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		RecommendationReason: recommendationReason,
 		RecommendedPackages:  recommendedPackages,
 	}, nil
+}
+
+func sessionOwnedByContext(session models.ChatSession, chatCtx ChatContext) bool {
+	if chatCtx.UserID == nil {
+		return session.UserID == nil
+	}
+	return session.UserID != nil && *session.UserID == *chatCtx.UserID
 }
 
 func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.UUID) []models.Trip {
@@ -410,9 +436,3 @@ func (s *AIService) refreshMemorySummary(sessionID uuid.UUID) error {
 	return s.repo.UpdateChatSession(&session)
 }
 
-func summarizePrompt(prompt string) string {
-	if len(prompt) <= 64 {
-		return prompt
-	}
-	return prompt[:64] + "..."
-}

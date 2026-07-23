@@ -18,6 +18,7 @@ import {
   assetURL,
   TripPackage,
   ChatResponse,
+  GuestChatHistoryResponse,
 } from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 
@@ -48,6 +49,32 @@ export default function ChatInterface() {
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+    void apiFetch<GuestChatHistoryResponse>("/api/v1/chat/history")
+      .then((data) => {
+        if (cancelled || data.messages.length === 0) {
+          return;
+        }
+        setMessages(
+          data.messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+            shouldAnimate: false,
+          }))
+        );
+        setCompletedTyping(
+          Object.fromEntries(data.messages.map((_, index) => [index, true]))
+        );
+      })
+      .catch(() => {
+        // A missing/expired guest cookie simply starts a fresh chat.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     messagesEndRef.current?.scrollIntoView({ behavior, block: "end" });
   }, []);
@@ -68,10 +95,7 @@ export default function ChatInterface() {
     setMessages((items) => [...items, { role: "user", content: text }]);
     setCompletedTyping((items) => ({ ...items, [nextUserIndex]: true }));
     try {
-      const payload: { prompt: string; session_id?: string } = { prompt: text };
-      if (sessionID) {
-        payload.session_id = sessionID;
-      }
+      const payload = { prompt: text };
 
       const data = await apiFetch<ChatResponse>(
         "/api/v1/chat",
@@ -80,7 +104,6 @@ export default function ChatInterface() {
           body: JSON.stringify(payload),
         }
       );
-      setSessionID(data.session_id);
       setMessages((items) => {
         const assistantIndex = items.length;
         setCompletedTyping((typing) => ({ ...typing, [assistantIndex]: false }));

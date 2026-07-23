@@ -9,6 +9,8 @@ import (
 )
 
 const refreshCookiePath = "/api/v1/auth"
+const guestSessionCookieName = "vero_chat_session"
+const guestSessionCookiePath = "/api/v1/chat"
 
 func SetRefreshCookie(c *gin.Context, cfg config.Config, token string, maxAgeSeconds int) {
 	sameSite := parseSameSite(cfg.JWTCookieSameSite)
@@ -49,6 +51,50 @@ func GetRefreshCookie(c *gin.Context, cfg config.Config) string {
 		return ""
 	}
 	return token
+}
+
+// GuestSessionCookie helpers manage the anonymous chat session identifier.
+// HttpOnly prevents XSS-exfiltration; Secure follows app config; SameSite
+// defaults to Lax to allow safe cross-origin redirect workflows.
+func SetGuestSessionCookie(c *gin.Context, cfg config.Config, sessionID string, maxAgeSeconds int) {
+	sameSite := parseSameSite(cfg.GuestCookieSameSite)
+	c.SetSameSite(sameSite)
+	secure := cfg.GuestCookieSecure
+	if sameSite == http.SameSiteNoneMode {
+		secure = true
+	}
+	c.SetCookie(
+		guestSessionCookieName,
+		sessionID,
+		maxAgeSeconds,
+		guestSessionCookiePath,
+		"",
+		secure,
+		true,
+	)
+}
+
+func GetGuestSessionCookie(c *gin.Context) string {
+	sessionID, err := c.Cookie(guestSessionCookieName)
+	if err != nil {
+		return ""
+	}
+	return sessionID
+}
+
+func ClearGuestSessionCookie(c *gin.Context, cfg config.Config) {
+	sameSite := parseSameSite(cfg.GuestCookieSameSite)
+	c.SetSameSite(sameSite)
+	secure := cfg.GuestCookieSecure || sameSite == http.SameSiteNoneMode
+	c.SetCookie(
+		guestSessionCookieName,
+		"",
+		-1,
+		guestSessionCookiePath,
+		"",
+		secure,
+		true,
+	)
 }
 
 func parseSameSite(value string) http.SameSite {

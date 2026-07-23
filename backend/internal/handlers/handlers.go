@@ -137,7 +137,12 @@ func (h *Handler) Chat(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	res, err := h.Services.AI.Chat(currentUserID(c), req)
+	if req.SessionID == nil {
+		utils.BadRequest(c, "session_id is required", gin.H{})
+		return
+	}
+	userID := currentUserID(c)
+	res, err := h.Services.AI.Chat(services.ChatContext{SessionID: *req.SessionID, UserID: &userID}, req)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
@@ -150,16 +155,22 @@ func (h *Handler) GuestChat(c *gin.Context) {
 	if !bind(c, &req) {
 		return
 	}
-	user, err := h.Services.Auth.GuestUser()
+	sessionID, err := resolveGuestSession(h, c)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
 	}
-	res, err := h.Services.AI.Chat(user.ID, req)
+	res, err := h.Services.AI.Chat(services.ChatContext{SessionID: sessionID}, req)
 	if err != nil {
+		if err.Error() == "chat session expired" || err.Error() == "chat session not found" {
+			auth.ClearGuestSessionCookie(c, h.Services.Config)
+			utils.BadRequest(c, "Chat session expired", gin.H{})
+			return
+		}
 		utils.ServerError(c, err)
 		return
 	}
+	auth.SetGuestSessionCookie(c, h.Services.Config, sessionID.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
 	utils.Success(c, http.StatusOK, "AI workflow completed", res)
 }
 
@@ -177,12 +188,71 @@ func (h *Handler) ChatMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
+	session, err := h.Services.Repo.FindChatSession(id)
+	if err != nil || session.UserID == nil || *session.UserID != currentUserID(c) || (session.ExpiresAt != nil && !session.ExpiresAt.After(time.Now())) {
+		utils.NotFound(c, "Chat session not found")
+		return
+	}
 	messages, err := h.Services.Repo.ListChatMessages(id)
 	if err != nil {
 		utils.ServerError(c, err)
 		return
 	}
 	utils.Success(c, http.StatusOK, "Chat messages", messages)
+}
+
+// GuestHistory restores the current anonymous session without accepting an
+// identifier from the request. The cookie is the ownership proof.
+func (h *Handler) GuestHistory(c *gin.Context) {
+	id, err := uuid.Parse(auth.GetGuestSessionCookie(c))
+	if err != nil {
+		utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": []models.ChatMessage{}})
+		return
+	}
+	session, err := h.Services.Repo.FindChatSession(id)
+	if err != nil || session.UserID != nil || (session.ExpiresAt != nil && !session.ExpiresAt.After(time.Now())) {
+		auth.ClearGuestSessionCookie(c, h.Services.Config)
+		utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": []models.ChatMessage{}})
+		return
+	}
+	now := time.Now()
+	expiresAt := now.Add(h.Services.Config.GuestSessionTTL)
+	if err := h.Services.Repo.UpdateChatSessionActivity(id, expiresAt, now); err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	messages, err := h.Services.Repo.ListChatMessages(id)
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	// Do not return ChatMessage.SessionID. The HttpOnly cookie is the only
+	// guest-session identifier and remains inaccessible to JavaScript.
+	guestMessages := make([]gin.H, 0, len(messages))
+	for _, message := range messages {
+		guestMessages = append(guestMessages, gin.H{"role": message.Role, "content": message.Content})
+	}
+	auth.SetGuestSessionCookie(c, h.Services.Config, id.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
+	utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": guestMessages})
+}
+
+func resolveGuestSession(h *Handler, c *gin.Context) (uuid.UUID, error) {
+	if cookieID := auth.GetGuestSessionCookie(c); cookieID != "" {
+		id, err := uuid.Parse(cookieID)
+		if err != nil {
+			auth.ClearGuestSessionCookie(c, h.Services.Config)
+		} else if session, err := h.Services.Repo.FindChatSession(id); err == nil && session.UserID == nil && (session.ExpiresAt == nil || session.ExpiresAt.After(time.Now())) {
+			return id, nil
+		}
+	}
+	now := time.Now()
+	expiresAt := now.Add(h.Services.Config.GuestSessionTTL)
+	session := models.ChatSession{Title: "Guest chat", ExpiresAt: &expiresAt, LastActivityAt: &now}
+	if err := h.Services.Repo.CreateChatSession(&session); err != nil {
+		return uuid.Nil, err
+	}
+	auth.SetGuestSessionCookie(c, h.Services.Config, session.ID.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
+	return session.ID, nil
 }
 
 func (h *Handler) ListTrips(c *gin.Context) {

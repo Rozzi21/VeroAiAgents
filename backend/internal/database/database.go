@@ -69,6 +69,32 @@ func (d *Database) AutoMigrate() error {
 	return d.migrateLegacySlots()
 }
 
+// MigrateGuestChatSessions removes the legacy shared guest-user ownership from
+// chat sessions. Anonymous ownership is now represented by NULL UserID, while
+// authenticated sessions keep their existing owner. Existing sessions also
+// receive an expiry so the cleanup path applies consistently after upgrade.
+func (d *Database) MigrateGuestChatSessions(ttl time.Duration) error {
+	if ttl <= 0 {
+		ttl = 7 * 24 * time.Hour
+	}
+	seconds := ttl.Seconds()
+	return d.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			UPDATE chat_sessions
+			SET user_id = NULL
+			WHERE user_id = (SELECT id FROM users WHERE email = 'guest@vero.local' LIMIT 1)
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			UPDATE chat_sessions
+			SET last_activity_at = COALESCE(last_activity_at, updated_at, created_at),
+				expires_at = COALESCE(expires_at, COALESCE(last_activity_at, updated_at, created_at) + (? * INTERVAL '1 second'))
+			WHERE expires_at IS NULL
+		`, seconds).Error
+	})
+}
+
 func (d *Database) migrateLegacySlots() error {
 	if !d.DB.Migrator().HasColumn("trips", "slots") {
 		return nil

@@ -3,6 +3,8 @@ package services
 import (
 	"errors"
 
+	"github.com/google/uuid"
+
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/ai"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/config"
@@ -10,6 +12,14 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/events"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
+
+// ChatContext carries the session boundary resolved by the HTTP layer. A nil
+// UserID represents an anonymous guest session; authenticated callers can be
+// added later without changing the AI service contract again.
+type ChatContext struct {
+	SessionID uuid.UUID
+	UserID    *uuid.UUID
+}
 
 // Services wires the per-domain service structs together. Each domain lives in
 // its own file within this package (auth_service.go, ai_service.go,

@@ -191,6 +191,10 @@ func (s *MCPService) executeSelectPackage(sessionID uuid.UUID, payload map[strin
 		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "trip not found"}}
 	}
 
+	session, err := s.repo.FindChatSession(sessionID)
+	if err != nil || (session.ExpiresAt != nil && !session.ExpiresAt.After(time.Now())) {
+		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "chat session expired"}}
+	}
 	if err := s.repo.UpdateChatSessionSelectedTrip(sessionID, &tripID); err != nil {
 		log.Printf("[mcp] select_package failed update session error=%v", err)
 		return ToolResult{Tool: mcp.ToolSelectPackage, Status: "failed", Data: map[string]interface{}{"error": "failed to update session"}}

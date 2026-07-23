@@ -21,6 +21,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 		// SEC-13: expensive unauthenticated writes get a strict per-IP budget
 		// (5 req/min) so bulk fake-order spam / LLM-cost abuse is impractical.
 		api.POST("/chat", middlewares.PublicWriteRateLimit(), middlewares.RequestBodyLimit(64<<10), h.GuestChat)
+		api.GET("/chat/history", h.GuestHistory)
 		// Public manual order entry for the temporary AI-driven flow:
 		// Customer -> AI chat -> select package -> confirm -> order saved as pending.
 		// This endpoint never creates DOKU payment/session while PAYMENTS_ENABLED=false.

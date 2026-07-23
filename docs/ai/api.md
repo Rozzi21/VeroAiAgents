@@ -120,6 +120,7 @@ Request penting:
 | POST | `/api/v1/chat` | 🔓 guest (rate limit 5/menit per-IP, SEC-13) | Jalankan workflow AI; balas message + recommended_packages |
 | GET | `/api/v1/chat/sessions` | 🔒 | Daftar sesi chat milik user |
 | GET | `/api/v1/chat/:id/messages` | 🔒 | Pesan dalam satu sesi |
+| GET | `/api/v1/chat/history` | 🔓 guest cookie | Pulihkan history guest aktif; session identifier tidak diterima dari request dan tidak dikembalikan |
 | GET | `/api/v1/events/stream` | 👮 | SSE stream event workflow/payment/log (khusus operator/admin — SEC-18) |
 
 ### Temporary Manual Order Flow
@@ -129,10 +130,12 @@ Request penting:
 | POST | `/api/v1/orders` | 🔓 (rate limit 5/menit per-IP, SEC-13) | Buat order dari customer UI setelah pilih paket; tersimpan sebagai `booking_status=pending`, `payment_status=pending_admin_processing`; tidak membuat DOKU payment/session |
 
 - `chat` request: `{prompt(min 2, max 4000), session_id?, stream?}` (DTO `ChatRequest`). Body maksimum 64 KiB. `session_id` hanya dipakai bila milik caller; ID sesi asing/tidak ditemukan diabaikan dan request dibuat pada sesi baru milik caller (SEC-17).
-- `chat` response data: `{session_id, message, workflow[], show_recommendations, recommendation_reason, recommended_packages[]}` (lihat `ChatResult`).
+- `chat` response data: `{message, workflow[], show_recommendations, recommendation_reason, recommended_packages[]}` (lihat `ChatResult`). Session identifier tidak dikembalikan di JSON; browser memakai HttpOnly cookie `vero_chat_session`.
   - `show_recommendations` boolean: apakah frontend harus menampilkan daftar rekomendasi.
   - `recommendation_reason`: `"initial"` (rekomendasi pertama), `"alternative"` (user meminta alternatif), atau `""` (tidak ada rekomendasi).
   - `recommended_packages` hanya berisi hasil tool `search_trips`; backend tidak lagi melakukan scoring otomatis setelah LLM selesai menjawab.
+- Guest chat memakai cookie `vero_chat_session` dengan `HttpOnly`, `Secure` mengikuti `GUEST_COOKIE_SECURE`, `SameSite` dari `GUEST_COOKIE_SAME_SITE` (default `Lax`), path `/api/v1/chat`, dan sliding TTL default 7 hari (`GUEST_SESSION_TTL_HOURS`).
+- Guest `ChatSession.UserID` bernilai `NULL`. Session expired ditolak dan dibersihkan bersama message/tool-call/AI-log terkait.
 
 ### Packages (publik) & Trips (terproteksi)
 

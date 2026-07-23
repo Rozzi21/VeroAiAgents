@@ -224,6 +224,12 @@ Origins dibaca dari env `CORS_ALLOWED_ORIGINS` (CSV), fallback ke localhost dev.
 
 ## B. Placeholder & Integrasi Belum Selesai
 
+### 0. Guest Chat Session Hardening (IMPLEMENTED)
+
+Guest ChatSession kini anonymous (`user_id=NULL`) dan diikat ke HttpOnly cookie `vero_chat_session`, bukan shared `guest@vero.local`. Cookie memakai `SameSite=Lax` default yang dapat dikonfigurasi (`GUEST_COOKIE_SAME_SITE`) untuk kompatibilitas roadmap OAuth, Secure di production, dan sliding TTL default 7 hari. `GET /chat/history` tidak menerima atau mengembalikan session identifier. Cleanup MVP berjalan tiap jam dan menghapus session expired beserta child chat records.
+
+Booking guest masih memakai legacy `GuestUser()` hanya untuk memenuhi kontrak `bookings.user_id` yang saat ini `NOT NULL`; ini tidak lagi dipakai sebagai ownership ChatSession. Saat login guest di masa depan, migrasi session cukup mengubah `chat_sessions.user_id` ke user baru.
+
 ### 1. Sebagian MCP Tools Masih Mock (Bukan Integrasi Nyata)
 
 **Lokasi:** `backend/internal/services/mcp_service.go` → `MCPService.mock()`

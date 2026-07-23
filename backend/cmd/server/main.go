@@ -73,6 +73,7 @@ func main() {
 	)
 	router.Static("/uploads", "./uploads")
 	routes.Register(router, handler, serviceContainer)
+	startChatSessionCleanup(serviceContainer)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -99,4 +100,25 @@ func main() {
 		log.Fatalf("server shutdown failed: %v", err)
 	}
 	log.Println("server stopped gracefully")
+}
+
+// startChatSessionCleanup is the MVP adapter for the cleanup use case. The
+// service method is scheduler-agnostic, so a future cron/systemd/Kubernetes
+// job can invoke the same operation without moving SQL into the scheduler.
+func startChatSessionCleanup(s *services.Services) {
+	interval := time.Hour
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for range ticker.C {
+			deleted, err := s.AI.CleanupExpiredChatSessions(time.Now())
+			if err != nil {
+				log.Printf("[chat-session-cleanup] failed: %v", err)
+				continue
+			}
+			if deleted > 0 {
+				log.Printf("[chat-session-cleanup] deleted=%d", deleted)
+			}
+		}
+	}()
 }

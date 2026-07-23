@@ -52,7 +52,7 @@ Menyimpan sesi refresh token untuk memungkinkan **revocation**.
 
 ### ChatSession & ChatMessage ([models.go](../../backend/internal/models/models.go))
 Percakapan AI.
-- `ChatSession` punya `Title` (ringkasan prompt pertama), `MemorySummary` (ringkasan memori jangka panjang, text), dan `SelectedTripID` (nullable, UUID index). `SelectedTripID` digunakan untuk menandai bahwa user sudah memilih satu paket, sehingga rekomendasi tidak dikirim berulang.
+- `ChatSession` punya `Title` (ringkasan prompt pertama), `MemorySummary` (ringkasan memori jangka panjang, text), `SelectedTripID` (nullable, UUID index), `UserID` nullable, `ExpiresAt`, dan `LastActivityAt`. `UserID=NULL` berarti anonymous guest; user authenticated di masa depan memakai `UserID` biasa. `ExpiresAt`/`LastActivityAt` mendukung sliding expiration 7 hari.
 - `ChatMessage` menyimpan `Role` (`user`/`assistant`) + `Content`. `has many` di bawah session (`foreignKey:SessionID`).
 
 ### Trip ([models.go](../../backend/internal/models/models.go))
@@ -99,6 +99,8 @@ erDiagram
 ## Migrasi
 
 `Database.AutoMigrate()` ([database.go](../../backend/internal/database/database.go)) dipanggil di startup (`main.go`). Mendaftarkan 10 model secara berurutan: User, AuthSession, ChatSession, ChatMessage, Trip, Itinerary, Booking, Payment, AILog, ToolCall.
+
+Setelah AutoMigrate, `MigrateGuestChatSessions()` menormalisasi session lama yang masih menunjuk `guest@vero.local` menjadi `UserID=NULL` dan mengisi expiry legacy dari timestamp aktivitas. Cleanup expired menghapus child `ChatMessage`, `ToolCall`, dan `AILog` lalu parent `ChatSession` dalam transaksi.
 
 ### Migrasi legacy: `slots` -> `adult_pax`
 `migrateLegacySlots()` menangani skema lama: jika kolom `slots` masih ada di tabel `trips`, menyalin nilainya ke `adult_pax` untuk baris yang belum punya pax. Pola ini contoh **migrasi data idempoten** — selalu cek `Migrator().HasColumn` dulu.
