@@ -169,7 +169,7 @@ export default function ChatInterface() {
                   <div className="w-2 h-2 rounded-full bg-[#df3333] animate-bounce" style={{ animationDelay: "300ms" }}></div>
                 </div>
                 <span className="text-sm font-medium text-slate-500 italic flex items-center gap-2">
-                  <span className="animate-pulse">Analyzing budget constraints...</span>
+                  <span className="animate-pulse">Thinking</span>
                 </span>
               </div>
           )}
