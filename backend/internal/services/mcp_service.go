@@ -97,7 +97,9 @@ func (s *MCPService) Execute(sessionID uuid.UUID, toolName string, payload map[s
 			_ = s.repo.CreateAILog(&aiLog)
 		}
 	}()
-	s.bus.Publish("mcp_tool_executed", result)
+	// SEC-18: broadcast only tool name + status; ToolResult.Data may carry
+	// booking PII (create_booking) or prompt-derived payloads.
+	s.bus.Publish("mcp_tool_executed", map[string]interface{}{"tool": result.Tool, "status": result.Status})
 	return result, nil
 }
 

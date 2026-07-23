@@ -118,6 +118,7 @@ Bukan queue/message broker eksternal. Implementasi in-memory di `backend/interna
 - `Subscribe()` membuat channel buffered (kapasitas 32).
 - `Publish()` **non-blocking**: pakai `select` dengan `default`, jadi event di-drop bila channel penuh (tidak memblok publisher).
 - Handler `EventStream` (di `handlers.go`) men-stream via SSE dengan heartbeat 25 detik.
+- **Akses (SEC-18):** route `/api/v1/events/stream` diguard `Role(operator, admin)` — hanya staff. Payload publish disanitasi: workflow step hanya `{session_id, tool}`, `workflow_completed` hanya `{session_id}`, `mcp_tool_executed` hanya `{tool, status}`, booking/payment event hanya ID + status (tanpa PII kontak, external_id, amount).
 
 Implikasi penting untuk AI: karena in-memory, event TIDAK persisten dan TIDAK survive restart atau multi-instance. Untuk horizontal scaling perlu diganti Redis pub/sub atau sejenis (lihat known-issues.md).
 

@@ -57,7 +57,9 @@ func (s *BookingService) Create(userID uuid.UUID, req dto.BookingRequest) (model
 	if err := s.repo.CreateBooking(&booking); err != nil {
 		return booking, err
 	}
-	s.bus.Publish("booking_created", booking)
+	// SEC-18: minimal signal only; the booking struct carries contact PII
+	// (name/email/phone) that must not be broadcast to every SSE subscriber.
+	s.bus.Publish("booking_created", map[string]interface{}{"booking_id": booking.ID, "trip_id": booking.TripID, "status": booking.BookingStatus})
 	return booking, nil
 }
 func (s *BookingService) List(query dto.ListQuery) ([]models.Booking, error) {
@@ -113,7 +115,7 @@ func (s *BookingService) UpdateStatus(id, userID uuid.UUID, isStaff bool, req dt
 
 	// Re-fetch so the caller receives the latest persisted state with preloads.
 	booking, _ = s.Find(id, userID, isStaff)
-	s.bus.Publish("booking_updated", booking)
+	s.bus.Publish("booking_updated", map[string]interface{}{"booking_id": booking.ID, "status": booking.BookingStatus})
 	return booking, nil
 }
 

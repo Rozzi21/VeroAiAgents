@@ -4,7 +4,7 @@ Catatan jujur tentang keterbatasan, technical debt, dan area yang perlu diperhat
 
 > Prinsip: dokumen ini sengaja menyoroti yang BELUM beres. Untuk gambaran fitur yang sudah aktif, lihat `architecture.md` dan `api.md`.
 
-> Audit terakhir: 23 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17, SEC-19 & SEC-20 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14, SEC-18 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
+> Audit terakhir: 23 Jul 2026 (audit keamanan + bug menyeluruh) menemukan 12 temuan (SEC-10..SEC-21). Status: SEC-11, SEC-13, SEC-15, SEC-16, SEC-17, SEC-18, SEC-19 & SEC-20 SELESAI (bagian A.2), sisanya (SEC-10, SEC-12, SEC-14 & SEC-21) BELUM (bagian A.1). Temuan lama SEC-1..SEC-9 tetap SELESAI (bagian A.3).
 
 ---
 
@@ -35,15 +35,6 @@ Signature diverifikasi terhadap pesan `ExternalID + Status` yang statis. Payload
 Setiap IP baru membuat entry `*rate.Limiter` di `sync.Map` dan TIDAK PERNAH dihapus. Penyerang dengan banyak IP (botnet/spoof via header jika `TrustedProxies` salah konfigurasi) dapat mengisi memori server tanpa batas. Juga: `c.ClientIP()` memakai default Gin yang percaya `X-Forwarded-For` dari semua proxy — `router.SetTrustedProxies()` tidak dipanggil di `main.go`, sehingga rate limit per-IP mudah di-bypass dengan memutar header `X-Forwarded-For`.
 
 **Perbaikan:** tambah janitor periodik (hapus limiter idle), batasi jumlah entry, dan set `router.SetTrustedProxies([]string{...})` sesuai reverse proxy deploy.
-
-### SEC-18. 🟡 RENDAH — Event Bus Broadcast Data Sensitif ke Semua Subscriber SSE
-
-**Lokasi:** `backend/internal/services/ai_service.go` (`bus.Publish(step.event, ...{"prompt": req.Prompt})`), `payment_service.go` (payload payment lengkap), `handlers.go` → `EventStream` (hanya butuh JWT apapun).
-
-Setiap subscriber `/events/stream` (user biasa pun bisa) menerima SEMUA event: prompt mentah user lain, session_id, data payment (external_id, amount). Tidak ada kanal per-user/filter.
-
-**Perbaikan:** batasi SSE ke role staff, atau kanal per-user; jangan publish prompt/payload penuh.
-
 
 ### SEC-21. 🟡 RENDAH — Bug Kecil Tersebar
 
@@ -107,6 +98,23 @@ Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 **Lokasi:** `backend/internal/dto/dto.go` → `ChatRequest`; `backend/internal/middlewares/middlewares.go` → `RequestBodyLimit()`; `backend/internal/routes/routes.go`.
 
 Dulu prompt chat tidak memiliki batas panjang dan request publik tidak memiliki batas body khusus. Kini `ChatRequest.Prompt` dibatasi `2..4000` karakter. Endpoint publik `POST /chat` dan `POST /orders` memakai `RequestBodyLimit(64 << 10)` (64 KiB) sebelum binding JSON; rate limit SEC-13 tetap aktif. Ini membatasi payload besar, biaya token LLM, alokasi memory, dan write workload dari request tunggal.
+
+Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
+
+### SEC-18. ✅ RENDAH — Event Bus Broadcast Data Sensitif ke Semua Subscriber SSE (FIXED 23 Jul 2026)
+
+**Lokasi:** `backend/internal/routes/routes.go` (`/events/stream`), `backend/internal/services/ai_service.go`, `payment_service.go`, `booking_service.go`, `mcp_service.go`.
+
+Dulu setiap subscriber `/events/stream` (cukup JWT apa pun, termasuk user biasa) menerima SEMUA event: prompt mentah user lain, session_id, struct booking lengkap (contact name/email/phone), dan struct payment lengkap (external_id, amount). Kini dua lapis pertahanan:
+
+1. **Akses dibatasi ke staff**: route `/events/stream` kini diguard `middlewares.Role(models.RoleOperator, models.RoleAdmin)` di samping `Auth` — user biasa menerima 403. SSE memang belum dikonsumsi frontend mana pun, jadi tidak ada UX yang rusak.
+2. **Payload disanitasi di sisi publish** (defense-in-depth bila nanti endpoint dibuka lebih luas):
+   - `ai_service.go` — step workflow hanya mengirim `{session_id, tool}` (prompt mentah dihapus); `workflow_completed` hanya `{session_id}` (body pesan asisten dihapus).
+   - `mcp_service.go` — `mcp_tool_executed` hanya `{tool, status}` (bukan seluruh `ToolResult.Data` yang bisa memuat PII booking).
+   - `booking_service.go` — `booking_created`/`booking_updated` hanya `{booking_id, trip_id?, status}` (struct dengan contact PII tidak lagi di-broadcast).
+   - `payment_service.go` — `payment_created`/`payment_updated` hanya `{payment_id, booking_id, status}` (external_id & amount tetap server-side). `trip_created` dibiarkan apa adanya (data katalog publik).
+
+Catatan: kanal per-user belum ada — bila SSE nanti dipakai customer chat, rancang filter per-user/session sebelum membuka akses non-staff.
 
 Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 
@@ -417,6 +425,7 @@ Refresh request kini menggunakan `AbortController` dengan timeout `10_000` ms. J
 | SEC-15 Kebocoran error internal | ✅ `ServerError` generik + log; `/health/database` & BadRequest tanpa `detail` mentah |
 | SEC-16 Prompt chat tanpa batas | ✅ Prompt `max=4000` + body limit 64 KiB untuk `/chat` dan `/orders` |
 | SEC-17 Session ID asing di chat | ✅ Cek `UserID` di `Chat()`; sesi asing → sesi baru |
+| SEC-18 SSE broadcast data sensitif | ✅ `/events/stream` dibatasi staff + payload event disanitasi (tanpa prompt/PII/amount) |
 | SEC-19 Token backoffice + BroadcastChannel | ✅ Validasi pesan channel + CSP/security headers di kedua `next.config.mjs` |
 | SEC-20 Docker/deploy hardening | ✅ Runtime non-root, no host network, uploads volume/gitignore, env placeholder guard |
 | #11 Pecah services.go | ✅ Dipecah per-domain (satu package) |

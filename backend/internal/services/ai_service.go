@@ -68,7 +68,9 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 
 	results := make([]ToolResult, 0, len(steps))
 	for _, step := range steps {
-		s.bus.Publish(step.event, map[string]interface{}{"session_id": sessionID, "prompt": req.Prompt})
+		// SEC-18: never broadcast the raw user prompt on the shared event bus;
+		// only non-sensitive workflow metadata (tool name + session id).
+		s.bus.Publish(step.event, map[string]interface{}{"session_id": sessionID, "tool": step.tool})
 		result, err := s.mcp.Execute(sessionID, step.tool, map[string]interface{}{"prompt": req.Prompt})
 		if err != nil {
 			return ChatResult{}, err
@@ -122,7 +124,9 @@ func (s *AIService) Chat(userID uuid.UUID, req dto.ChatRequest) (ChatResult, err
 		return ChatResult{}, err
 	}
 	_ = s.refreshMemorySummary(sessionID)
-	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID, "message": response})
+	// SEC-18: omit the assistant message body from the broadcast; subscribers
+	// only need a completion signal scoped to the session.
+	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID})
 
 	return ChatResult{
 		SessionID:           sessionID,

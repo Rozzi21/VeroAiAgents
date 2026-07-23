@@ -47,7 +47,9 @@ func (s *PaymentService) Create(req dto.PaymentCreateRequest) (models.Payment, e
 	if err := s.repo.CreatePayment(&payment); err != nil {
 		return payment, err
 	}
-	s.bus.Publish("payment_created", payment)
+	// SEC-18: publish only a minimal signal; the full payment (external_id,
+	// amount) stays server-side.
+	s.bus.Publish("payment_created", map[string]interface{}{"payment_id": payment.ID, "booking_id": payment.BookingID, "status": payment.Status})
 	return payment, nil
 }
 
@@ -105,7 +107,8 @@ func (s *PaymentService) Webhook(req dto.PaymentWebhookRequest) (models.Payment,
 	if err := s.repo.UpdatePayment(&payment); err != nil {
 		return payment, err
 	}
-	s.bus.Publish("payment_updated", payment)
+	// SEC-18: minimal status payload only.
+	s.bus.Publish("payment_updated", map[string]interface{}{"payment_id": payment.ID, "booking_id": payment.BookingID, "status": payment.Status})
 	if payment.Status == "paid" || payment.Status == "settlement" {
 		s.bus.Publish("booking_confirmed", map[string]interface{}{"booking_id": payment.BookingID, "payment_id": payment.ID})
 		s.triggerN8N("payment_success", map[string]interface{}{

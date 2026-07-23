@@ -120,7 +120,7 @@ Request penting:
 | POST | `/api/v1/chat` | 🔓 guest (rate limit 5/menit per-IP, SEC-13) | Jalankan workflow AI; balas message + recommended_packages |
 | GET | `/api/v1/chat/sessions` | 🔒 | Daftar sesi chat milik user |
 | GET | `/api/v1/chat/:id/messages` | 🔒 | Pesan dalam satu sesi |
-| GET | `/api/v1/events/stream` | 🔒 | SSE stream event workflow/payment/log |
+| GET | `/api/v1/events/stream` | 👮 | SSE stream event workflow/payment/log (khusus operator/admin — SEC-18) |
 
 ### Temporary Manual Order Flow
 
@@ -199,7 +199,7 @@ Query `ListQuery` (bookings, logs, tool-calls): `limit` (default 50, maks 200), 
 
 ## Server-Sent Events (SSE)
 
-Endpoint `GET /api/v1/events/stream` (🔒) menstream event dari event bus in-memory. Handler: `EventStream` di [handlers.go](../../backend/internal/handlers/handlers.go), bus: [backend/internal/events/bus.go](../../backend/internal/events/bus.go).
+Endpoint `GET /api/v1/events/stream` (👮 operator/admin saja — SEC-18) menstream event dari event bus in-memory. Handler: `EventStream` di [handlers.go](../../backend/internal/handlers/handlers.go), bus: [backend/internal/events/bus.go](../../backend/internal/events/bus.go). Payload event disanitasi di sisi publish: tidak ada prompt mentah, PII kontak booking, maupun external_id/amount payment.
 
 Event yang dipublikasikan:
 - Workflow chat: `ai_thinking`, `searching_destination`, `calculating_budget`, `generating_itinerary`, `ai_response`, `workflow_completed`

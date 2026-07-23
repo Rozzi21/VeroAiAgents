@@ -36,7 +36,11 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			authGroup.GET("/me", middlewares.Auth(s.JWT), h.Me)
 		}
 
-		api.GET("/events/stream", middlewares.Auth(s.JWT), h.EventStream)
+		// SEC-18: SSE broadcasts internal workflow/payment events to every
+		// subscriber. Restrict to staff so raw prompts, session IDs, and payment
+		// data are not exposed to regular users. Payloads are also sanitized at
+		// the publish site as defense-in-depth.
+		api.GET("/events/stream", middlewares.Auth(s.JWT), middlewares.Role(models.RoleOperator, models.RoleAdmin), h.EventStream)
 
 		protected := api.Group("")
 		protected.Use(middlewares.Auth(s.JWT))
