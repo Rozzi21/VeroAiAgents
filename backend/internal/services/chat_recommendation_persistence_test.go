@@ -204,9 +204,12 @@ func TestGetGuestHistoryReconstructsWithoutLLM(t *testing.T) {
 	}
 	svc := newGenUIAIService(repo)
 
-	messages, err := svc.GetGuestHistory(context.Background(), sessionID)
+	messages, selectedTripID, err := svc.GetGuestHistory(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("GetGuestHistory: %v", err)
+	}
+	if selectedTripID != nil {
+		t.Fatalf("no package was selected in this fixture; got %s", *selectedTripID)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("expected 3 messages, got %d", len(messages))

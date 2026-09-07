@@ -47,6 +47,14 @@ type ChatRequest struct {
 	Stream    bool       `json:"stream"`
 }
 
+// SelectPackageRequest is the body of POST /api/v1/chat/select-package — the
+// deterministic "Select Package" action of a Travel Package recommendation
+// card (B-GENUI-3). It runs the same select_package tool logic the LLM uses;
+// the frontend never mutates selected_trip_id locally.
+type SelectPackageRequest struct {
+	TripID uuid.UUID `json:"trip_id" binding:"required"`
+}
+
 // ChatRecommendationReason describes why recommended packages are returned.
 // Valid values: "initial", "alternative", or empty.
 type ChatRecommendationReason string

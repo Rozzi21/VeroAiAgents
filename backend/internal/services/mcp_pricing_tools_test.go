@@ -21,6 +21,11 @@ type mockMCPRepo struct {
 	trip     models.Trip
 	tripErr  error
 	messages []models.ChatMessage // captured chat messages (for order marker)
+	// B-GENUI-3/4 test hooks (zero values keep the legacy behavior below):
+	// when session is set FindChatSession returns it verbatim (with the
+	// requested id); selectedTripUpdates records every selected_trip_id write.
+	session             *models.ChatSession
+	selectedTripUpdates []uuid.UUID
 }
 
 func (m *mockMCPRepo) FindTrip(_ context.Context, id uuid.UUID) (models.Trip, error) {
@@ -36,6 +41,11 @@ func (m *mockMCPRepo) ListTrips(_ context.Context, _ repositories.TripRepository
 // ChatRepository / LogRepository stubs (unused by the read tools but required
 // to satisfy the MCPRepository interface).
 func (m *mockMCPRepo) FindChatSession(_ context.Context, id uuid.UUID) (models.ChatSession, error) {
+	if m.session != nil {
+		sess := *m.session
+		sess.ID = id
+		return sess, nil
+	}
 	guestID := uuid.New()
 	return models.ChatSession{BaseModel: models.BaseModel{ID: id}, GuestSessionID: &guestID}, nil
 }
@@ -64,7 +74,10 @@ func (m *mockMCPRepo) ListChatSessions(_ context.Context, _ uuid.UUID) ([]models
 func (m *mockMCPRepo) UpdateChatSessionMemorySummary(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil
 }
-func (m *mockMCPRepo) UpdateChatSessionSelectedTrip(_ context.Context, _ uuid.UUID, _ *uuid.UUID) error {
+func (m *mockMCPRepo) UpdateChatSessionSelectedTrip(_ context.Context, _ uuid.UUID, tripID *uuid.UUID) error {
+	if tripID != nil {
+		m.selectedTripUpdates = append(m.selectedTripUpdates, *tripID)
+	}
 	return nil
 }
 func (m *mockMCPRepo) UpdateChatSessionActivity(_ context.Context, _ uuid.UUID, _ time.Time, _ time.Time) error {

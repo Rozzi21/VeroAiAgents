@@ -81,6 +81,11 @@ export type ChatResponse = {
   // This is the ONLY thing the UI may branch on for the guest-order rule — the
   // assistant's prose is display text, never a signal.
   order_gate?: ChatOrderGate;
+  // Backend-authoritative selected package of the chat session
+  // (chat_sessions.selected_trip_id), echoed on every finalized turn since
+  // 9 Sep 2026 (B-GENUI-3/4). This is the ONLY source the UI may use for the
+  // selected/active card state. Absent when nothing is selected.
+  selected_trip_id?: string;
 };
 
 // ChatOrderGate is the chat-transport twin of `error.code` on the REST
@@ -112,6 +117,11 @@ export type GuestChatHistoryResponse = {
     content: string;
     recommendation?: ChatRecommendation;
   }>;
+  // Persisted package selection of the session (chat_sessions.selected_trip_id),
+  // returned since 9 Sep 2026 (B-GENUI-3) so a reload restores the
+  // selected/active card state WITHOUT any search_trips or LLM call.
+  // Absent when nothing is selected.
+  selected_trip_id?: string;
 };
 
 type Envelope<T> = {
@@ -202,6 +212,25 @@ export async function customerLogout(): Promise<void> {
     refreshInFlight = null;
     clearCustomerAccessToken();
   }
+}
+
+export type SelectPackageResponse = {
+  selected_trip_id: string;
+};
+
+// selectPackage is the deterministic "Select Package" action of a Travel
+// Package recommendation card (B-GENUI-3, 9 Sep 2026). The backend endpoint
+// runs the SAME select_package tool logic the LLM uses: it validates the
+// trip, persists chat_sessions.selected_trip_id, and returns it. An APIError
+// (validation, unknown trip, expired session) means the selection did NOT
+// happen — the caller must leave the UI selection state unchanged. Opening
+// the detail panel never calls this. Selection is not booking: no order is
+// created here.
+export function selectPackage(tripId: string): Promise<SelectPackageResponse> {
+  return apiFetch<SelectPackageResponse>("/api/v1/chat/select-package", {
+    method: "POST",
+    body: JSON.stringify({ trip_id: tripId }),
+  });
 }
 
 // Abort requests that hang so the UI does not stay in a loading state forever.

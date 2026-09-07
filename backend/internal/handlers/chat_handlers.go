@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/mcp"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
@@ -147,7 +148,7 @@ func (h *Handler) GuestHistory(c *gin.Context) {
 		utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": []models.ChatMessage{}})
 		return
 	}
-	messages, err := h.Services.AI.GetGuestHistory(c.Request.Context(), id)
+	messages, selectedTripID, err := h.Services.AI.GetGuestHistory(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, services.ErrChatSessionNotFound) || errors.Is(err, services.ErrChatSessionExpired) {
 			auth.ClearGuestSessionCookie(c, h.Services.Config)
@@ -171,7 +172,62 @@ func (h *Handler) GuestHistory(c *gin.Context) {
 		guestMessages = append(guestMessages, entry)
 	}
 	auth.SetGuestSessionCookie(c, h.Services.Config, id.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
-	utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": guestMessages})
+	payload := gin.H{"messages": guestMessages}
+	// B-GENUI-3/4: echo the backend-authoritative selection so a reload
+	// restores the selected/active card state without any search_trips call.
+	if selectedTripID != nil {
+		payload["selected_trip_id"] = selectedTripID.String()
+	}
+	utils.Success(c, http.StatusOK, "Chat history", payload)
+}
+
+// GuestSelectPackage is the deterministic backend entry point for the "Select
+// Package" action on a Travel Package recommendation card (B-GENUI-3).
+// Clicking a card to open the detail panel NEVER reaches this endpoint; only
+// the explicit Select Package button does. The handler runs the SAME
+// select_package tool the LLM uses (MCPService.Execute -> executeSelectPackage),
+// so validation and selected_trip_id persistence stay backend-authoritative
+// and identical across both entry points. No order is created here — selection
+// is not booking. A failed tool result means selected_trip_id is unchanged;
+// the client must not mark the package as selected in that case.
+func (h *Handler) GuestSelectPackage(c *gin.Context) {
+	var req dto.SelectPackageRequest
+	if !bind(c, &req) {
+		return
+	}
+	sessionID, err := resolveGuestSession(h, c)
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	// Same OptionalAuth contract as GuestChat: a valid Bearer token upgrades
+	// the caller identity passed to the MCP pipeline; no token = pure guest.
+	var userID *uuid.UUID
+	if uid := currentUserID(c); uid != uuid.Nil {
+		userID = &uid
+	}
+	result, err := h.Services.MCP.Execute(c.Request.Context(), sessionID, userID, mcp.ToolSelectPackage, map[string]interface{}{
+		"trip_id": req.TripID.String(),
+	})
+	if err != nil {
+		utils.ServerError(c, err)
+		return
+	}
+	if result.Status != models.ToolResultStatusSuccess {
+		// Selection did NOT happen — selected_trip_id is unchanged. The tool's
+		// error strings are stable and user-safe (see executeSelectPackage);
+		// surface one so the client can render the existing error state
+		// instead of silently assuming success.
+		msg, _ := result.Data["error"].(string)
+		if msg == "" {
+			msg = "failed to select package"
+		}
+		utils.BadRequest(c, msg, gin.H{})
+		return
+	}
+	utils.Success(c, http.StatusOK, "Package selected", gin.H{
+		"selected_trip_id": result.Data["trip_id"],
+	})
 }
 
 // rebindGuestChatSession mints a brand-new anonymous chat session for a guest

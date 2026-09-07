@@ -30,6 +30,11 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 		// unchanged. The endpoint stays public; invalid tokens are ignored.
 		api.POST("/chat", middlewares.PublicWriteRateLimit(), middlewares.RequestBodyLimit(64<<10), middlewares.OptionalAuth(s.JWT), h.GuestChat)
 		api.GET("/chat/history", h.GuestHistory)
+		// B-GENUI-3: explicit "Select Package" action of a recommendation card.
+		// Runs the existing select_package tool logic; same auth contract as
+		// /chat (guest cookie + optional Bearer upgrade). Selection is not
+		// booking — no order is created here.
+		api.POST("/chat/select-package", middlewares.PublicWriteRateLimit(), middlewares.RequestBodyLimit(64<<10), middlewares.OptionalAuth(s.JWT), h.GuestSelectPackage)
 		// Public manual order entry for the temporary AI-driven flow:
 		// Customer -> AI chat -> select package -> confirm -> order saved as pending.
 		// This endpoint never creates DOKU payment/session while PAYMENTS_ENABLED=false.

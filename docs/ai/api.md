@@ -43,8 +43,8 @@ Diterapkan ke semua request via `router.Use(...)` di [backend/cmd/server/main.go
 ## Middleware Per-Rute
 
 - `AuthRateLimit` — grup `/auth`: 5 req/detik per-IP (anti brute force).
-- `PublicWriteRateLimit` — `POST /chat` & `POST /orders`: 5 req/**menit** per-IP, bucket terpisah per route (SEC-13, anti spam order & abuse biaya LLM).
-- `RequestBodyLimit` — `POST /chat` & `POST /orders`: body JSON maksimum 64 KiB (SEC-16).
+- `PublicWriteRateLimit` — `POST /chat`, `POST /chat/select-package` & `POST /orders`: 5 req/**menit** per-IP, bucket terpisah per route (SEC-13, anti spam order & abuse biaya LLM).
+- `RequestBodyLimit` — `POST /chat`, `POST /chat/select-package` & `POST /orders`: body JSON maksimum 64 KiB (SEC-16).
 - `Auth(jwt)` — wajib `Authorization: Bearer <access_token>`. Memvalidasi audience `access`. Jika refresh token dipakai sebagai access, dicatat sebagai event audit `refresh_token_used_as_access`. Set `user_id`, `role`, `email` ke context.
 - `OptionalAuth(jwt)` — seperti `Auth` tapi TIDAK PERNAH menolak request: tanpa token / token invalid / kedaluwarsa, request lanjut sebagai anonymous. Dipakai di `POST /chat` (27 Agu 2026): Bearer access token valid meng-upgrade chat menjadi caller terautentikasi sehingga `create_booking` membuat order atas nama AKUN (tanpa limit satu order guest). Refresh token yang dikirim sebagai Bearer diabaikan (bukan diterima).
 - `Role(roles...)` — RBAC; harus dijalankan SETELAH `Auth`. Membandingkan `role` di context dengan daftar role yang diizinkan.
@@ -137,7 +137,8 @@ Request penting:
 | POST | `/api/v1/chat` | 🔓 guest + 🔑 Bearer opsional (`OptionalAuth`, 27 Agu 2026); rate limit 5/menit per-IP (SEC-13) | Jalankan workflow AI; balas message + recommended_packages. Dengan Bearer access token valid, order dari `create_booking` diatribusikan ke akun (bypass guest limit) |
 | GET | `/api/v1/chat/sessions` | 🔒 | Daftar sesi chat milik user |
 | GET | `/api/v1/chat/:id/messages` | 🔒 | Pesan dalam satu sesi |
-| GET | `/api/v1/chat/history` | 🔓 guest cookie | Pulihkan history guest aktif; session identifier tidak diterima dari request dan tidak dikembalikan. Sejak 6 Sep 2026 tiap pesan membawa `id` (message id stabil) + `recommendation?` (metadata kartu paket yang dipersist, bila ada) |
+| GET | `/api/v1/chat/history` | 🔓 guest cookie | Pulihkan history guest aktif; session identifier tidak diterima dari request dan tidak dikembalikan. Sejak 6 Sep 2026 tiap pesan membawa `id` (message id stabil) + `recommendation?` (metadata kartu paket yang dipersist, bila ada). Sejak 9 Sep 2026 payload top-level juga membawa `selected_trip_id?` (seleksi paket yang dipersist) agar reload memulihkan status kartu terpilih (B-GENUI-3) |
+| POST | `/api/v1/chat/select-package` | 🔓 guest cookie + 🔑 Bearer opsional (`OptionalAuth`); rate limit 5/menit per-IP + body 64 KiB (sama seperti `POST /chat`) | Aksi "Select Package" eksplisit dari kartu rekomendasi (B-GENUI-3, 9 Sep 2026). Body `{trip_id}`. Menjalankan tool `select_package` yang sama dengan jalur LLM (`MCPService.Execute` → validasi trip → persist `chat_sessions.selected_trip_id`). Sukses membalas `{selected_trip_id}`; gagal membalas 400 dengan pesan tool (`invalid trip_id` / `trip not found` / `chat session expired`) dan seleksi TIDAK berubah. Bukan booking — tidak membuat order |
 | GET | `/api/v1/events/stream` | 👮 | SSE stream event workflow/payment/log (khusus operator/admin — SEC-18) |
 
 ### Temporary Manual Order Flow

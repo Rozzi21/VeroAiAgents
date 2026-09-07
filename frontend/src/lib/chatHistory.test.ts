@@ -110,6 +110,43 @@ test("legacy payloads without server ids fall back to the local counter", () => 
   assert.equal(mapped[1].showRecommendations, undefined);
 });
 
+test("two recommendation sets (initial + alternative) both survive reload", () => {
+  // B-GENUI-4: after selecting from set A the user can ask for another
+  // package; set B is a NEW assistant message and set A stays visible.
+  const payload: HistoryPayload = [
+    { id: "u-1", role: "user", content: "cari paket bali" },
+    {
+      id: "set-a",
+      role: "assistant",
+      content: "Ini rekomendasi paket untuk Anda.",
+      recommendation: {
+        show_recommendations: true,
+        recommendation_reason: "initial",
+        recommended_packages: [trip("trip-1", "Bali Adventure")],
+      },
+    },
+    { id: "u-2", role: "user", content: "carikan paket lain" },
+    {
+      id: "set-b",
+      role: "assistant",
+      content: "Berikut pilihan paket yang berbeda.",
+      recommendation: {
+        show_recommendations: true,
+        recommendation_reason: "alternative",
+        recommended_packages: [trip("trip-2", "Bromo Sunrise")],
+      },
+    },
+  ];
+  const mapped = mapHistoryMessages(payload, () => "fallback");
+  assert.equal(mapped.filter((m) => m.showRecommendations).length, 2);
+  assert.equal(mapped[1].id, "set-a");
+  assert.equal(mapped[1].recommendationReason, "initial");
+  assert.equal(mapped[1].packages?.[0].id, "trip-1");
+  assert.equal(mapped[3].id, "set-b");
+  assert.equal(mapped[3].recommendationReason, "alternative");
+  assert.equal(mapped[3].packages?.[0].id, "trip-2");
+});
+
 test("malformed metadata (flag on, no packages) renders as text-only", () => {
   const payload: HistoryPayload = [
     {

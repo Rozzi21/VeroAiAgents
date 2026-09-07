@@ -28,6 +28,7 @@ import {
   apiFetch,
   assetURL,
   ensureCustomerSession,
+  selectPackage,
   streamChat,
   TripPackage,
   GuestChatHistoryResponse,
@@ -35,6 +36,15 @@ import {
 import type { ChatOrderGate } from "@/lib/api";
 import { orderGateView } from "@/lib/orderGate";
 import { mapHistoryMessages } from "@/lib/chatHistory";
+import {
+  initialPackageSelection,
+  isPackageSelected,
+  PackageSelectionState,
+  selectionFailed,
+  selectionStarted,
+  selectionSucceeded,
+  selectionSynced,
+} from "@/lib/packageSelection";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 
 type ChatMessage = {
@@ -72,6 +82,12 @@ export default function ChatInterface() {
     },
   ]);
   const [selectedPackage, setSelectedPackage] = useState<TripPackage | null>(null);
+  // B-GENUI-3: backend-authoritative package selection state (drives the
+  // "Terpilih" card state). Updated ONLY from structured backend signals —
+  // select_package success, the `done` selected_trip_id echo, or the history
+  // restore. Opening the detail panel NEVER touches it; assistant text is
+  // never parsed for it.
+  const [selection, setSelection] = useState<PackageSelectionState>(initialPackageSelection);
   const [completedTyping, setCompletedTyping] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -163,7 +179,14 @@ export default function ChatInterface() {
     let cancelled = false;
     void apiFetch<GuestChatHistoryResponse>("/api/v1/chat/history")
       .then((data) => {
-        if (cancelled || data.messages.length === 0) {
+        if (cancelled) {
+          return;
+        }
+        // B-GENUI-3: restore the persisted selection together with the
+        // messages — pure data from the history payload; a reload never calls
+        // search_trips or the LLM.
+        setSelection((s) => selectionSynced(s, data.selected_trip_id ?? null));
+        if (data.messages.length === 0) {
           return;
         }
         // History carries the stable server-owned message id plus any
@@ -266,6 +289,11 @@ export default function ChatInterface() {
               // into this final setMessages so no trailing text is lost.
               const pending = streamStateRef.current.buffer;
               stopStreamScheduler();
+              // B-GENUI-3/4: the backend echoes selected_trip_id on every
+              // finalized turn (including an LLM-driven select_package);
+              // sync the selected card state from it — never from the
+              // assistant text.
+              setSelection((s) => selectionSynced(s, result.selected_trip_id ?? null));
               // Stable server-owned id (persisted ChatMessage.ID) replaces
               // the local placeholder so the assistant message AND its
               // recommendation cards stay one logical message with a key
@@ -361,6 +389,30 @@ export default function ChatInterface() {
     [loading, prompt, scheduleStreamFlush, stopStreamScheduler]
   );
 
+  // B-GENUI-3: explicit "Select Package" card action. The backend validates
+  // and persists selected_trip_id via the existing select_package tool; the
+  // UI marks the card selected ONLY after that confirmation. A failure shows
+  // the error state and leaves the current selection untouched — never assume
+  // success, never mutate selected_trip_id locally.
+  const handleSelectPackage = useCallback(
+    async (trip: TripPackage) => {
+      if (selection.pendingTripId !== null || isPackageSelected(selection, trip.id)) {
+        return;
+      }
+      setSelection((s) => selectionStarted(s, trip.id));
+      try {
+        await ensureCustomerSession();
+        const res = await selectPackage(trip.id);
+        setSelection((s) => selectionSucceeded(s, res.selected_trip_id || trip.id));
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Gagal memilih paket. Coba lagi.";
+        setSelection((s) => selectionFailed(s, message));
+      }
+    },
+    [selection]
+  );
+
   return (
     <div className="flex h-screen bg-[#fafafc]">
       {/* Consumes the Google callback fragment (#access_token=...) so a customer
@@ -393,7 +445,10 @@ export default function ChatInterface() {
                   id={message.id}
                   message={message}
                   completedTyping={completedTyping[message.id]}
-                  onSelectPackage={setSelectedPackage}
+                  onViewDetails={setSelectedPackage}
+                  onSelectPackage={handleSelectPackage}
+                  selectedTripId={selection.selectedTripId}
+                  pendingTripId={selection.pendingTripId}
                   scrollToBottom={scrollToBottom}
                   onTypingDone={setCompletedTyping}
                 />
@@ -420,6 +475,22 @@ export default function ChatInterface() {
       {/* Sticky Input Area */}
       <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#fafafc] via-[#fafafc] to-transparent pt-10 pb-8 px-8">
         <div className="max-w-4xl mx-auto">
+          {selection.error && (
+            <div
+              role="alert"
+              className="mb-3 flex items-center justify-between rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800"
+            >
+              <span>{selection.error}</span>
+              <button
+                type="button"
+                onClick={() => setSelection((s) => ({ ...s, error: null }))}
+                className="ml-4 text-rose-500 hover:text-rose-700"
+                aria-label="Tutup pesan error"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-full shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] flex items-center p-2 pl-4">
             <button type="button" className="p-2 text-slate-400 hover:text-slate-600 transition-colors">
               <Plus size={20} />
@@ -457,7 +528,13 @@ type AssistantMessageProps = {
   id: string;
   message: ChatMessage;
   completedTyping: boolean;
+  // View Details: opens the PackageDetailPanel only — never selects (B-GENUI-3).
+  onViewDetails: (trip: TripPackage) => void;
+  // Select Package: the backend-authoritative selection flow (B-GENUI-3).
   onSelectPackage: (trip: TripPackage) => void;
+  // Backend-echoed selection state used to mark the active card.
+  selectedTripId: string | null;
+  pendingTripId: string | null;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   onTypingDone: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
 };
@@ -466,7 +543,10 @@ const AssistantMessage = memo(function AssistantMessage({
   id,
   message,
   completedTyping,
+  onViewDetails,
   onSelectPackage,
+  selectedTripId,
+  pendingTripId,
   scrollToBottom,
   onTypingDone,
 }: AssistantMessageProps) {
@@ -508,7 +588,10 @@ const AssistantMessage = memo(function AssistantMessage({
             <PackageRecommendations
               packages={message.packages}
               reason={message.recommendationReason}
-              onSelect={onSelectPackage}
+              onViewDetails={onViewDetails}
+              onSelectPackage={onSelectPackage}
+              selectedTripId={selectedTripId}
+              pendingTripId={pendingTripId}
             />
           )}
         <OrderGateBlock gate={message.orderGate} />
@@ -629,11 +712,17 @@ function TypingText({
 function PackageRecommendations({
   packages,
   reason,
-  onSelect,
+  onViewDetails,
+  onSelectPackage,
+  selectedTripId,
+  pendingTripId,
 }: {
   packages: TripPackage[];
   reason?: "initial" | "alternative" | "";
-  onSelect: (trip: TripPackage) => void;
+  onViewDetails: (trip: TripPackage) => void;
+  onSelectPackage: (trip: TripPackage) => void;
+  selectedTripId: string | null;
+  pendingTripId: string | null;
 }) {
   const heading =
     reason === "alternative"
@@ -653,7 +742,10 @@ function PackageRecommendations({
             category={trip.category}
             image={assetURL(trip.image_url || trip.media?.[0]?.url)}
             icon={<Utensils size={14} className="text-[#df3333]" />}
-            onSelect={() => onSelect(trip)}
+            onViewDetails={() => onViewDetails(trip)}
+            onSelectPackage={() => onSelectPackage(trip)}
+            selected={selectedTripId === trip.id}
+            selecting={pendingTripId === trip.id}
           />
         ))}
       </div>

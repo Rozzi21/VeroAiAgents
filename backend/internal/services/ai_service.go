@@ -68,6 +68,11 @@ type ChatResult struct {
 	// assistant's prose (which is LLM-generated, localized, and unreliable).
 	// Derived from tool results only — see chatOrderGateFromToolResults.
 	OrderGate *ChatOrderGate `json:"order_gate,omitempty"`
+	// SelectedTripID echoes the backend-authoritative selected package of this
+	// session (chat_sessions.selected_trip_id) on every finalized turn, so the
+	// client renders the selected/active card state without inferring it from
+	// assistant text. Nil when no package is selected.
+	SelectedTripID *uuid.UUID `json:"selected_trip_id,omitempty"`
 }
 
 // ChatOrderGate mirrors, for the chat transport, what `error.code` already does
@@ -276,7 +281,10 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 	// info harus diawetkan; pesan konflik hanya muncul bila memang tidak ada
 	// jawaban substantif lain.
 	if title, found := failedSearchTripsAlreadySelected(toolResults); found {
-		if !responseMentionsSelectionOptions(response) && !hasSuccessfulInfoTool(toolResults) {
+		// B-GENUI-4: when an explicit alternative search ALSO succeeded this
+		// turn, fresh cards are rendering — the model's own text introduces
+		// them, so the conflict backstop must not clobber it.
+		if !responseMentionsSelectionOptions(response) && !hasSuccessfulInfoTool(toolResults) && !hasSearchTripsAlternative(toolResults) {
 			name := title
 			if name == "" {
 				name = "paket tersebut"
@@ -318,14 +326,20 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		}
 	}
 
-	// BUG-13 (11 Agu 2026): suppress recommendations whenever the user has
-	// already selected a package, regardless of whether search_trips was
-	// called with alternative=true. Previously the guard only fired when
-	// hasSearchTripsAlternative was false, allowing the LLM to bypass it by
-	// calling search_trips(alternative=true) after the first failure — which
-	// leaked unrelated packages to the frontend while the user was asking
-	// about the one package they already selected.
-	if selectedTripID != nil {
+	// BUG-13 (11 Agu 2026), refined for B-GENUI-4 (9 Sep 2026): once a package
+	// is selected, follow-up questions about it must NOT re-render
+	// recommendations — suppress them. The single exception is an EXPLICIT
+	// alternative request, which arrives structured as a successful
+	// search_trips(alternative=true) tool result: executeSearchTrips refuses
+	// plain (alternative=false) searches while a selection exists
+	// (already_package_selected), so a successful plain search here can only
+	// come from the same turn that ran select_package — and that must stay
+	// suppressed. The alternative intent signal is the tool argument set by
+	// the model under the system prompt (only on an explicit user request);
+	// assistant text is never parsed. The alternative result renders as a NEW
+	// recommendation set on THIS message; the previous set keeps its own
+	// persisted metadata untouched.
+	if selectedTripID != nil && !hasSearchTripsAlternative(toolResults) {
 		showRecommendations = false
 		recommendationReason = ""
 		recommendedPackages = nil
@@ -378,6 +392,9 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		// Structured ordering outcome for the client (auth gate / order
 		// tracking). Nil when this turn did not run create_booking.
 		OrderGate: chatOrderGateFromToolResults(toolResults),
+		// Echo the backend-authoritative selection so the client can mark the
+		// selected card after ANY turn (including an LLM-driven select_package).
+		SelectedTripID: selectedTripID,
 	}, nil
 }
 
@@ -1072,20 +1089,28 @@ func (s *AIService) GetSessionMessages(ctx context.Context, sessionID uuid.UUID,
 	return s.repo.ListChatMessages(ctx, sessionID)
 }
 
-func (s *AIService) GetGuestHistory(ctx context.Context, sessionID uuid.UUID) ([]models.ChatMessage, error) {
+// GetGuestHistory returns the persisted messages plus the session's selected
+// package (selected_trip_id, nil when nothing is selected) so a reload can
+// restore BOTH the historical recommendation cards and the selected/active
+// card state without any LLM or search_trips call (B-GENUI-3/4).
+func (s *AIService) GetGuestHistory(ctx context.Context, sessionID uuid.UUID) ([]models.ChatMessage, *uuid.UUID, error) {
 	session, err := s.repo.FindChatSession(ctx, sessionID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if session.UserID != nil || (session.ExpiresAt != nil && !session.ExpiresAt.After(time.Now())) {
-		return nil, ErrChatSessionNotFound
+		return nil, nil, ErrChatSessionNotFound
 	}
 	now := time.Now()
 	expiresAt := now.Add(s.cfg.GuestSessionTTL)
 	if err := s.repo.UpdateChatSessionActivity(ctx, sessionID, expiresAt, now); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return s.repo.ListChatMessages(ctx, sessionID)
+	messages, err := s.repo.ListChatMessages(ctx, sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return messages, session.SelectedTripID, nil
 }
 
 func (s *AIService) ResolveGuestSession(ctx context.Context, sessionID uuid.UUID) (uuid.UUID, bool, error) {
