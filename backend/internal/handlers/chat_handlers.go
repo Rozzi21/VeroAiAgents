@@ -159,9 +159,16 @@ func (h *Handler) GuestHistory(c *gin.Context) {
 	}
 	// Do not return ChatMessage.SessionID. The HttpOnly cookie is the only
 	// guest-session identifier and remains inaccessible to JavaScript.
+	// The message id (ChatMessage.ID) IS returned: it is the stable
+	// server-owned anchor the client uses as React key and to re-attach the
+	// persisted recommendation metadata on reload (GenUI persistence).
 	guestMessages := make([]gin.H, 0, len(messages))
 	for _, message := range messages {
-		guestMessages = append(guestMessages, gin.H{"role": message.Role, "content": message.Content})
+		entry := gin.H{"id": message.ID, "role": message.Role, "content": message.Content}
+		if message.Recommendation != nil {
+			entry["recommendation"] = message.Recommendation
+		}
+		guestMessages = append(guestMessages, entry)
 	}
 	auth.SetGuestSessionCookie(c, h.Services.Config, id.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
 	utils.Success(c, http.StatusOK, "Chat history", gin.H{"messages": guestMessages})

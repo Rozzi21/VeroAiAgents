@@ -34,6 +34,7 @@ import {
 } from "@/lib/api";
 import type { ChatOrderGate } from "@/lib/api";
 import { orderGateView } from "@/lib/orderGate";
+import { mapHistoryMessages } from "@/lib/chatHistory";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
 
 type ChatMessage = {
@@ -165,12 +166,14 @@ export default function ChatInterface() {
         if (cancelled || data.messages.length === 0) {
           return;
         }
-        const nextMessages: ChatMessage[] = data.messages.map((message) => ({
-          id: nextMessageId(),
-          role: message.role,
-          content: message.content,
-          shouldAnimate: false,
-        }));
+        // History carries the stable server-owned message id plus any
+        // persisted recommendation metadata, so Travel Package cards are
+        // reconstructed from the DB payload alone — no search_trips, no LLM.
+        // Messages without metadata (old conversations) map to text-only.
+        const nextMessages: ChatMessage[] = mapHistoryMessages(
+          data.messages,
+          nextMessageId
+        ).map((message) => ({ ...message, shouldAnimate: false }));
         setMessages(nextMessages);
         setCompletedTyping(
           Object.fromEntries(nextMessages.map((m) => [m.id, true]))
@@ -263,6 +266,12 @@ export default function ChatInterface() {
               // into this final setMessages so no trailing text is lost.
               const pending = streamStateRef.current.buffer;
               stopStreamScheduler();
+              // Stable server-owned id (persisted ChatMessage.ID) replaces
+              // the local placeholder so the assistant message AND its
+              // recommendation cards stay one logical message with a key
+              // that survives reload. Fall back to the placeholder if an
+              // older backend omits message_id.
+              const finalId = result.message_id ?? assistantId;
               setMessages((items) => {
                 const targetIndex = items.findIndex((m) => m.id === assistantId);
                 const target = targetIndex !== -1 ? items[targetIndex] : null;
@@ -277,7 +286,7 @@ export default function ChatInterface() {
                 // (ChatGPT-style) instead of all at once.
                 const noDeltasReceived = wasStreaming && target.content === "" && pending === "";
                 const newMsg: ChatMessage = {
-                  id: assistantId,
+                  id: finalId,
                   role: "assistant",
                   content,
                   packages: result.recommended_packages ?? [],
@@ -306,7 +315,7 @@ export default function ChatInterface() {
               // recommendations block can render (it gates on completedTyping).
               setCompletedTyping((items) => ({
                 ...items,
-                [assistantId]: true,
+                [finalId]: true,
               }));
             },
             onError: (message) => {

@@ -130,6 +130,30 @@ test("a turn without an ordering step carries no gate", async () => {
   assert.equal(done[0].order_gate, undefined);
 });
 
+test("the stable server-owned message_id survives the SSE done event", async () => {
+  // GenUI persistence (6 Sep 2026): the done payload carries the persisted
+  // ChatMessage.ID so the assistant message AND its recommendation cards share
+  // one stable id that survives reload.
+  stubFetch(
+    sseResponse([
+      { event: "delta", data: { content: "Ini " } },
+      {
+        event: "done",
+        data: {
+          message: "Ini rekomendasinya.",
+          message_id: "11111111-1111-1111-1111-111111111111",
+          show_recommendations: true,
+          recommendation_reason: "initial",
+        },
+      },
+    ])
+  );
+
+  const { deltas, done } = await run();
+  assert.deepEqual(deltas, ["Ini "]);
+  assert.equal(done[0].message_id, "11111111-1111-1111-1111-111111111111");
+});
+
 test("the access token is attached so the backend sees an account, not a guest", async () => {
   const token = futureToken();
   setCustomerAccessToken(token, 900);

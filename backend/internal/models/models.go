@@ -284,6 +284,23 @@ type ChatMessage struct {
 	Session   ChatSession `json:"-" gorm:"foreignKey:SessionID"`
 	Role      string      `json:"role" gorm:"size:30;not null"`
 	Content   string      `json:"content" gorm:"type:text;not null"`
+	// Recommendation is the persisted Travel Package recommendation metadata
+	// attached to THIS assistant message (GenUI persistence, 6 Sep 2026).
+	// Nil for user messages, old messages (backward compatibility), and
+	// assistant turns without recommendations. Packages reuse the existing
+	// Trip schema — no separate structure. Never persist rendered UI.
+	Recommendation *ChatRecommendation `json:"recommendation,omitempty" gorm:"serializer:json;type:jsonb"`
+}
+
+// ChatRecommendation mirrors the recommendation slice of services.ChatResult
+// (show_recommendations / recommendation_reason / recommended_packages) so a
+// reload can reconstruct the exact same Travel Package cards from the DB
+// without re-running search_trips or the LLM. Written once by finalizeChat
+// together with the assistant message; treated as immutable afterwards.
+type ChatRecommendation struct {
+	ShowRecommendations  bool   `json:"show_recommendations"`
+	RecommendationReason string `json:"recommendation_reason"`
+	RecommendedPackages  []Trip `json:"recommended_packages"`
 }
 
 type Trip struct {

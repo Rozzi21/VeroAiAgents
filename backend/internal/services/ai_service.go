@@ -50,8 +50,14 @@ type MCPToolExecutor interface {
 }
 
 type ChatResult struct {
-	SessionID            uuid.UUID     `json:"-"`
-	Message              string        `json:"message"`
+	SessionID uuid.UUID `json:"-"`
+	Message   string    `json:"message"`
+	// MessageID is the stable server-owned id of the persisted assistant
+	// ChatMessage (BaseModel uuid, generated once at insert). The client uses
+	// it as the React key and as the anchor for the persisted recommendation
+	// metadata, so both survive reload identical. Empty only if the message
+	// insert failed (in which case Chat/ChatStream return an error instead).
+	MessageID            uuid.UUID     `json:"message_id,omitempty"`
 	Workflow             []ToolResult  `json:"workflow"`
 	ShowRecommendations  bool          `json:"show_recommendations"`
 	RecommendationReason string        `json:"recommendation_reason"`
@@ -340,7 +346,20 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		recommendedPackages = nil
 	}
 
-	if err := s.repo.AddChatMessage(ctx, &models.ChatMessage{SessionID: sessionID, Role: "assistant", Content: response}); err != nil {
+	// Persist the assistant message TOGETHER with its recommendation metadata
+	// (GenUI persistence, 6 Sep 2026). The recommendation is only attached
+	// when this turn actually shows packages, so old/plain messages keep a
+	// NULL column and reload renders them as text-only (backward compatible).
+	// BeforeCreate assigns the stable MessageID on insert.
+	assistantMsg := &models.ChatMessage{SessionID: sessionID, Role: "assistant", Content: response}
+	if showRecommendations && len(recommendedPackages) > 0 {
+		assistantMsg.Recommendation = &models.ChatRecommendation{
+			ShowRecommendations:  showRecommendations,
+			RecommendationReason: recommendationReason,
+			RecommendedPackages:  recommendedPackages,
+		}
+	}
+	if err := s.repo.AddChatMessage(ctx, assistantMsg); err != nil {
 		return ChatResult{}, err
 	}
 	_ = s.refreshMemorySummary(ctx, sessionID)
@@ -350,6 +369,7 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 
 	return ChatResult{
 		SessionID:            sessionID,
+		MessageID:            assistantMsg.ID,
 		Message:              response,
 		Workflow:             toolResults,
 		ShowRecommendations:  showRecommendations,

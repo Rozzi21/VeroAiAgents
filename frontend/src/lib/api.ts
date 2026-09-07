@@ -68,6 +68,10 @@ export type BookingOrder = {
 export type ChatResponse = {
   session_id: string;
   message: string;
+  // Stable server-owned id of the persisted assistant message
+  // (ChatMessage.ID). Present on `done` since 6 Sep 2026; older backends may
+  // omit it, so callers fall back to their local placeholder id.
+  message_id?: string;
   workflow?: Record<string, unknown>[];
   show_recommendations: boolean;
   recommendation_reason: "initial" | "alternative" | "";
@@ -90,10 +94,23 @@ export type ChatOrderGate = {
   order_id?: string;
 };
 
+// ChatRecommendation is the persisted recommendation metadata attached to one
+// assistant message (backend: models.ChatRecommendation). Presence means the
+// Travel Package cards of THAT message must be reconstructed on reload —
+// without calling search_trips or the LLM again. Absent on old messages.
+export type ChatRecommendation = {
+  show_recommendations: boolean;
+  recommendation_reason: "initial" | "alternative" | "";
+  recommended_packages?: TripPackage[];
+};
+
 export type GuestChatHistoryResponse = {
   messages: Array<{
+    // Stable server-owned message id (ChatMessage.ID), since 6 Sep 2026.
+    id?: string;
     role: "user" | "assistant";
     content: string;
+    recommendation?: ChatRecommendation;
   }>;
 };
 
