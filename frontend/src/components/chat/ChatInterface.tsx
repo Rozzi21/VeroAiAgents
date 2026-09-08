@@ -35,7 +35,7 @@ import {
 } from "@/lib/api";
 import type { ChatOrderGate } from "@/lib/api";
 import { orderGateView } from "@/lib/orderGate";
-import { mapHistoryMessages } from "@/lib/chatHistory";
+import { mapHistoryMessages, reconcileFailedTurn } from "@/lib/chatHistory";
 import {
   initialPackageSelection,
   isPackageSelected,
@@ -250,6 +250,10 @@ export default function ChatInterface() {
       streamAbortRef.current = abort;
 
       const assistantId = nextMessageId();
+      // A stream can report one terminal failure (including EOF without done).
+      // Keep finalization per-turn so a late callback cannot replace or append
+      // the recovered message a second time.
+      let finalized = false;
       streamStateRef.current = {
         active: true,
         buffer: "",
@@ -284,6 +288,10 @@ export default function ChatInterface() {
               scheduleStreamFlush();
             },
             onDone: (result) => {
+              if (finalized) {
+                return;
+              }
+              finalized = true;
               // Flush the scheduler tail: deltas that arrived after the last
               // animation frame are still sitting in the buffer. Merge them
               // into this final setMessages so no trailing text is lost.
@@ -347,36 +355,65 @@ export default function ChatInterface() {
               }));
             },
             onError: (message) => {
+              if (finalized) {
+                return;
+              }
+              finalized = true;
               // Same tail-flush as onDone: keep buffered deltas that never
-              // reached a frame, then surface the error below them.
+              // reached a frame. Fetch history once: if persistence completed
+              // before SSE EOF, replace this placeholder with that exact turn.
               const pending = streamStateRef.current.buffer;
               stopStreamScheduler();
-              setMessages((items) => {
-                const targetIndex = items.findIndex((m) => m.id === assistantId);
-                const target = targetIndex !== -1 ? items[targetIndex] : null;
-                // If we already streamed partial text, keep it and append the
-                // error notice; otherwise replace the empty placeholder.
-                if (target?.streaming) {
-                  const partial = target.content + pending;
-                  if (partial) {
+              const showStreamError = () => {
+                setMessages((items) => {
+                  const targetIndex = items.findIndex((m) => m.id === assistantId);
+                  const target = targetIndex !== -1 ? items[targetIndex] : null;
+                  // If we already streamed partial text, keep it and append the
+                  // error notice; otherwise replace the empty placeholder.
+                  if (target?.streaming) {
+                    const partial = target.content + pending;
+                    if (partial) {
+                      const next = [...items];
+                      next[targetIndex] = {
+                        ...target,
+                        content: partial + "\n\n" + message,
+                        streaming: false,
+                      };
+                      return next;
+                    }
                     const next = [...items];
                     next[targetIndex] = {
-                      ...target,
-                      content: partial + "\n\n" + message,
-                      streaming: false,
+                      id: assistantId,
+                      role: "assistant",
+                      content: message,
                     };
                     return next;
                   }
-                  const next = [...items];
-                  next[targetIndex] = {
-                    id: assistantId,
-                    role: "assistant",
-                    content: message,
-                  };
-                  return next;
-                }
-                return [...items, { id: assistantId, role: "assistant", content: message }];
-              });
+                  return [...items, { id: assistantId, role: "assistant", content: message }];
+                });
+              };
+
+              void apiFetch<GuestChatHistoryResponse>("/api/v1/chat/history")
+                .then((data) => {
+                  const reconcile = (items: ChatMessage[]) =>
+                    reconcileFailedTurn(
+                      items,
+                      data.messages,
+                      text,
+                      assistantId,
+                      nextMessageId,
+                      (historyMessage) => ({ ...historyMessage, shouldAnimate: false })
+                    );
+                  const preview = reconcile(messagesRef.current);
+                  if (!preview.recovered) {
+                    showStreamError();
+                    return;
+                  }
+                  setSelection((s) => selectionSynced(s, data.selected_trip_id ?? null));
+                  setMessages((items) => reconcile(items).messages);
+                  setCompletedTyping((items) => ({ ...items, [preview.recovered!.id]: true }));
+                })
+                .catch(showStreamError);
             },
           },
           { signal: abort.signal }

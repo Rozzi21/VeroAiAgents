@@ -405,6 +405,15 @@ export async function streamChat(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let receivedDone = false;
+  let reportedError = false;
+  const reportError = (message: string) => {
+    if (reportedError || receivedDone) {
+      return;
+    }
+    reportedError = true;
+    handlers.onError(message);
+  };
 
   try {
     for (;;) {
@@ -435,10 +444,11 @@ export async function streamChat(
             }
           } else if (event === "done") {
             const parsed = JSON.parse(data) as ChatResponse;
+            receivedDone = true;
             handlers.onDone(parsed);
           } else if (event === "error") {
             const parsed = JSON.parse(data) as { message?: string };
-            handlers.onError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
+            reportError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
           }
         } catch {
           // Skip malformed event payloads without aborting the stream.
@@ -446,7 +456,15 @@ export async function streamChat(
       }
     }
   } catch {
-    handlers.onError("Koneksi terputus saat memuat respons. Coba lagi.");
+    reportError("Koneksi terputus saat memuat respons. Coba lagi.");
+    return;
+  }
+
+  // A successful HTTP response can still end before the backend's terminal
+  // `done` event reaches this client. Tell the UI exactly once so it can
+  // recover the already-persisted turn from history without retrying chat.
+  if (!receivedDone) {
+    reportError("Koneksi terputus saat memuat respons. Coba lagi.");
   }
 }
 

@@ -154,6 +154,36 @@ test("the stable server-owned message_id survives the SSE done event", async () 
   assert.equal(done[0].message_id, "11111111-1111-1111-1111-111111111111");
 });
 
+test("clean EOF without done reports one stream error for history recovery", async () => {
+  stubFetch(sseResponse([{ event: "delta", data: { content: "Respons tersimpan." } }]));
+
+  const { deltas, done, errors } = await run();
+  assert.deepEqual(deltas, ["Respons tersimpan."]);
+  assert.equal(done.length, 0);
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0], "Koneksi terputus saat memuat respons. Coba lagi.");
+});
+
+test("normal done does not report an EOF error", async () => {
+  stubFetch(
+    sseResponse([
+      { event: "done", data: { message: "Selesai.", show_recommendations: false, recommendation_reason: "" } },
+    ])
+  );
+
+  const { done, errors } = await run();
+  assert.equal(done.length, 1);
+  assert.equal(errors.length, 0);
+});
+
+test("SSE error event is not reported again when stream reaches EOF", async () => {
+  stubFetch(sseResponse([{ event: "error", data: { message: "Backend gagal." } }]));
+
+  const { done, errors } = await run();
+  assert.equal(done.length, 0);
+  assert.deepEqual(errors, ["Backend gagal."]);
+});
+
 test("the access token is attached so the backend sees an account, not a guest", async () => {
   const token = futureToken();
   setCustomerAccessToken(token, 900);
