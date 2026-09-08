@@ -26,11 +26,104 @@ export type HistoryChatMessage = {
   recommendationReason?: "initial" | "alternative" | "";
 };
 
+type StreamableChatMessage = HistoryChatMessage & { streaming?: boolean };
+
+// Per-turn terminal guard. Recovery starts only after one stream failure;
+// normal completion and recovery completion are mutually exclusive. Keeping
+// this outside React state makes duplicate callbacks and late SSE events no-op
+// without causing another render or history request.
+export function createChatTurnCompletionGuard() {
+  let phase: "streaming" | "recovering" | "completed" = "streaming";
+  return {
+    completeNormally(): boolean {
+      if (phase !== "streaming") {
+        return false;
+      }
+      phase = "completed";
+      return true;
+    },
+    beginRecovery(): boolean {
+      if (phase !== "streaming") {
+        return false;
+      }
+      phase = "recovering";
+      return true;
+    },
+    completeRecovery(): boolean {
+      if (phase !== "recovering") {
+        return false;
+      }
+      phase = "completed";
+      return true;
+    },
+  };
+}
+
+// Replace one local placeholder with one server-owned logical message. If that
+// stable id already exists (late done, repeated updater, Strict Mode), remove
+// only the placeholder and keep the existing message. Never append.
+export function replaceAssistantPlaceholder<T extends HistoryChatMessage>(
+  current: T[],
+  placeholderId: string,
+  finalMessage: T
+): T[] {
+  const placeholderIndex = current.findIndex((message) => message.id === placeholderId);
+  const stableIndex = current.findIndex((message) => message.id === finalMessage.id);
+
+  if (stableIndex !== -1 && stableIndex !== placeholderIndex) {
+    return placeholderIndex === -1
+      ? current
+      : current.filter((message) => message.id !== placeholderId);
+  }
+  if (placeholderIndex === -1) {
+    return current;
+  }
+
+  const messages = [...current];
+  messages[placeholderIndex] = finalMessage;
+  return messages;
+}
+
+// Finalize the existing placeholder as an error exactly once. Missing or
+// already-finalized placeholders stay untouched; no text, package, or
+// recommendation is invented and no duplicate local id is appended.
+export function markAssistantStreamFailed<T extends StreamableChatMessage>(
+  current: T[],
+  placeholderId: string,
+  pending: string,
+  errorMessage: string
+): T[] {
+  const index = current.findIndex((message) => message.id === placeholderId);
+  if (index === -1 || !current[index].streaming) {
+    return current;
+  }
+
+  const target = current[index];
+  const partial = target.content + pending;
+  const messages = [...current];
+  messages[index] = {
+    ...target,
+    content: partial ? `${partial}\n\n${errorMessage}` : errorMessage,
+    streaming: false,
+  };
+  return messages;
+}
+
 export function mapHistoryMessages(
   messages: GuestChatHistoryResponse["messages"],
   fallbackId: () => string
 ): HistoryChatMessage[] {
-  return messages.map((message) => {
+  const seenServerIds = new Set<string>();
+  return messages.flatMap((message) => {
+    // History rows have immutable DB ids. Ignore a repeated server id rather
+    // than rendering a second assistant/recommendation component. Legacy rows
+    // have no id and receive distinct local ids for backward compatibility.
+    if (message.id) {
+      if (seenServerIds.has(message.id)) {
+        return [];
+      }
+      seenServerIds.add(message.id);
+    }
     const mapped: HistoryChatMessage = {
       id: message.id ?? fallbackId(),
       role: message.role,
@@ -42,7 +135,7 @@ export function mapHistoryMessages(
       mapped.recommendationReason = rec.recommendation_reason;
       mapped.packages = rec.recommended_packages;
     }
-    return mapped;
+    return [mapped];
   });
 }
 
@@ -74,8 +167,14 @@ export function reconcileFailedTurn<T extends HistoryChatMessage>(
     return { messages: current, recovered: null };
   }
 
-  const assistant = persisted.slice(userIndex + 1).find((message) => message.role === "assistant");
+  // Only the immediately following persisted row can belong to this turn.
+  // Crossing another user row could attach another tab/turn's assistant and
+  // invent a completion for a prompt whose assistant was never persisted.
+  const assistant = persisted[userIndex + 1];
   if (!assistant?.id) {
+    return { messages: current, recovered: null };
+  }
+  if (assistant.role !== "assistant") {
     return { messages: current, recovered: null };
   }
 
@@ -84,10 +183,12 @@ export function reconcileFailedTurn<T extends HistoryChatMessage>(
   const failedIndex = current.findIndex((message) => message.id === failedAssistantId);
   const duplicateIndex = current.findIndex((message) => message.id === recovered.id);
   if (duplicateIndex !== -1) {
-    // This server message already belongs to rendered history. It may be an
-    // older answer to an identical prompt, so never use it to finalize the
-    // current failed turn.
-    return { messages: current, recovered: null };
+    // Stable id proves this is the same logical assistant message. A late done
+    // may already have inserted it; remove only the obsolete placeholder.
+    return {
+      messages: replaceAssistantPlaceholder(current, failedAssistantId, recovered),
+      recovered: current[duplicateIndex],
+    };
   }
   if (failedIndex === -1) {
     // Persisted recovery exists, but this state snapshot predates React adding
@@ -96,7 +197,8 @@ export function reconcileFailedTurn<T extends HistoryChatMessage>(
     return { messages: current, recovered };
   }
 
-  const messages = [...current];
-  messages[failedIndex] = recovered;
-  return { messages, recovered };
+  return {
+    messages: replaceAssistantPlaceholder(current, failedAssistantId, recovered),
+    recovered,
+  };
 }

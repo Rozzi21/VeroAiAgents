@@ -8,11 +8,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  createChatTurnCompletionGuard,
   mapHistoryMessages,
+  markAssistantStreamFailed,
   reconcileFailedTurn,
+  replaceAssistantPlaceholder,
   type HistoryChatMessage,
 } from "./chatHistory.ts";
 import type { GuestChatHistoryResponse, TripPackage } from "./api.ts";
+import { initialPackageSelection, selectionSynced } from "./packageSelection.ts";
 
 type HistoryPayload = GuestChatHistoryResponse["messages"];
 type RecoveryMessage = HistoryChatMessage & { streaming?: boolean };
@@ -207,7 +211,60 @@ test("failed placeholder becomes matching persisted assistant with recommendatio
   assert.equal(result.messages[2].packages?.[0].id, "alternative");
 });
 
-test("reconciliation rejects an existing server id instead of reusing an older answer", () => {
+test("alternative recovery preserves previous set and persisted selected_trip_id", () => {
+  const selectedTripId = "selected-trip";
+  const current: RecoveryMessage[] = [
+    {
+      id: "initial-recommendation",
+      role: "assistant",
+      content: "Pilihan awal",
+      showRecommendations: true,
+      recommendationReason: "initial",
+      packages: [trip(selectedTripId, "Bali Adventure")],
+    },
+    { id: "alternative-user", role: "user", content: "alternatif lain" },
+    { id: "alternative-placeholder", role: "assistant", content: "", streaming: true },
+  ];
+  const history: GuestChatHistoryResponse = {
+    selected_trip_id: selectedTripId,
+    messages: [
+      { id: "server-user", role: "user", content: "alternatif lain" },
+      {
+        id: "alternative-server",
+        role: "assistant",
+        content: "Pilihan alternatif",
+        recommendation: {
+          show_recommendations: true,
+          recommendation_reason: "alternative",
+          recommended_packages: [trip("alternative-trip", "Lombok Adventure")],
+        },
+      },
+    ],
+  };
+
+  const result = reconcileFailedTurn(
+    current,
+    history.messages,
+    "alternatif lain",
+    "alternative-placeholder",
+    () => "never-used",
+    (message) => ({ ...message, streaming: false })
+  );
+  const selection = selectionSynced(
+    initialPackageSelection,
+    history.selected_trip_id ?? null
+  );
+
+  assert.equal(result.messages.length, 3);
+  assert.equal(result.messages[0].id, "initial-recommendation");
+  assert.equal(result.messages[0].packages?.[0].id, selectedTripId);
+  assert.equal(result.messages[2].id, "alternative-server");
+  assert.equal(result.messages[2].recommendationReason, "alternative");
+  assert.equal(result.messages[2].packages?.[0].id, "alternative-trip");
+  assert.equal(selection.selectedTripId, selectedTripId);
+});
+
+test("duplicate reconciliation removes placeholder and keeps one stable server message", () => {
   const current: RecoveryMessage[] = [
     { id: "user-local", role: "user" as const, content: "halo" },
     { id: "server-assistant", role: "assistant" as const, content: "Sudah selesai" },
@@ -227,12 +284,10 @@ test("reconciliation rejects an existing server id instead of reusing an older a
     (message) => ({ ...message, streaming: false })
   );
 
-  assert.equal(result.recovered, null);
-  assert.equal(result.messages, current);
+  assert.equal(result.recovered?.id, "server-assistant");
   assert.deepEqual(result.messages.map((message) => message.id), [
     "user-local",
     "server-assistant",
-    "placeholder",
   ]);
 });
 
@@ -278,4 +333,156 @@ test("duplicate prompts recover assistant after latest persisted occurrence", ()
   assert.equal(result.recovered?.id, "assistant-2");
   assert.equal(result.messages[1].id, "assistant-2");
   assert.equal(result.messages[1].content, "Jawaban terbaru");
+});
+
+test("Strict Mode remount maps one stable message id to one recommendation", () => {
+  const payload = payloadWithRecommendation();
+  const duplicatedPayload = [...payload, payload[1]];
+  const firstMount = mapHistoryMessages(duplicatedPayload, () => "fallback-first");
+  const secondMount = mapHistoryMessages(duplicatedPayload, () => "fallback-second");
+
+  for (const mounted of [firstMount, secondMount]) {
+    assert.equal(mounted.filter((message) => message.id === SERVER_MSG_ID).length, 1);
+    assert.equal(mounted.filter((message) => message.showRecommendations).length, 1);
+  }
+  assert.deepEqual(secondMount, firstMount);
+});
+
+test("repeated reconciliation is referentially idempotent", () => {
+  const current: RecoveryMessage[] = [
+    { id: "local-user", role: "user", content: "cari bali" },
+    { id: "placeholder", role: "assistant", content: "", streaming: true },
+  ];
+  const persisted: HistoryPayload = [
+    { id: "server-user", role: "user", content: "cari bali" },
+    {
+      id: SERVER_MSG_ID,
+      role: "assistant",
+      content: "Paket tersimpan",
+      recommendation: {
+        show_recommendations: true,
+        recommendation_reason: "initial",
+        recommended_packages: [trip("trip-1", "Bali Adventure")],
+      },
+    },
+  ];
+  const reconcile = (messages: RecoveryMessage[]) =>
+    reconcileFailedTurn(
+      messages,
+      persisted,
+      "cari bali",
+      "placeholder",
+      () => {
+        throw new Error("stable message_id must prevent generated recommendation id");
+      },
+      (message) => ({ ...message, streaming: false })
+    );
+
+  const first = reconcile(current);
+  const second = reconcile(first.messages);
+  assert.equal(first.messages.length, 2);
+  assert.equal(second.messages, first.messages);
+  assert.equal(second.messages.filter((message) => message.id === SERVER_MSG_ID).length, 1);
+  assert.equal(second.messages.filter((message) => message.showRecommendations).length, 1);
+});
+
+test("late SSE completion during recovery cannot create a second assistant", () => {
+  const guard = createChatTurnCompletionGuard();
+  let messages: RecoveryMessage[] = [
+    { id: "local-user", role: "user", content: "cari bali" },
+    { id: "placeholder", role: "assistant", content: "", streaming: true },
+  ];
+  const persisted: HistoryPayload = [
+    { id: "server-user", role: "user", content: "cari bali" },
+    {
+      id: SERVER_MSG_ID,
+      role: "assistant",
+      content: "Persisted response",
+      recommendation: {
+        show_recommendations: true,
+        recommendation_reason: "initial",
+        recommended_packages: [trip("trip-1", "Bali Adventure")],
+      },
+    },
+  ];
+
+  assert.equal(guard.beginRecovery(), true);
+  assert.equal(guard.beginRecovery(), false);
+  assert.equal(guard.completeNormally(), false);
+  assert.equal(guard.completeRecovery(), true);
+  messages = reconcileFailedTurn(
+    messages,
+    persisted,
+    "cari bali",
+    "placeholder",
+    () => "never-used",
+    (message) => ({ ...message, streaming: false })
+  ).messages;
+  const repeated = replaceAssistantPlaceholder(messages, "placeholder", messages[1]);
+
+  assert.equal(repeated, messages);
+  assert.equal(messages.length, 2);
+  assert.equal(messages[1].id, SERVER_MSG_ID);
+  assert.equal(messages.filter((message) => message.showRecommendations).length, 1);
+});
+
+test("normal done closes turn without allowing history reconciliation", () => {
+  const guard = createChatTurnCompletionGuard();
+  let historyRequests = 0;
+
+  assert.equal(guard.completeNormally(), true);
+  if (guard.beginRecovery()) {
+    historyRequests += 1;
+  }
+  assert.equal(guard.completeNormally(), false);
+  assert.equal(historyRequests, 0);
+});
+
+test("reconciliation failure finalizes existing placeholder once without invented data", () => {
+  const current: RecoveryMessage[] = [
+    { id: "placeholder", role: "assistant", content: "parsial", streaming: true },
+  ];
+  const failed = markAssistantStreamFailed(
+    current,
+    "placeholder",
+    " tersisa",
+    "Koneksi terputus."
+  );
+  const repeated = markAssistantStreamFailed(
+    failed,
+    "placeholder",
+    " tersisa",
+    "Koneksi terputus."
+  );
+
+  assert.equal(repeated, failed);
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].content, "parsial tersisa\n\nKoneksi terputus.");
+  assert.equal(failed[0].showRecommendations, undefined);
+  assert.equal(failed[0].packages, undefined);
+});
+
+test("failed persistence does not cross next user turn or invent assistant data", () => {
+  const current: RecoveryMessage[] = [
+    { id: "local-user", role: "user", content: "turn gagal" },
+    { id: "placeholder", role: "assistant", content: "", streaming: true },
+  ];
+  const persisted: HistoryPayload = [
+    { id: "failed-user", role: "user", content: "turn gagal" },
+    { id: "next-user", role: "user", content: "turn berikut" },
+    { id: "next-assistant", role: "assistant", content: "Bukan jawaban turn gagal" },
+  ];
+  const result = reconcileFailedTurn(
+    current,
+    persisted,
+    "turn gagal",
+    "placeholder",
+    () => "never-used",
+    (message) => ({ ...message, streaming: false })
+  );
+
+  assert.equal(result.recovered, null);
+  assert.equal(result.messages, current);
+  assert.equal(result.messages[1].showRecommendations, undefined);
+  assert.equal(result.messages[1].packages, undefined);
 });

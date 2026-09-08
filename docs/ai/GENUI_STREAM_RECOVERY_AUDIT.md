@@ -11,6 +11,9 @@ TANPA retry otomatis `search_trips`.
 > **Status 9 Sep 2026:** mekanisme minimal §6–§7 sudah diimplementasikan di
 > frontend. Dokumen ini tetap merekam kondisi sebelum fix dan alasan desain.
 > Recovery melakukan satu fetch history, tidak me-retry LLM/chat/`search_trips`.
+> Implementasi kemudian di-harden dengan guard terminal per-turn dan replacement
+> berbasis `message_id` yang idempoten; late `done`, callback berulang, rerender,
+> serta Strict Mode tidak membuat pesan atau blok rekomendasi kedua.
 
 ## File yang Diaudit
 

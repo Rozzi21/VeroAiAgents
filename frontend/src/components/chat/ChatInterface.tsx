@@ -35,7 +35,13 @@ import {
 } from "@/lib/api";
 import type { ChatOrderGate } from "@/lib/api";
 import { orderGateView } from "@/lib/orderGate";
-import { mapHistoryMessages, reconcileFailedTurn } from "@/lib/chatHistory";
+import {
+  createChatTurnCompletionGuard,
+  mapHistoryMessages,
+  markAssistantStreamFailed,
+  reconcileFailedTurn,
+  replaceAssistantPlaceholder,
+} from "@/lib/chatHistory";
 import {
   initialPackageSelection,
   isPackageSelected,
@@ -253,7 +259,7 @@ export default function ChatInterface() {
       // A stream can report one terminal failure (including EOF without done).
       // Keep finalization per-turn so a late callback cannot replace or append
       // the recovered message a second time.
-      let finalized = false;
+      const completion = createChatTurnCompletionGuard();
       streamStateRef.current = {
         active: true,
         buffer: "",
@@ -288,10 +294,9 @@ export default function ChatInterface() {
               scheduleStreamFlush();
             },
             onDone: (result) => {
-              if (finalized) {
+              if (!completion.completeNormally()) {
                 return;
               }
-              finalized = true;
               // Flush the scheduler tail: deltas that arrived after the last
               // animation frame are still sitting in the buffer. Merge them
               // into this final setMessages so no trailing text is lost.
@@ -311,6 +316,11 @@ export default function ChatInterface() {
               setMessages((items) => {
                 const targetIndex = items.findIndex((m) => m.id === assistantId);
                 const target = targetIndex !== -1 ? items[targetIndex] : null;
+                if (!target) {
+                  // Placeholder was already removed/replaced by another state
+                  // update. Never append a second logical assistant message.
+                  return items;
+                }
                 const wasStreaming = target?.streaming === true;
                 const content = wasStreaming
                   ? (target.content + pending || result.message)
@@ -340,12 +350,7 @@ export default function ChatInterface() {
                   // full block appearing instantaneously.
                   shouldAnimate: !wasStreaming || noDeltasReceived,
                 };
-                if (wasStreaming) {
-                  const next = [...items];
-                  next[targetIndex] = newMsg;
-                  return next;
-                }
-                return [...items, newMsg];
+                return replaceAssistantPlaceholder(items, assistantId, newMsg);
               });
               // Mark the finalized assistant message as done typing so the
               // recommendations block can render (it gates on completedTyping).
@@ -355,46 +360,25 @@ export default function ChatInterface() {
               }));
             },
             onError: (message) => {
-              if (finalized) {
+              if (!completion.beginRecovery()) {
                 return;
               }
-              finalized = true;
               // Same tail-flush as onDone: keep buffered deltas that never
               // reached a frame. Fetch history once: if persistence completed
               // before SSE EOF, replace this placeholder with that exact turn.
               const pending = streamStateRef.current.buffer;
               stopStreamScheduler();
               const showStreamError = () => {
-                setMessages((items) => {
-                  const targetIndex = items.findIndex((m) => m.id === assistantId);
-                  const target = targetIndex !== -1 ? items[targetIndex] : null;
-                  // If we already streamed partial text, keep it and append the
-                  // error notice; otherwise replace the empty placeholder.
-                  if (target?.streaming) {
-                    const partial = target.content + pending;
-                    if (partial) {
-                      const next = [...items];
-                      next[targetIndex] = {
-                        ...target,
-                        content: partial + "\n\n" + message,
-                        streaming: false,
-                      };
-                      return next;
-                    }
-                    const next = [...items];
-                    next[targetIndex] = {
-                      id: assistantId,
-                      role: "assistant",
-                      content: message,
-                    };
-                    return next;
-                  }
-                  return [...items, { id: assistantId, role: "assistant", content: message }];
-                });
+                setMessages((items) =>
+                  markAssistantStreamFailed(items, assistantId, pending, message)
+                );
               };
 
               void apiFetch<GuestChatHistoryResponse>("/api/v1/chat/history")
                 .then((data) => {
+                  if (!completion.completeRecovery()) {
+                    return;
+                  }
                   const reconcile = (items: ChatMessage[]) =>
                     reconcileFailedTurn(
                       items,
@@ -413,7 +397,11 @@ export default function ChatInterface() {
                   setMessages((items) => reconcile(items).messages);
                   setCompletedTyping((items) => ({ ...items, [preview.recovered!.id]: true }));
                 })
-                .catch(showStreamError);
+                .catch(() => {
+                  if (completion.completeRecovery()) {
+                    showStreamError();
+                  }
+                });
             },
           },
           { signal: abort.signal }
