@@ -428,7 +428,7 @@ export default function ChatInterface() {
       try {
         await ensureCustomerSession();
         const res = await selectPackage(trip.id);
-        setSelection((s) => selectionSucceeded(s, res.selected_trip_id || trip.id));
+        setSelection(selectionSucceeded(res.selected_trip_id || trip.id));
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Gagal memilih paket. Coba lagi.";
@@ -779,48 +779,36 @@ function PackageRecommendations({
 
 function PackageDetailPanel({
   trip,
-	messages,
+  messages,
   onClose,
 }: {
   trip: TripPackage;
-	messages: ChatMessage[];
+  messages: ChatMessage[];
   onClose: () => void;
 }) {
   const image = assetURL(trip.image_url || trip.media?.[0]?.url);
   const adultPrice = getTripAdultPrice(trip);
   const childPrice = getTripChildPrice(trip);
 
-	// Extract draft or created order state from the AI workflow payloads
-	let draftPaxAdult = 1;
-	let draftPaxChild = 0;
-	let draftDate = "Flexible";
-	let isOrderCreated = false;
-	let orderId = "";
-
-	if (messages) {
-		for (const msg of messages) {
-			if (msg.role === "assistant" && msg.workflow) {
-				for (const wf of msg.workflow) {
-					if (wf.tool === "update_order_draft" && wf.data && typeof wf.data === "object") {
-						const data = wf.data as Record<string, unknown>;
-						if (data.trip_id === trip.id) {
-							draftPaxAdult = Number(data.adult_pax) || 1;
-							draftPaxChild = Number(data.child_pax) || 0;
-							if (data.travel_date) draftDate = String(data.travel_date);
-						}
-					}
-					if (wf.tool === "create_booking" && wf.status === "success" && wf.data && typeof wf.data === "object") {
-						const data = wf.data as Record<string, unknown>;
-						isOrderCreated = true;
-						orderId = String(data.booking_id);
-					}
-				}
-			}
-		}
-	}
-
-	const estimatedTotal = (adultPrice.displayPrice * draftPaxAdult) + (childPrice.displayPrice * draftPaxChild);
-	const paxLabel = `${draftPaxAdult} Dewasa${draftPaxChild > 0 ? `, ${draftPaxChild} Anak` : ""}`;
+  let isOrderCreated = false;
+  let orderId = "";
+  for (const message of messages) {
+    if (message.role !== "assistant" || !message.workflow) {
+      continue;
+    }
+    for (const result of message.workflow) {
+      if (
+        result.tool === "create_booking" &&
+        result.status === "success" &&
+        result.data &&
+        typeof result.data === "object"
+      ) {
+        const data = result.data as Record<string, unknown>;
+        isOrderCreated = true;
+        orderId = String(data.booking_id);
+      }
+    }
+  }
 
   return (
     <aside className="h-screen w-[35%] overflow-y-auto border-l border-slate-200 bg-white shadow-[-20px_0_60px_-45px_rgba(15,23,42,0.55)]">
@@ -864,8 +852,11 @@ function PackageDetailPanel({
         </div>
 
         <div className="mt-6 grid grid-cols-2 gap-3">
-          <InfoPill icon={<CalendarDays size={16} />} label={draftDate !== "Flexible" ? draftDate : trip.duration || "Flexible"} />
-          <InfoPill icon={<Ticket size={16} />} label={paxLabel} />
+          <InfoPill
+            icon={<CalendarDays size={16} />}
+            label={trip.duration || "Flexible"}
+          />
+          <InfoPill icon={<Ticket size={16} />} label="1 Dewasa" />
         </div>
 
         <section className="mt-7 rounded-3xl border border-slate-100 bg-slate-50 p-5">
@@ -875,28 +866,34 @@ function PackageDetailPanel({
               <TripPriceBlock label="Harga Anak" price={childPrice} size="md" />
             </div>
           ) : null}
-					<div className="mt-4 border-t border-slate-200 pt-4">
-						<div className="flex justify-between items-center text-slate-800">
-							<span className="font-bold">Estimasi Total</span>
-							<span className="text-xl font-black">
-								{new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(estimatedTotal)}
-							</span>
-						</div>
-					</div>
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            <div className="flex items-center justify-between text-slate-800">
+              <span className="font-bold">Estimasi Total</span>
+              <span className="text-xl font-black">
+                {new Intl.NumberFormat("id-ID", {
+                  style: "currency",
+                  currency: "IDR",
+                  maximumFractionDigits: 0,
+                }).format(adultPrice.displayPrice)}
+              </span>
+            </div>
+          </div>
         </section>
 
-				{isOrderCreated ? (
-					<section className="mt-7 rounded-3xl border border-emerald-100 bg-emerald-50 p-5">
-						<div className="flex items-center gap-3">
-							<CheckCircle2 size={24} className="text-emerald-500" />
-							<h3 className="text-lg font-black text-emerald-900">Order Berhasil</h3>
-						</div>
-						<p className="mt-2 text-sm leading-6 text-emerald-800 font-medium">
-							ID Pesanan: {orderId.slice(0, 8)}<br />
-							Tim kami akan menghubungi Anda melalui kontak yang telah diberikan untuk membantu proses selanjutnya.
-						</p>
-					</section>
-				) : null}
+        {isOrderCreated ? (
+          <section className="mt-7 rounded-3xl border border-emerald-100 bg-emerald-50 p-5">
+            <div className="flex items-center gap-3">
+              <CheckCircle2 size={24} className="text-emerald-500" />
+              <h3 className="text-lg font-black text-emerald-900">Order Berhasil</h3>
+            </div>
+            <p className="mt-2 text-sm font-medium leading-6 text-emerald-800">
+              ID Pesanan: {orderId.slice(0, 8)}
+              <br />
+              Tim kami akan menghubungi Anda melalui kontak yang telah diberikan untuk
+              membantu proses selanjutnya.
+            </p>
+          </section>
+        ) : null}
 
         <section className="mt-7">
           <h3 className="text-lg font-black text-slate-900">Summary</h3>

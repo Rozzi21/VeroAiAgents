@@ -55,15 +55,6 @@ type SelectPackageRequest struct {
 	TripID uuid.UUID `json:"trip_id" binding:"required"`
 }
 
-// ChatRecommendationReason describes why recommended packages are returned.
-// Valid values: "initial", "alternative", or empty.
-type ChatRecommendationReason string
-
-const (
-	ChatRecommendationReasonInitial     ChatRecommendationReason = "initial"
-	ChatRecommendationReasonAlternative ChatRecommendationReason = "alternative"
-)
-
 type TripRequest struct {
 	Title                string             `json:"title" binding:"required"`
 	Slug                 string             `json:"slug"`

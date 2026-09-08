@@ -32,8 +32,7 @@ test("starting a selection keeps the current selection and clears the error", ()
 });
 
 test("successful backend selection marks the package selected", () => {
-  const pending = selectionStarted(initialPackageSelection, "trip-b");
-  const done = selectionSucceeded(pending, "trip-b");
+  const done = selectionSucceeded("trip-b");
   assert.equal(done.selectedTripId, "trip-b");
   assert.equal(done.pendingTripId, null);
   assert.equal(done.error, null);
@@ -42,7 +41,7 @@ test("successful backend selection marks the package selected", () => {
 });
 
 test("failed selection does NOT change the selected package", () => {
-  const selected = selectionSucceeded(initialPackageSelection, "trip-a");
+  const selected = selectionSucceeded("trip-a");
   const pending = selectionStarted(selected, "trip-b");
   const failed = selectionFailed(pending, "trip not found");
   // trip-a stays the active package; trip-b is NOT marked selected.
@@ -52,16 +51,15 @@ test("failed selection does NOT change the selected package", () => {
   assert.ok(!isPackageSelected(failed, "trip-b"));
 });
 
-test("selecting an alternative replaces the active selection", () => {
-  const first = selectionSucceeded(initialPackageSelection, "trip-a");
-  const second = selectionSucceeded(selectionStarted(first, "trip-b"), "trip-b");
+test("successful alternative selection marks only the confirmed package", () => {
+  const second = selectionSucceeded("trip-b");
   assert.equal(second.selectedTripId, "trip-b");
   assert.ok(isPackageSelected(second, "trip-b"));
   assert.ok(!isPackageSelected(second, "trip-a"));
 });
 
 test("backend echo (done/history) is the source of truth, including clearing", () => {
-  const selected = selectionSucceeded(initialPackageSelection, "trip-a");
+  const selected = selectionSucceeded("trip-a");
   const synced = selectionSynced(selected, "trip-b");
   assert.equal(synced.selectedTripId, "trip-b");
   // An echo without a selection (older session / cleared server-side) clears

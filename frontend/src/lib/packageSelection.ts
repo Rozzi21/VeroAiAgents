@@ -34,7 +34,6 @@ export function selectionStarted(
 
 // The backend persisted selected_trip_id — NOW the UI may mark the card.
 export function selectionSucceeded(
-  state: PackageSelectionState,
   tripId: string
 ): PackageSelectionState {
   return { selectedTripId: tripId, pendingTripId: null, error: null };
