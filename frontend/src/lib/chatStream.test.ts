@@ -154,6 +154,45 @@ test("the stable server-owned message_id survives the SSE done event", async () 
   assert.equal(done[0].message_id, "11111111-1111-1111-1111-111111111111");
 });
 
+test("recommendation pricing survives the SSE done event", async () => {
+  stubFetch(
+    sseResponse([
+      {
+        event: "done",
+        data: {
+          message: "Paket ditemukan.",
+          message_id: "22222222-2222-2222-2222-222222222222",
+          show_recommendations: true,
+          recommendation_reason: "initial",
+          recommended_packages: [
+            {
+              id: "trip-1",
+              title: "Bali Adventure",
+              destination: "Bali",
+              duration: "3D2N",
+              base_price: 2000000,
+              discount_enabled: true,
+              discount_price: 1500000,
+              child_price: 1000000,
+              child_discount_enabled: true,
+              child_discount_price: 750000,
+            },
+          ],
+        },
+      },
+    ])
+  );
+
+  const { done, errors } = await run();
+  assert.equal(errors.length, 0);
+  const trip = done[0].recommended_packages?.[0];
+  assert.equal(trip?.base_price, 2000000);
+  assert.equal(trip?.discount_price, 1500000);
+  assert.equal(trip?.child_discount_price, 750000);
+  assert.equal(trip?.destination, "Bali");
+  assert.equal(trip?.duration, "3D2N");
+});
+
 test("clean EOF without done reports one stream error for history recovery", async () => {
   stubFetch(sseResponse([{ event: "delta", data: { content: "Respons tersimpan." } }]));
 

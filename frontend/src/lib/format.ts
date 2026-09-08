@@ -1,4 +1,4 @@
-import { TripPackage } from "@/lib/api";
+import type { TripPackage } from "./api.ts";
 
 export function formatIDR(amount: number | null | undefined) {
   if (amount == null || Number.isNaN(amount)) {

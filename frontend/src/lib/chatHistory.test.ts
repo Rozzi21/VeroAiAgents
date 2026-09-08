@@ -39,6 +39,21 @@ function trip(id: string, title: string): TripPackage {
   };
 }
 
+function discountedTrip(id: string, title: string): TripPackage {
+  return {
+    ...trip(id, title),
+    destination: "Bali",
+    duration: "3D2N",
+    base_price: 2_000_000,
+    estimated_price: 2_000_000,
+    discount_enabled: true,
+    discount_price: 1_500_000,
+    child_price: 1_000_000,
+    child_discount_enabled: true,
+    child_discount_price: 750_000,
+  };
+}
+
 const SERVER_MSG_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 
 function payloadWithRecommendation(): HistoryPayload {
@@ -73,6 +88,24 @@ test("history reconstructs the persisted recommendation on the same message", ()
   assert.equal(assistant.recommendationReason, "initial");
   assert.equal(assistant.packages?.length, 1);
   assert.equal(assistant.packages?.[0].id, "trip-1");
+});
+
+test("history reload preserves complete authoritative pricing fields", () => {
+  const payload = payloadWithRecommendation();
+  payload[1].recommendation!.recommended_packages = [
+    discountedTrip("trip-priced", "Bali Adventure"),
+  ];
+
+  const assistant = mapHistoryMessages(payload, () => "fallback")[1];
+  const priced = assistant.packages?.[0];
+  assert.equal(priced?.base_price, 2_000_000);
+  assert.equal(priced?.discount_enabled, true);
+  assert.equal(priced?.discount_price, 1_500_000);
+  assert.equal(priced?.child_price, 1_000_000);
+  assert.equal(priced?.child_discount_enabled, true);
+  assert.equal(priced?.child_discount_price, 750_000);
+  assert.equal(priced?.destination, "Bali");
+  assert.equal(priced?.duration, "3D2N");
 });
 
 test("messages without metadata stay text-only (backward compatibility)", () => {
@@ -401,7 +434,7 @@ test("late SSE completion during recovery cannot create a second assistant", () 
       recommendation: {
         show_recommendations: true,
         recommendation_reason: "initial",
-        recommended_packages: [trip("trip-1", "Bali Adventure")],
+        recommended_packages: [discountedTrip("trip-1", "Bali Adventure")],
       },
     },
   ];
@@ -424,6 +457,7 @@ test("late SSE completion during recovery cannot create a second assistant", () 
   assert.equal(messages.length, 2);
   assert.equal(messages[1].id, SERVER_MSG_ID);
   assert.equal(messages.filter((message) => message.showRecommendations).length, 1);
+  assert.equal(messages[1].packages?.[0].discount_price, 1_500_000);
 });
 
 test("normal done closes turn without allowing history reconciliation", () => {

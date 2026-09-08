@@ -347,7 +347,7 @@ highlights, image_url). Field pricing AIW-5 (`adult_price`, `discount_price`,
 | Tak ada id pesan stabil (S-2) | **Tertutup** — `message_id` di `done` + `id` di history |
 | B-GENUI-3 klik kartu ≠ seleksi | Masih terbuka |
 | B-GENUI-4 alternatif mustahil pasca-seleksi | Masih terbuka |
-| B-GENUI-5 kartu kehilangan pricing AIW-5 | Masih terbuka |
+| B-GENUI-5 kartu kehilangan pricing AIW-5 | **Tertutup 9 Sep 2026** — field adult/child normal + diskon dipetakan ke `models.Trip`, ikut `ChatResult`/persistensi/history, lalu dirender kartu bersama destination + duration |
 ---
 
 ## 6. Rekomendasi Perubahan Minimal

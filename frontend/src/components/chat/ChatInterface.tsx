@@ -762,8 +762,7 @@ function PackageRecommendations({
         {packages.map((trip) => (
           <RecommendationCard
             key={trip.id}
-            title={trip.title}
-            description={trip.summary || trip.overview || trip.destination}
+            trip={trip}
             category={trip.category}
             image={assetURL(trip.image_url || trip.media?.[0]?.url)}
             icon={<Utensils size={14} className="text-[#df3333]" />}

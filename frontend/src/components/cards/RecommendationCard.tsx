@@ -1,8 +1,10 @@
 import Link from "next/link";
+import type { TripPackage } from "@/lib/api";
+import { recommendationCardView } from "@/lib/recommendationCard";
+import { TripPriceInline } from "../pricing/TripPriceBlock";
 
 interface RecommendationCardProps {
-  title: string;
-  description: string;
+  trip: TripPackage;
   image: string;
   category: string;
   icon: React.ReactNode;
@@ -19,8 +21,7 @@ interface RecommendationCardProps {
 }
 
 export default function RecommendationCard({
-  title,
-  description,
+  trip,
   image,
   category,
   icon,
@@ -30,6 +31,7 @@ export default function RecommendationCard({
   selected = false,
   selecting = false,
 }: RecommendationCardProps) {
+  const view = recommendationCardView(trip);
   const imageBlock = (
     <div className="relative h-48 w-full overflow-hidden">
       <div
@@ -65,10 +67,31 @@ export default function RecommendationCard({
       >
         {imageBlock}
         <div className="p-5 flex flex-col flex-grow">
-          <h3 className="text-xl font-bold text-slate-900 mb-2">{title}</h3>
+          <h3 className="text-xl font-bold text-slate-900 mb-2">{view.title}</h3>
+          {(view.destination || view.duration) && (
+            <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+              {[view.destination, view.duration].filter(Boolean).join(" • ")}
+            </p>
+          )}
           <p className="text-sm text-slate-500 flex-grow leading-relaxed line-clamp-4">
-            {description}
+            {view.description}
           </p>
+          {(view.adultPrice || view.childPrice) && (
+            <div className="mt-4 space-y-2 border-t border-slate-100 pt-4 text-sm">
+              {view.adultPrice && (
+                <div>
+                  <span className="mr-2 text-xs font-semibold text-slate-500">Dewasa</span>
+                  <TripPriceInline price={view.adultPrice} />
+                </div>
+              )}
+              {view.childPrice && (
+                <div>
+                  <span className="mr-2 text-xs font-semibold text-slate-500">Anak</span>
+                  <TripPriceInline price={view.childPrice} />
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-5 flex gap-2">
             {onViewDetails ? (
               <button
@@ -102,15 +125,25 @@ export default function RecommendationCard({
   // Legacy link mode (marketing/listing contexts): unchanged behaviour.
   return (
     <Link
-      href={href ?? `/trip/${title.toLowerCase()}`}
+      href={href ?? `/trip/${view.title.toLowerCase()}`}
       className="bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-[0_2px_10px_-4px_rgba(0,0,0,0.1)] hover:shadow-lg transition-all duration-300 flex flex-col group cursor-pointer"
     >
       {imageBlock}
       <div className="p-5 flex flex-col flex-grow">
-        <h3 className="text-xl font-bold text-slate-900 mb-2">{title}</h3>
+        <h3 className="text-xl font-bold text-slate-900 mb-2">{view.title}</h3>
+        {(view.destination || view.duration) && (
+          <p className="mb-3 text-xs font-bold uppercase tracking-wide text-slate-500">
+            {[view.destination, view.duration].filter(Boolean).join(" • ")}
+          </p>
+        )}
         <p className="text-sm text-slate-500 flex-grow leading-relaxed line-clamp-4">
-          {description}
+          {view.description}
         </p>
+        {view.adultPrice && (
+          <div className="mt-4 border-t border-slate-100 pt-4 text-sm">
+            <TripPriceInline price={view.adultPrice} />
+          </div>
+        )}
         <span className="mt-5 w-full py-2.5 rounded-xl border border-[#df3333]/30 text-[#df3333] font-medium text-sm group-hover:bg-[#df3333] group-hover:text-white transition-colors flex justify-center items-center">
           View Details
         </span>

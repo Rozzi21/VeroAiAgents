@@ -483,9 +483,17 @@ func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.U
 				if summary, ok := item["summary"].(string); ok {
 					trip.Summary = summary
 				}
-				if v, ok := item["price"].(float64); ok {
-					trip.BasePrice = v
-				}
+				// B-GENUI-5: preserve the authoritative pricing fields already
+				// returned by search_trips. ChatResult and persisted recommendation
+				// metadata both reuse models.Trip, so filling its existing fields here
+				// carries the same values through SSE and history without recalculation.
+				trip.BasePrice = firstMapNumber(item, "adult_price", "price")
+				trip.EstimatedPrice = firstMapNumber(item, "price")
+				trip.DiscountPrice = firstMapNumber(item, "discount_price")
+				trip.ChildPrice = firstMapNumber(item, "child_price")
+				trip.ChildDiscount = firstMapNumber(item, "child_discount")
+				trip.DiscountEnabled = mapBool(item, "discount_enabled")
+				trip.ChildDiscountEnabled = mapBool(item, "child_discount_enabled")
 				if highlights, ok := item["highlights"].([]string); ok {
 					trip.Highlights = highlights
 				}
@@ -509,6 +517,20 @@ func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.U
 		}
 	}
 	return nil
+}
+
+func firstMapNumber(item map[string]interface{}, keys ...string) float64 {
+	for _, key := range keys {
+		if value, ok := item[key].(float64); ok {
+			return value
+		}
+	}
+	return 0
+}
+
+func mapBool(item map[string]interface{}, key string) bool {
+	value, _ := item[key].(bool)
+	return value
 }
 
 func recommendationReasonFromToolResults(toolResults []ToolResult) string {
