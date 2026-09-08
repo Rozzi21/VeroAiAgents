@@ -333,7 +333,7 @@ selesai).
 | `frontend/src/lib/api.ts` | `streamChat`: deteksi EOF-tanpa-`done` → panggil `onError`/callback; (opsional) laporkan apakah `done` pernah diproses | Wajib |
 | `frontend/src/components/chat/ChatInterface.tsx` | `onError`: fetch history sekali + helper merge + guard flag per-turn; jangan ubah `onDone` jalur sukses | Wajib |
 | `frontend/src/lib/chatHistory.ts` | Helper merge murni baru (mis. `reconcileFailedTurn`) — ganti pesan error lokal dengan baris server, dedup by id, pertahankan pesan lama | Wajib |
-| `frontend/src/lib/chatHistory.test.ts` | Kasus: race A (reconcile sukses), race B (tidak ada baris → error tetap), race E (alternatif + seleksi utuh), prompt duplikat, dedup id | Wajib |
+| `frontend/tests/unit/lib/chatHistory.test.ts` | Kasus: race A (reconcile sukses), race B (tidak ada baris → error tetap), race E (alternatif + seleksi utuh), prompt duplikat, dedup id | Wajib |
 | `backend/internal/handlers/chat_stream_handlers.go` + `backend/internal/services/ai_service.go` | HANYA untuk opsi `message_id` awal via event `meta` (§6 butir 5) | Opsional |
 | Backend lainnya (routes/models/repo) | **Tidak ada** — endpoint history sudah mengembalikan semua data yang dibutuhkan | Tidak |
 

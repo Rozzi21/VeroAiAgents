@@ -47,7 +47,7 @@
 | Rute + middleware | `backend/internal/routes/routes.go`, `internal/middlewares/middlewares.go` |
 | Skema/migrasi | `backend/internal/database/database.go`, `backend/migrations/20260818_guest_order_limit.sql` |
 | Config | `backend/internal/config/config.go` |
-| Test | `backend/internal/services/guest_order_limit_test.go` |
+| Test | `backend/tests/integration/services/guest_order_limit_test.go` |
 
 ### 1.2 Frontend customer
 
@@ -523,7 +523,7 @@ dan hash berubah begitu order pindah kepemilikan.
   (`user_id = caller AND guest_session_id IS NULL`), jadi tidak ada order pemilik
   lain yang bisa terbaca dan pemanggil tanpa marker tidak menjalankan query
   tambahan. Regresi:
-  `backend/internal/services/guest_order_idempotency_claim_test.go` +
+  `backend/tests/integration/services/guest_order_idempotency_claim_test.go` +
   `TestPostgresClaimedGuestIdempotencyKeyNotReplayable` (suite Postgres opsional).
 
 #### GO-P2-5: Guard duplikat MCP terikat chat session dan window 200 pesan

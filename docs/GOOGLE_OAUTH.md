@@ -613,7 +613,7 @@ fragment `#access_token`), refresh rotation + reuse detection, cookie HttpOnly,
 alur login/register/logout/revoke, chat/booking/streaming, transisi guest →
 authenticated.
 
-**Test:** `frontend/src/lib/authToken.test.ts` + `api.test.ts` (26 test, runner
+**Test:** `frontend/tests/unit/lib/authToken.test.ts` + `api.test.ts` (26 test, runner
 bawaan Node — `npm test` di `frontend/`): cleanup fragment, nilai fragment jahat,
 token tidak pernah di-log, logout menghapus token, token kedaluwarsa memicu
 refresh, refresh 401 logout aman, dedup multi-tab, dan Bearer tidak pernah masuk

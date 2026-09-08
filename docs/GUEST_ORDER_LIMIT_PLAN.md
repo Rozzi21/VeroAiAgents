@@ -200,7 +200,7 @@ tetap bisa diakses melalui existing owner path/staff dan perlu support flow.
   `/order/[id]` baru; komponen bersama `AuthForm`.
 - Login/register: handler meng-claim order guest via
   `GuestService.ClaimOrder` (cookie-diverifikasi, single-use, atomic UPDATE).
-- Tests: `backend/internal/services/guest_order_limit_test.go` — policy,
+- Tests: `backend/tests/integration/services/guest_order_limit_test.go` — policy,
   ownership/IDOR, failed attempts, race (diverifikasi `-race`), idempotency,
   authenticated-not-limited, claim single-use.
 - Verifikasi: `go build`, `go vet`, `go test ./...`, `go test -race` (services,

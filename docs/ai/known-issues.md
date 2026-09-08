@@ -82,7 +82,7 @@ bullet terkait); semua item lain di bawah masih terbuka.
   `frontend/src/lib/chatProxy.ts` (`forwardedChatHeaders`) dan memuat
   `Authorization`; `Host`/`Origin`/`X-Forwarded-*`/`Content-Length` tetap dibuang
   (rewrite `Host` merusak TLS/virtual hosting, `Content-Length` basi merusak body
-  yang diteruskan). Regresi dikunci `frontend/src/lib/chatProxy.test.ts`.
+  yang diteruskan). Regresi dikunci `frontend/tests/unit/lib/chatProxy.test.ts`.
   **Pendamping di turn yang sama:** (a) respons chat kini membawa `order_gate`
   terstruktur (`ChatResult.OrderGate`) sehingga UI chat punya auth gate + tombol
   Google/Login/Register + Continue Tracking tanpa mem-parse prosa LLM; (b)
@@ -124,7 +124,7 @@ bullet terkait); semua item lain di bawah masih terbuka.
   `GET /bookings/:id` gagal untuk sesi aktif, jadi claim yang ter-skip karena
   cookie tidak terkirim (GO-P2-6 `SameSite`) atau kegagalan DB sesaat bisa
   sembuh sendiri tanpa intervensi manual. Regresi dikunci
-  `backend/internal/services/guest_order_claim_test.go` (8 test: valid claim,
+  `backend/tests/integration/services/guest_order_claim_test.go` (8 test: valid claim,
   identitas guest invalid, guest salah, user terautentikasi salah, duplikat,
   konkuren, order sudah di-claim tanpa marker, serangan email-only) +
   `backend/internal/handlers/guest_order_claim_handler_test.go` (9 test HTTP:
@@ -151,7 +151,7 @@ bullet terkait); semua item lain di bawah masih terbuka.
   sudah kedaluwarsa/hilang. Losernya dapat `ErrChatSessionGuestMismatch` +
   audit `guest_chat_bind_refused`; `GuestChat` lalu mencetak chat session BARU
   untuk identitas pemanggil (pola SEC-17) alih-alih memakai sesi orang lain.
-  Dikunci `internal/services/guest_concurrency_test.go` +
+  Dikunci `tests/integration/services/guest_concurrency_test.go` +
   `internal/handlers/guest_chat_bind_handler_test.go`.
 - **✅ GO-P2-6 FIXED (4 Sep 2026) — `SameSite` salah tulis tidak lagi jatuh
   senyap ke `Strict`.** `Config.Validate()` kini menolak nilai
@@ -185,7 +185,7 @@ bullet terkait); semua item lain di bawah masih terbuka.
   (`user_id = caller AND guest_session_id IS NULL`). Dua-duanya harus cocok, dan
   keduanya milik pemanggil, jadi order pemilik lain tetap tak terjangkau dan
   pemanggil yang tidak pernah jadi guest tidak menjalankan query tambahan sama
-  sekali. Dikunci `backend/internal/services/guest_order_idempotency_claim_test.go`
+  sekali. Dikunci `backend/tests/integration/services/guest_order_idempotency_claim_test.go`
   (replay setelah claim = order yang sama; akun lain dengan key sama dapat order
   sendiri; key berbeda tetap membuat order baru; guest order yang BELUM di-claim
   tidak pernah tersaji ke akun) + `TestPostgresClaimedGuestIdempotencyKeyNotReplayable`
@@ -226,7 +226,7 @@ bullet terkait); semua item lain di bawah masih terbuka.
   `guest_order_contact_entitlement_test.go` — di situ arbiternya unique index
   `contact_key`, yang juga cukup di Postgres.
   **Sejak 4 Sep 2026 ada verifikasi mesin nyata yang opsional** (GO-P3-6):
-  `internal/services/guest_postgres_race_test.go` menjalankan lima skenario
+  `tests/integration/services/guest_postgres_race_test.go` menjalankan lima skenario
   konkurensi (pembuatan order guest paralel, key idempotency identik paralel,
   claim paralel, binding chat→guest paralel, resolusi identitas paralel) plus
   satu regresi non-race yang SQL-nya engine-dependent
@@ -330,7 +330,7 @@ lock row guest `FOR UPDATE` -> cek `order_count` -> validasi trip/kontak/tanggal
 -> insert booking -> `ConsumeGuestOrder` conditional (`WHERE order_count=0`).
 Idempotency wajib via header `Idempotency-Key` (hash di
 `bookings.idempotency_key_hash`, unique partial). Regression tests:
-`backend/internal/services/guest_order_limit_test.go` (policy, ownership,
+`backend/tests/integration/services/guest_order_limit_test.go` (policy, ownership,
 race, idempotency, claim single-use). Docs lengkap:
 `docs/GUEST_ORDER_LIMIT.md`.
 
@@ -884,7 +884,7 @@ Audit arsitektur terhadap 15 aspek (layering, package dependency, repository/ser
 - **Affected Files:**
   - `backend/internal/handlers/chat_handlers.go` (`GuestChat`)
   - `backend/internal/services/payment_service.go`
-  - `backend/internal/services/payment_service_test.go`
+  - `backend/tests/integration/services/payment_service_test.go`
 - **Fix (1 Agu 2026):**
   1. **Sentinel errors payment domain** — `payment_service.go` kini memiliki 9 sentinel: `ErrPaymentNotFound`, `ErrBookingNotFoundForPayment`, `ErrMissingSignature`, `ErrInvalidTimestampFormat`, `ErrWebhookTimestampExpired`, `ErrInvalidPaymentSignature`, `ErrWebhookSecretMissing`, `ErrPaymentAmountMismatch`, `ErrPaymentAlreadySettled`. Semua `errors.New` inline diganti dengan referensi ke sentinel ini.
   2. **`GuestChat` handler** — `chat_handlers.go` mengganti `err.Error() == "chat session expired" || err.Error() == "chat session not found"` dengan `errors.Is(err, services.ErrChatSessionExpired) || errors.Is(err, services.ErrChatSessionNotFound)` (sentinel yang sudah ada di `services.go`).

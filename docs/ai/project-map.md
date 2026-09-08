@@ -35,15 +35,20 @@ VeroAiTravelAgents/
 │   │   ├── events/bus.go          → event bus in-memory untuk SSE
 │   │   ├── utils/response.go      → envelope respons API standar
 │   │   └── dto/                   → request/response + validasi
+│   ├── tests/
+│   │   └── integration/           → black-box/DB tests yang tidak butuh akses private package
 │   ├── .env.example               → template environment variables
 │   ├── docker-compose.yml         → Postgres 16 + API
 │   └── docs/server-deploy.md      → panduan deploy systemd
 │
 ├── frontend/ (customer)
-│   └── src/
+│   ├── src/
 │       ├── app/                   → page.tsx (chat), trip/[id], layout.tsx
 │       ├── components/chat/ChatInterface.tsx  → komponen inti
 │       └── lib/api.ts             → apiFetch + assetURL (tanpa auth)
+│   └── tests/
+│       ├── unit/lib/              → test helper/domain frontend
+│       └── helpers/               → helper test bersama
 │
 ├── backoffice-frontend/ (admin)
 │   └── src/
@@ -106,7 +111,7 @@ VeroAiTravelAgents/
 
 ## Fakta Penting (Status Saat Ini)
 
-- **Automated test backend aktif** di `internal/ai`, `internal/auth`, `internal/mcp`, `internal/middlewares`, `internal/handlers` (Google OAuth guard + `guest_order_claim_handler_test.go` untuk `POST /orders/claim` + `guest_order_limit_handler_test.go` untuk kontrak 403 `GUEST_ORDER_LIMIT_REACHED` di `POST /orders`), `internal/services` (incl. `guest_order_limit_test.go` + `guest_order_claim_test.go` + `guest_order_chat_gate_test.go` — guest policy, race, idempotency, ownership, claim, structured code MCP + guard no-retry + `order_gate`), `internal/utils`. **Frontend customer punya test** (`npm test`, runner bawaan Node): `authToken.test.ts`, `api.test.ts`, `chatProxy.test.ts`, `orderGate.test.ts`, `chatStream.test.ts`. Backoffice belum punya test.
+- **Automated test backend aktif**. White-box test yang butuh akses private tetap colocated di `internal/{ai,auth,config,handlers,mcp,middlewares,services,utils}`; black-box/DB integration test berada di `backend/tests/integration/{routes,services}`. **Frontend customer punya test** di `frontend/tests/unit/lib` (`npm test`, runner bawaan Node), dengan helper bersama di `frontend/tests/helpers`. Backoffice belum punya test.
 - **Tool MCP legacy masih simulasi/mock** (`mcp_service.go` method `mock` — hanya `send_whatsapp` + fallback unknown; tool rekomendasi lama di-unify ke `search_trips`).
 - **Frontend customer**: chat + detail paket + order guest/tracking + auth customer (login/register/Google, `order_gate` gate di chat sejak 4 Sep 2026).
 - **Backoffice**: auth + CRUD paket + upload media aktif; dashboard/orders/settings masih placeholder.

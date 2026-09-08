@@ -3,6 +3,7 @@
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
+import { makeJWT, makeMemoryStorage } from "../../helpers/auth.ts";
 import {
   clearCustomerAccessToken,
   consumeOAuthFragment,
@@ -11,37 +12,9 @@ import {
   oauthErrorMessage,
   setCustomerAccessToken,
   tokenExpiryMs,
-} from "./authToken.ts";
+} from "../../../src/lib/authToken.ts";
 
 // --- helpers ---------------------------------------------------------------
-
-function b64url(value: object): string {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
-}
-
-// makeJWT builds an UNSIGNED compact JWT. Shape only — the backend verifies
-// signatures; the client never does.
-function makeJWT(exp?: number): string {
-  const payload: Record<string, unknown> = { sub: "user-1", aud: "access" };
-  if (exp !== undefined) {
-    payload.exp = exp;
-  }
-  return `${b64url({ alg: "RS256", typ: "JWT" })}.${b64url(payload)}.c2lnYXR1cmU`;
-}
-
-function makeMemoryStorage(): Storage {
-  const map = new Map<string, string>();
-  return {
-    getItem: (k: string) => (map.has(k) ? (map.get(k) as string) : null),
-    setItem: (k: string, v: string) => void map.set(k, String(v)),
-    removeItem: (k: string) => void map.delete(k),
-    clear: () => map.clear(),
-    key: (i: number) => Array.from(map.keys())[i] ?? null,
-    get length() {
-      return map.size;
-    },
-  } as Storage;
-}
 
 let store: Storage;
 

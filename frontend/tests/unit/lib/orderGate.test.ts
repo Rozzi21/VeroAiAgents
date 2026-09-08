@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { orderGateView } from "./orderGate.ts";
+import { orderGateView } from "../../../src/lib/orderGate.ts";
 
 test("guest limit asks for sign-in and never invents an order id", () => {
   const view = orderGateView({ code: "GUEST_ORDER_LIMIT_REACHED", auth_required: true });

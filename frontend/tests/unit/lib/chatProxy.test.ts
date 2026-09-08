@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { forwardedChatHeaders } from "./chatProxy.ts";
+import { forwardedChatHeaders } from "../../../src/lib/chatProxy.ts";
 
 test("Authorization is forwarded so a signed-in customer is not treated as a guest", () => {
   const headers = forwardedChatHeaders(

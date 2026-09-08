@@ -226,7 +226,7 @@ Integrasi eksternal harus punya fallback. Contoh: klien AI (`ai/ai_client.go`) m
 
 ## 5. Verifikasi Sebelum Selesai
 
-- **Backend**: `cd backend && gofmt -w . && go build ./...` harus exit 0, lalu `go test ./...` (suite aktif: `ai`, `auth`, `handlers`, `mcp`, `middlewares`, `routes`, `services`, `utils`). Test TIDAK boleh butuh `OPENAI_API_KEY`, DB Postgres, atau jaringan — mock lewat interface narrow (SEC-27) dan pakai SQLite in-memory seperti suite guest order.
+- **Backend**: `cd backend && gofmt -w . && go build ./...` harus exit 0, lalu `go test ./...`. White-box test yang membutuhkan symbol private tetap colocated sebagai `internal/<package>/*_test.go`; black-box dan integration test ada di `backend/tests/integration/<domain>/`. Suite default TIDAK boleh butuh `OPENAI_API_KEY`, DB Postgres, atau jaringan — mock lewat interface narrow (SEC-27) dan pakai SQLite in-memory. Test PostgreSQL nyata boleh opt-in dan wajib skip tanpa `VERO_TEST_POSTGRES_DSN` aman.
 - **Frontend/Backoffice**: `npx tsc --noEmit` harus lolos (atau `npm run lint`).
-- **Frontend customer**: `cd frontend && npm test` (runner bawaan Node, tanpa framework tambahan). File test baru WAJIB didaftarkan di skrip `test` pada `package.json` — runner memakai daftar file eksplisit, bukan glob, jadi test yang tidak didaftarkan tidak pernah jalan.
+- **Frontend customer**: `cd frontend && npm test` (runner bawaan Node, tanpa framework tambahan). Unit test ada di `frontend/tests/unit/`; helper/mock/fixture bersama ada di `frontend/tests/helpers`, `frontend/tests/mocks`, atau `frontend/tests/fixtures` sesuai fungsi. Skrip `test` memakai glob `tests/unit/lib/*.test.ts`, jadi file baru dengan pola itu otomatis dijalankan.
 - Hindari `npx tsc` tanpa binary lokal karena bisa memicu prompt instalasi yang hang; pakai `./node_modules/.bin/tsc --noEmit`.

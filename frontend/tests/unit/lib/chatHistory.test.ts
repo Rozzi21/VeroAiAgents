@@ -14,9 +14,9 @@ import {
   reconcileFailedTurn,
   replaceAssistantPlaceholder,
   type HistoryChatMessage,
-} from "./chatHistory.ts";
-import type { GuestChatHistoryResponse, TripPackage } from "./api.ts";
-import { initialPackageSelection, selectionSynced } from "./packageSelection.ts";
+} from "../../../src/lib/chatHistory.ts";
+import type { GuestChatHistoryResponse, TripPackage } from "../../../src/lib/api.ts";
+import { initialPackageSelection, selectionSynced } from "../../../src/lib/packageSelection.ts";
 
 type HistoryPayload = GuestChatHistoryResponse["messages"];
 type RecoveryMessage = HistoryChatMessage & { streaming?: boolean };

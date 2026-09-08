@@ -16,8 +16,8 @@ import {
   selectionStarted,
   selectionSucceeded,
   selectionSynced,
-} from "./packageSelection.ts";
-import { APIError, selectPackage } from "./api.ts";
+} from "../../../src/lib/packageSelection.ts";
+import { APIError, selectPackage } from "../../../src/lib/api.ts";
 
 // --- state transitions -----------------------------------------------------
 
@@ -130,11 +130,11 @@ test("selectPackage failure rejects with the backend message (no silent success)
 
 test("chat UI contains no 'paket lain' keyword matching", () => {
   const chatInterface = readFileSync(
-    new URL("../components/chat/ChatInterface.tsx", import.meta.url),
+    new URL("../../../src/components/chat/ChatInterface.tsx", import.meta.url),
     "utf8"
   );
   const card = readFileSync(
-    new URL("../components/cards/RecommendationCard.tsx", import.meta.url),
+    new URL("../../../src/components/cards/RecommendationCard.tsx", import.meta.url),
     "utf8"
   );
   for (const source of [chatInterface, card]) {

@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { TripPackage } from "./api.ts";
-import { formatIDR } from "./format.ts";
-import { recommendationCardView } from "./recommendationCard.ts";
+import type { TripPackage } from "../../../src/lib/api.ts";
+import { formatIDR } from "../../../src/lib/format.ts";
+import { recommendationCardView } from "../../../src/lib/recommendationCard.ts";
 
 function packageFixture(overrides: Partial<TripPackage> = {}): TripPackage {
   return {
@@ -67,7 +67,7 @@ test("old recommendation without optional prices remains renderable without fake
 
 test("RecommendationCard renders structured price, destination, and duration view", () => {
   const source = readFileSync(
-    new URL("../components/cards/RecommendationCard.tsx", import.meta.url),
+    new URL("../../../src/components/cards/RecommendationCard.tsx", import.meta.url),
     "utf8"
   );
 

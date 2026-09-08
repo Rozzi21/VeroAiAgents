@@ -158,7 +158,7 @@ memberi akses ke order lama karena semua jalur order me-resolve cookie hash
 terhadap session yang HIDUP). Loser dapat `ErrChatSessionGuestMismatch` + audit
 `guest_chat_bind_refused`, dan `GuestChat` mencetak chat session BARU untuk
 identitas pemanggil (`rebindGuestChatSession`, pola SEC-17) alih-alih memakai
-sesi milik orang lain. Dikunci `internal/services/guest_concurrency_test.go` +
+sesi milik orang lain. Dikunci `tests/integration/services/guest_concurrency_test.go` +
 `internal/handlers/guest_chat_bind_handler_test.go`.
 
 **Claim aman + idempoten (GO-P1-3 / GO-P3-3, 4 Sep 2026).**
@@ -189,7 +189,7 @@ tercatat. Bila marker masih NULL tapi booking sudah keluar dari jalur guest
 bukan ditimpa. Handler (`handlers/helpers.go: claimGuestOrder`) memakai satu jalur
 untuk Register/Login/Google callback dan tetap non-fatal terhadap penerbitan
 sesi; yang berubah: kegagalan dan penolakan tidak lagi menyatu jadi satu baris
-log generik. Regresi dikunci `internal/services/guest_order_claim_test.go`
+log generik. Regresi dikunci `tests/integration/services/guest_order_claim_test.go`
 (valid claim, identitas guest invalid, guest salah, user salah, duplikat,
 konkuren, order sudah di-claim tanpa marker, serangan email-only).
 
@@ -228,7 +228,7 @@ TIDAK tahu soal jangkar ini: pemisahan tanggung jawab sama seperti Google OAuth
 - `BookingService.Find(id, userID, isStaff)` / `PaymentService.Find(...)`: cek kepemilikan (SEC-2). Non-staff hanya bisa akses miliknya (repo `FindBookingForUser`/`FindPaymentForUser`).
 - **Idempotency race (GO-P2-3, 4 Sep 2026)**: lookup `FindBookingByIdempotency` di dalam transaksi bisa miss di dua request paralel dengan owner + key yang sama; `bookings.idempotency_key_hash` (UNIQUE) menolak yang kalah dan **membatalkan transaksinya**, jadi baris pemenang hanya bisa dibaca SETELAH transaksi itu selesai. `create()` karena itu mengulang lookup yang sama **di luar** transaksi dan mengembalikan booking pemenang sebagai replay, bukan constraint error (dulu HTTP 500). Scope lookup tetap owner (`guest_session_id` untuk guest, `user_id` untuk akun) + key hash pemanggil, jadi replay tidak bisa menyentuh order pemilik lain; error nyata (limit guest, kontak invalid, DB down) tetap diteruskan. Dikunci `internal/services/booking_idempotency_race_test.go` + `guest_concurrency_test.go`.
 - `PaymentService.Create()`: payment intent dengan `ExternalID=DOKU-<uuid>`, expired 15 menit. `Amount` diambil dari `Booking.TotalPrice` (SEC-3), bukan dari body.
-- **Idempotency lintas batas claim (GO-P2-4, 4 Sep 2026)**: hash key di-scope owner (`guest:<guestSessionID>` sebelum claim, `user:<userID>` sesudahnya), dan claim memindahkan booking ke akun **tanpa bisa me-rehash** (key mentah tidak disimpan). Akibatnya akun yang mengulang request yang tadi ia buat sebagai guest — skenario retry setelah 403 `GUEST_ORDER_LIMIT_REACHED` + login — dulu membuat order KEDUA. Sekarang jalur authenticated, setelah lookup normalnya miss, mencoba lagi dengan hash `guest:<id>:<key>` untuk tiap identitas guest yang SUDAH di-claim akun itu (`Repository.ListClaimedGuestSessionIDs`, marker `guest_sessions.claimed_user_id`, maks 5 terbaru), tetap dengan filter owner pemanggil (`user_id = caller AND guest_session_id IS NULL`). Read-only, tanpa perubahan skema; pemanggil tanpa marker tidak menjalankan query tambahan. Dikunci `internal/services/guest_order_idempotency_claim_test.go` + `TestPostgresClaimedGuestIdempotencyKeyNotReplayable`.
+- **Idempotency lintas batas claim (GO-P2-4, 4 Sep 2026)**: hash key di-scope owner (`guest:<guestSessionID>` sebelum claim, `user:<userID>` sesudahnya), dan claim memindahkan booking ke akun **tanpa bisa me-rehash** (key mentah tidak disimpan). Akibatnya akun yang mengulang request yang tadi ia buat sebagai guest — skenario retry setelah 403 `GUEST_ORDER_LIMIT_REACHED` + login — dulu membuat order KEDUA. Sekarang jalur authenticated, setelah lookup normalnya miss, mencoba lagi dengan hash `guest:<id>:<key>` untuk tiap identitas guest yang SUDAH di-claim akun itu (`Repository.ListClaimedGuestSessionIDs`, marker `guest_sessions.claimed_user_id`, maks 5 terbaru), tetap dengan filter owner pemanggil (`user_id = caller AND guest_session_id IS NULL`). Read-only, tanpa perubahan skema; pemanggil tanpa marker tidak menjalankan query tambahan. Dikunci `tests/integration/services/guest_order_idempotency_claim_test.go` + `TestPostgresClaimedGuestIdempotencyKeyNotReplayable`.
 - **Validasi `SameSite` (GO-P2-6, 4 Sep 2026)**: `Config.Validate()` menolak `GUEST_COOKIE_SAME_SITE`/`JWT_COOKIE_SAME_SITE` di luar `Strict`/`Lax`/`None` di semua environment, karena `auth.parseSameSite` memetakan nilai tak dikenal ke `Strict` secara senyap dan cookie guest `Strict` tidak terkirim pada callback Google. `Strict` sendiri tetap valid (dan tetap mematikan claim otomatis) — didokumentasikan, bukan diblokir. Dikunci `internal/config/config_test.go`.
 - `PaymentService.Webhook()`: bila `DOKU_SECRET` di-set, signature **wajib** valid (SEC-4); di production secret wajib ada. Validasi `amount` (bila dikirim) + idempotency (status `paid`/`settlement` tidak bisa turun/diproses ulang). Bila `paid`/`settlement` -> publish `booking_confirmed` + trigger N8N.
 

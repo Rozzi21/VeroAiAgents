@@ -430,13 +430,13 @@ Ini kebijakan, bukan celah — pengambilalihan itu tidak memberi apa pun:
 
 Konsekuensi yang diterima: order guest yang belum di-claim setelah token
 kedaluwarsa hanya bisa diakses staff (retention dapat diperpanjang lewat env).
-Dikunci `backend/internal/services/guest_expired_identity_policy_test.go`
+Dikunci `backend/tests/integration/services/guest_expired_identity_policy_test.go`
 (`TestExpiredGuestIdentityTakeoverGrantsNothing`) +
 `TestChatGuestBindingTakenOverWhenOwnerExpired`.
 
 ## Pengujian
 
-`backend/internal/services/guest_order_limit_test.go` (SQLite in-memory):
+`backend/tests/integration/services/guest_order_limit_test.go` (SQLite in-memory):
 
 1. First guest order sukses; second ditolak `ErrGuestOrderLimitReached` (1,2).
 2. Owner bisa akses order; guest lain tidak; UUID tebakan tidak memberi akses
@@ -491,7 +491,7 @@ dan Bearer token terpasang pada request stream).
 
 Jangkar kontak (4 Sep 2026) ditutup dua file test baru:
 
-`backend/internal/services/guest_order_contact_entitlement_test.go`
+`backend/tests/integration/services/guest_order_contact_entitlement_test.go`
 (SQLite in-memory, memakai fixture yang sama):
 
 1. `TestGuestOrderDeniedForFreshIdentityWithSameContact` — identitas guest baru
@@ -526,7 +526,7 @@ telepon (`0`/`+62`/`00`/pemisah/tanpa digit), serta derivasi anchor
 (email ≠ phone key, ejaan ekuivalen → key sama, kontak beda → key beda).
 
 Claim pasca-autentikasi (4 Sep 2026) ditutup
-`backend/internal/services/guest_order_claim_test.go` (SQLite in-memory, fixture
+`backend/tests/integration/services/guest_order_claim_test.go` (SQLite in-memory, fixture
 yang sama):
 
 1. `TestGuestOrderClaimValidCookie` — cookie valid → transfer, marker terisi,
@@ -563,7 +563,7 @@ akun → 401 dan tidak ada yang bergerak.
 
 TOCTOU/konkurensi (4 Sep 2026) dikunci tiga file tambahan:
 
-- `internal/services/guest_concurrency_test.go` — order guest dengan
+- `tests/integration/services/guest_concurrency_test.go` — order guest dengan
   `Idempotency-Key` sama secara paralel (satu booking, semua pemanggil menerima
   booking yang sama, allowance + jangkar kontak terpakai sekali);
   claim duplikat paralel oleh akun yang sama (tepat satu transfer, sisanya replay,
@@ -584,7 +584,7 @@ TOCTOU/konkurensi (4 Sep 2026) dikunci tiga file tambahan:
   meneruskan kegagalan non-race; `LinkAccount` yang kalah constraint membalas
   `ErrGoogleIdentityTaken` (akun lain) atau no-op idempotent (akun sendiri).
   Pemulihan handler-nya di `internal/handlers/guest_chat_bind_handler_test.go`.
-- `internal/services/guest_postgres_race_test.go` — **verifikasi mesin nyata
+- `tests/integration/services/guest_postgres_race_test.go` — **verifikasi mesin nyata
   (opsional)**. Lima skenario konkurensi yang sama dijalankan di PostgreSQL dengan
   pool 8 koneksi, jadi `FOR UPDATE` benar-benar berebut dan transaksi yang ditolak
   unique index benar-benar abort, plus satu regresi non-race yang SQL-nya
@@ -619,12 +619,12 @@ Regresi tambahan dari final review (4 Sep 2026):
   salah tulis ditolak dengan menyebut nama env var, penolakan berlaku di
   development/staging/production, jalur nyata `Load()` + `Validate()` ikut diuji,
   dan default yang dikirimkan (`Lax`/`Strict`) tetap valid.
-- `internal/services/guest_order_idempotency_claim_test.go` — GO-P2-4: replay key
+- `tests/integration/services/guest_order_idempotency_claim_test.go` — GO-P2-4: replay key
   guest setelah claim mengembalikan order YANG SAMA (bukan order kedua); akun lain
   dengan key sama mendapat order sendiri dan tidak pernah membaca order yang sudah
   di-claim; key berbeda dari akun yang sama tetap membuat order baru (guard bukan
   lock per-akun); guest order yang BELUM di-claim tidak pernah tersaji ke akun.
-- `internal/services/guest_expired_identity_policy_test.go` — kebijakan identitas
+- `tests/integration/services/guest_expired_identity_policy_test.go` — kebijakan identitas
   kedaluwarsa: setelah chat diambil alih identitas penerus, identitas itu tidak
   bisa membaca order identitas lama, tidak bisa mereset aturan satu order (jangkar
   kontak tetap menahan), dan tidak bisa meng-claim order itu — begitu pula token
