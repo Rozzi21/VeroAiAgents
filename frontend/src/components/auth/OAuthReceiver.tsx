@@ -1,7 +1,18 @@
 "use client";
 
 import { useEffect } from "react";
-import { consumeOAuthFragment, oauthErrorMessage, setCustomerAccessToken } from "@/lib/authToken";
+import {
+  consumeOAuthFragment,
+  oauthErrorMessage,
+  postOAuthSuccessPath,
+  sanitizeOAuthReturnQuery,
+  setCustomerAccessToken,
+} from "@/lib/authToken";
+
+// Shown when the browser refuses to persist the session (storage full/blocked).
+// Never treated as a successful sign-in.
+const OAUTH_STORAGE_ERROR =
+  "Your session could not be saved in this browser. Please enable site storage and try again.";
 
 // OAuthReceiver consumes the backend's Google callback redirect. The access
 // token arrives in the URL fragment (#access_token=...) — which is never sent
@@ -15,6 +26,9 @@ import { consumeOAuthFragment, oauthErrorMessage, setCustomerAccessToken } from 
 //   when invalid, so attacker input never lingers in history/share.
 // - It also surfaces a backend auth_error (?auth_error=...) so the hosting page
 //   can show a message, then strips that code from the URL too.
+// - On success from the dedicated auth pages (/login, /register) the user is
+//   redirected to "/" — consistent with password login; elsewhere the current
+//   page reloads in place.
 export function OAuthReceiver({ onError }: { onError?: (message: string) => void }) {
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -23,19 +37,28 @@ export function OAuthReceiver({ onError }: { onError?: (message: string) => void
     const result = consumeOAuthFragment(window.location.hash);
     if (result.kind !== "none") {
       // Clean the fragment FIRST so the token (or attacker input) does not
-      // linger in history/share, whatever happens next.
-      const clean = window.location.pathname + window.location.search;
+      // linger in history/share, whatever happens next. One-shot OAuth query
+      // params (a stale auth_error) are stripped too.
+      const cleanQuery = sanitizeOAuthReturnQuery(window.location.search);
+      const clean = window.location.pathname + (cleanQuery ? `?${cleanQuery}` : "");
       window.history.replaceState(null, "", clean);
-      if (result.kind === "token" && setCustomerAccessToken(result.token, result.expiresIn)) {
-        // Land the user on the page they started from (this page) — token is
-        // set, so a plain reload of the current path reflects the session.
-        window.location.replace(clean);
+      if (result.kind === "token") {
+        if (setCustomerAccessToken(result.token, result.expiresIn)) {
+          // From /login or /register land on "/" (consistent with password
+          // login); otherwise reload the current page so it reflects the new
+          // session.
+          const destination = postOAuthSuccessPath(window.location.pathname);
+          window.location.replace(destination === window.location.pathname ? clean : destination);
+        } else if (onError) {
+          // Storage rejected a VALID token (full/blocked): not signed in —
+          // say so explicitly instead of silently appearing logged out.
+          onError(OAUTH_STORAGE_ERROR);
+        }
         return;
       }
-      // kind === "invalid" (or storage rejected the token): fragment already
-      // stripped; surface a generic failure. The raw value is never shown or
-      // logged.
-      if (result.kind === "invalid" && onError) {
+      // kind === "invalid": fragment already stripped; surface a generic
+      // failure. The raw value is never shown or logged.
+      if (onError) {
         onError(oauthErrorMessage("authentication_failed"));
       }
     }

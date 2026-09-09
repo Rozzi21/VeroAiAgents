@@ -96,6 +96,9 @@ export default function ChatInterface() {
   const [selection, setSelection] = useState<PackageSelectionState>(initialPackageSelection);
   const [completedTyping, setCompletedTyping] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
+  // Surfaces Google sign-in failures (auth_error query, invalid fragment,
+  // storage rejection) delivered by OAuthReceiver below.
+  const [oauthError, setOauthError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   // PERF-1: AbortController for the in-flight streaming chat request so the
   // user can cancel a slow/long generation (and navigations abort cleanly).
@@ -444,12 +447,17 @@ export default function ChatInterface() {
           who signed in from the chat auth gate lands back here ALREADY
           authenticated — otherwise the token is dropped and the next order
           attempt would still run as a guest. */}
-      <OAuthReceiver />
+      <OAuthReceiver onError={setOauthError} />
       <div
         className={`relative flex h-screen flex-col transition-all duration-300 ${
           selectedPackage ? "w-[65%]" : "w-full"
         }`}
       >
+      {oauthError ? (
+        <div className="mx-auto mt-4 w-full max-w-4xl rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert">
+          {oauthError}
+        </div>
+      ) : null}
       <div className="flex-1 overflow-y-auto px-8 py-10 pb-32">
         <div className={`${selectedPackage ? "max-w-3xl" : "max-w-4xl"} mx-auto space-y-8`}>
           {messages.map((message) =>

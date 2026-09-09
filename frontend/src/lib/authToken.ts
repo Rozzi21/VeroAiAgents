@@ -136,6 +136,44 @@ export function clearCustomerAccessToken(): void {
   store.removeItem(TOKEN_EXPIRES_AT_KEY);
 }
 
+// OAuth-specific query params that must never round-trip through return_to or
+// linger after the flow finishes: auth_error is a one-shot error code from the
+// backend, google_linked is the one-shot marker of the link flow.
+const OAUTH_ONE_SHOT_PARAMS = ["auth_error", "google_linked"];
+
+// sanitizeOAuthReturnQuery strips one-shot OAuth params from a query string so
+// a stale auth_error is neither carried into the next Google start (return_to)
+// nor kept in the URL after a successful callback. Accepts with or without a
+// leading "?"; returns the cleaned query WITHOUT the leading "?".
+export function sanitizeOAuthReturnQuery(search: string): string {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  if (!raw) {
+    return "";
+  }
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(raw);
+  } catch {
+    return "";
+  }
+  for (const key of OAUTH_ONE_SHOT_PARAMS) {
+    params.delete(key);
+  }
+  return params.toString();
+}
+
+// postOAuthSuccessPath decides where the user lands after a successful Google
+// sign-in. From the dedicated auth pages (/login, /register) the user goes to
+// the home page — consistent with password login, which redirects to "/".
+// Everywhere else (trip detail, chat) the user stays on the page they started
+// from. Anything else falls back to the given path unchanged.
+export function postOAuthSuccessPath(pathname: string): string {
+  if (pathname === "/login" || pathname === "/register") {
+    return "/";
+  }
+  return pathname;
+}
+
 export type OAuthFragmentResult =
   // No usable fragment: nothing to store, nothing to clean.
   | { kind: "none" }

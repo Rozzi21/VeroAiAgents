@@ -1,17 +1,20 @@
 "use client";
 
 import { usePathname, useSearchParams } from "next/navigation";
+import { sanitizeOAuthReturnQuery } from "@/lib/authToken";
 
 // GoogleButton starts the server-side Authorization Code flow via a full-page
 // navigation to the backend (NOT apiFetch — the browser must follow the Google
 // consent redirect). return_to is the current path so the user lands back here
-// after Google + the backend finish.
+// after Google + the backend finish. One-shot OAuth params (auth_error,
+// google_linked) are stripped from return_to so a stale error code never
+// round-trips into the next sign-in attempt.
 export function GoogleButton({ label = "Continue with Google" }: { label?: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
   function start() {
-    const query = searchParams?.toString();
+    const query = sanitizeOAuthReturnQuery(searchParams?.toString() ?? "");
     const returnTo = query ? `${pathname}?${query}` : pathname ?? "/";
     window.location.href = `/api/v1/auth/google?return_to=${encodeURIComponent(returnTo)}`;
   }

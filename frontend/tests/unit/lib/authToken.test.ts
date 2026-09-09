@@ -10,6 +10,8 @@ import {
   getCustomerAccessToken,
   isPlausibleAccessToken,
   oauthErrorMessage,
+  postOAuthSuccessPath,
+  sanitizeOAuthReturnQuery,
   setCustomerAccessToken,
   tokenExpiryMs,
 } from "../../../src/lib/authToken.ts";
@@ -148,5 +150,34 @@ test("oauthErrorMessage maps known codes and never echoes unknown input", () => 
   const message = oauthErrorMessage(crafted);
   assert.equal(message.includes(crafted), false);
   assert.equal(message, "Google sign-in failed. Please try again.");
+});
+
+
+// --- return_to sanitizing (F-06) ---------------------------------------------
+
+test("sanitizeOAuthReturnQuery strips one-shot OAuth params, keeps the rest", () => {
+  assert.equal(sanitizeOAuthReturnQuery("auth_error=access_denied"), "");
+  assert.equal(sanitizeOAuthReturnQuery("?auth_error=access_denied&foo=bar"), "foo=bar");
+  assert.equal(sanitizeOAuthReturnQuery("foo=bar&google_linked=1"), "foo=bar");
+  assert.equal(sanitizeOAuthReturnQuery(""), "");
+  assert.equal(sanitizeOAuthReturnQuery("?"), "");
+  // A crafted auth_error value is dropped entirely, never echoed back.
+  assert.equal(
+    sanitizeOAuthReturnQuery("auth_error=%3Cscript%3E&next=%2Ftrip%2Fx"),
+    "next=%2Ftrip%2Fx"
+  );
+});
+
+// --- post-login landing path (F-05) ------------------------------------------
+
+test("postOAuthSuccessPath sends /login and /register to home", () => {
+  assert.equal(postOAuthSuccessPath("/login"), "/");
+  assert.equal(postOAuthSuccessPath("/register"), "/");
+});
+
+test("postOAuthSuccessPath keeps every other page in place", () => {
+  assert.equal(postOAuthSuccessPath("/"), "/");
+  assert.equal(postOAuthSuccessPath("/trip/abc"), "/trip/abc");
+  assert.equal(postOAuthSuccessPath("/order/123"), "/order/123");
 });
 

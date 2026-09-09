@@ -10,6 +10,7 @@ import {
   apiFetch,
   customerLogout,
   ensureCustomerSession,
+  fetchCurrentCustomer,
   getCustomerAccessToken,
   setCustomerAccessToken,
 } from "../../../src/lib/api.ts";
@@ -191,5 +192,33 @@ test("token is never written to console on non-JSON error responses", async () =
 
   assert.equal(logged.length > 0, true);
   assert.equal(JSON.stringify(logged).includes(token), false);
+});
+
+
+// --- authenticated profile (F-01: UI knows WHO is signed in) ------------------
+
+test("fetchCurrentCustomer loads /auth/me with the stored Bearer token", async () => {
+  const token = futureToken();
+  setCustomerAccessToken(token, 900);
+  fetchHandler = async () =>
+    jsonEnvelope({ id: "user-1", name: "Vero User", email: "user@example.com" });
+
+  const profile = await fetchCurrentCustomer();
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, "/api/v1/auth/me");
+  const headers = new Headers(fetchCalls[0].init.headers);
+  assert.equal(headers.get("Authorization"), `Bearer ${token}`);
+  assert.equal(profile.email, "user@example.com");
+});
+
+test("logout then profile fetch: no token is attached anymore", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  await customerLogout();
+  fetchCalls = [];
+  fetchHandler = async () => jsonEnvelope({}, 401);
+
+  await assert.rejects(fetchCurrentCustomer());
+  const headers = new Headers(fetchCalls[0].init.headers);
+  assert.equal(headers.get("Authorization"), null);
 });
 

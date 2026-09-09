@@ -15,6 +15,7 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
   const [order, setOrder] = useState<BookingOrder | null>(null);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [authRequired, setAuthRequired] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
   const [contact, setContact] = useState("");
   const idempotencyKeyRef = useRef<string | null>(null);
 
@@ -94,8 +95,13 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
   return (
     <div className="flex-1 overflow-y-auto h-screen bg-slate-50">
       <Suspense fallback={null}>
-        <OAuthReceiver />
+        <OAuthReceiver onError={setOauthError} />
       </Suspense>
+      {oauthError ? (
+        <div className="mx-auto mt-4 max-w-2xl rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
+          {oauthError}
+        </div>
+      ) : null}
       <div className="relative w-full h-[65vh] min-h-[400px] overflow-hidden rounded-b-[40px] shadow-lg">
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-black/10 z-10" />
         <div

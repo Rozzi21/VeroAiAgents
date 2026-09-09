@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { Plus, Compass, History, Bookmark, Settings, User } from "lucide-react";
+import { Plus, Compass, History, Bookmark, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { AuthStatus } from "@/components/auth/AuthStatus";
 
 export default function Sidebar() {
   return (
@@ -27,12 +28,9 @@ export default function Sidebar() {
         </nav>
       </div>
 
-      <div className="flex items-center gap-3 px-2 py-3 hover:bg-white/60 rounded-xl cursor-pointer transition-colors border border-transparent hover:border-slate-200">
-        <div className="w-8 h-8 rounded-full bg-slate-300 flex items-center justify-center overflow-hidden">
-          <User size={16} className="text-slate-600" />
-        </div>
-        <span className="text-sm font-medium text-slate-700">My Profile</span>
-      </div>
+      {/* Signed-in identity + logout, or Login/Register links for guests.
+          Client component: resolves the session from the refresh cookie. */}
+      <AuthStatus />
     </aside>
   );
 }

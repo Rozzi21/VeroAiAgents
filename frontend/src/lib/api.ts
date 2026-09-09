@@ -214,6 +214,23 @@ export async function customerLogout(): Promise<void> {
   }
 }
 
+// CustomerProfile is the minimal shape of GET /api/v1/auth/me used by the UI
+// to know WHO is signed in (display name/email). Password and Google sessions
+// return the same shape.
+export type CustomerProfile = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+// fetchCurrentCustomer loads the signed-in customer's profile. Call
+// ensureCustomerSession() first so an expired 15-minute token is renewed from
+// the refresh cookie before this request; a 401 here means the session is gone
+// (treat as anonymous, never retry-loop).
+export function fetchCurrentCustomer(): Promise<CustomerProfile> {
+  return apiFetch<CustomerProfile>("/api/v1/auth/me");
+}
+
 export type SelectPackageResponse = {
   selected_trip_id: string;
 };
