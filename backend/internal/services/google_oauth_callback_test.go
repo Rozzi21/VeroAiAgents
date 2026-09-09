@@ -24,6 +24,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/config"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
+	"golang.org/x/oauth2"
 	"gorm.io/gorm"
 )
 
@@ -175,6 +176,16 @@ func (env *googleMockEnv) runFlow(t *testing.T, linkUserID *uuid.UUID) (GoogleCa
 	row, ok := env.repo.states[hashOAuthState(state)]
 	if !ok {
 		t.Fatal("redirect state matches no persisted state hash — CSRF binding broken")
+	}
+	// PKCE binding (regression: double-hash bug, 9 Sep 2026): the consent URL
+	// must carry code_challenge = S256(persisted raw code_verifier), method S256.
+	// A double-hashed challenge (S256(S256(verifier))) makes Google reject the
+	// exchange with invalid_grant "Invalid code verifier.".
+	if got, want := q.Get("code_challenge"), oauth2.S256ChallengeFromVerifier(row.CodeVerifier); got != want {
+		t.Errorf("code_challenge != S256(persisted code_verifier) — PKCE binding broken")
+	}
+	if got := q.Get("code_challenge_method"); got != "S256" {
+		t.Errorf("code_challenge_method = %q, want S256", got)
 	}
 	env.nonce = row.Nonce // the mock provider echoes this nonce in the id_token
 	res, err := env.svc.Callback(context.Background(), mockAuthCode, state, meta)

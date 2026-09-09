@@ -181,7 +181,11 @@ func (s *GoogleOAuthService) StartLogin(ctx context.Context, returnTo string, li
 		startFields["link_user_id"] = linkUserID.String()
 	}
 	auth.LogSecurity(auth.EventGoogleLoginStarted, startFields)
-	return GoogleStartResult{RedirectURL: s.google.AuthCodeURLForRedirect(s.callbackRedirectURI(linkUserID != nil), state, nonce, pkceS256Challenge(codeVerifier))}, nil
+	// Pass the RAW code_verifier: oauth2.S256ChallengeOption derives the S256
+	// challenge internally (S256ChallengeFromVerifier). Pre-hashing here would
+	// double-hash (S256(S256(verifier))) and Google rejects the exchange with
+	// invalid_grant "Invalid code verifier." (BUG: PKCE double-hash, 9 Sep 2026).
+	return GoogleStartResult{RedirectURL: s.google.AuthCodeURLForRedirect(s.callbackRedirectURI(linkUserID != nil), state, nonce, codeVerifier)}, nil
 }
 
 // googleFlowName labels the audit trail: "login" for the normal flow, "link"
@@ -203,13 +207,6 @@ func (s *GoogleOAuthService) callbackRedirectURI(linkFlow bool) string {
 		return s.cfg.GoogleLinkRedirectURI
 	}
 	return s.cfg.GoogleRedirectURI
-}
-
-// pkceS256Challenge derives the RFC 7636 S256 code_challenge from a verifier:
-// BASE64URL(SHA256(verifier)), no padding.
-func pkceS256Challenge(verifier string) string {
-	sum := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
 }
 
 // Callback validates the state (single-use, anti-CSRF), exchanges the code,

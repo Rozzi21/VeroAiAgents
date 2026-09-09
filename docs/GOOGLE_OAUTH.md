@@ -53,7 +53,7 @@ refresh token lewat cookie HttpOnly pada respons 302.
 | Komponen | Path | Tanggung jawab |
 |---|---|---|
 | `GoogleClient` (OIDC client) | `backend/internal/auth/google.go` | Discovery OIDC, pembuatan URL consent (`AuthCodeURLForRedirect`), exchange code (`ExchangeForRedirect`), verifikasi id_token. Issuer pinned `https://accounts.google.com`. Scope minimal `openid email profile` |
-| `GoogleOAuthService` | `backend/internal/services/google_oauth_service.go` | `StartLogin`, `Callback`, `resolveUser`, `LinkAccount`, `sanitizeReturnTo` (open-redirect guard), `hashOAuthState`, `randomURLToken`, `pkceS256Challenge`; emit audit event |
+| `GoogleOAuthService` | `backend/internal/services/google_oauth_service.go` | `StartLogin`, `Callback`, `resolveUser`, `LinkAccount`, `sanitizeReturnTo` (open-redirect guard), `hashOAuthState`, `randomURLToken`; emit audit event |
 | Handler | `backend/internal/handlers/google_auth_handlers.go` | Redirect-based (`302`), bukan JSON: `GoogleLogin`, `GoogleLinkStart`, `GoogleCallback`; set refresh cookie; claim guest order; redirect error `auth_error` |
 | Repository | `backend/internal/repositories/oauth_repository.go` | `CreateOAuthState`, `ConsumeOAuthState` (atomik single-use), `DeleteExpiredOAuthStates`, `FindUserByGoogleSub`, `CreateUserWithGoogleIdentity`, `LinkUserGoogleSub` |
 | Model | `backend/internal/models/models.go` | `OAuthState`, `ExternalIdentity`, `User.GoogleSub` (mirror denormalisasi) |

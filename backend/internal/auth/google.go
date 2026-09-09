@@ -86,8 +86,8 @@ func newGoogleClientWithProvider(provider *oidc.Provider, clientID, clientSecret
 
 // AuthCodeURL builds the Google consent-screen redirect for the client's
 // configured redirect URI. See AuthCodeURLForRedirect.
-func (g *GoogleClient) AuthCodeURL(state, nonce, codeChallenge string) string {
-	return g.AuthCodeURLForRedirect(g.oauthConfig.RedirectURL, state, nonce, codeChallenge)
+func (g *GoogleClient) AuthCodeURL(state, nonce, codeVerifier string) string {
+	return g.AuthCodeURLForRedirect(g.oauthConfig.RedirectURL, state, nonce, codeVerifier)
 }
 
 // AuthCodeURLForRedirect is AuthCodeURL with an explicit redirect URI. The
@@ -95,10 +95,11 @@ func (g *GoogleClient) AuthCodeURL(state, nonce, codeChallenge string) string {
 // Account" flow uses its own /google/link/callback URI so the two endpoints
 // stay distinct. `state` (CSRF) and `nonce` (id_token binding) are generated
 // by the caller and persisted server-side; both are echoed back and
-// re-validated on callback. `codeChallenge` (PKCE S256) binds the
-// authorization request to the server-held code_verifier, mitigating
-// authorization-code interception.
-func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeChallenge string) string {
+// re-validated on callback. `codeVerifier` is the RAW PKCE verifier —
+// oauth2.S256ChallengeOption derives the S256 code_challenge from it
+// internally; passing a pre-hashed challenge here would double-hash it and
+// break the token exchange (invalid_grant "Invalid code verifier.").
+func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeVerifier string) string {
 	cfg := g.oauthConfig
 	cfg.RedirectURL = redirectURI
 	// AccessType online is sufficient (no offline/refresh access needed).
@@ -108,7 +109,7 @@ func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeCha
 		oauth2.AccessTypeOnline,
 		oauth2.SetAuthURLParam("nonce", nonce),
 		oauth2.SetAuthURLParam("prompt", "select_account"),
-		oauth2.S256ChallengeOption(codeChallenge),
+		oauth2.S256ChallengeOption(codeVerifier),
 	)
 }
 
