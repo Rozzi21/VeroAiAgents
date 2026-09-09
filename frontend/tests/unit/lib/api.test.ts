@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { futureToken, makeJWT, makeMemoryStorage } from "../../helpers/auth.ts";
 import {
+  APIError,
   apiFetch,
   customerLogout,
   ensureCustomerSession,
@@ -14,6 +15,7 @@ import {
   getCustomerAccessToken,
   setCustomerAccessToken,
 } from "../../../src/lib/api.ts";
+import { readRefreshResult } from "../../../src/lib/refreshCoordinator.ts";
 
 // --- helpers ---------------------------------------------------------------
 
@@ -89,6 +91,171 @@ test("concurrent ensureCustomerSession calls share one refresh (multi-tab safe)"
   ]);
   assert.deepEqual([a, b, c], ["active", "active", "active"]);
   assert.equal(fetchCalls.length, 1); // single-use rotation never raced
+});
+
+// --- F-07: reactive 401 refresh/retry ----------------------------------------
+
+test("401 then successful refresh retries GET once with the fresh token", async () => {
+  const stale = futureToken();
+  const fresh = makeJWT(Math.floor(Date.now() / 1000) + 1800);
+  setCustomerAccessToken(stale, 900);
+  let resourceCalls = 0;
+  fetchHandler = async (url) => {
+    if (url === "/api/v1/auth/refresh") {
+      return jsonEnvelope({ access_token: fresh, expires_in: 1800 });
+    }
+    resourceCalls += 1;
+    return resourceCalls === 1 ? jsonEnvelope({}, 401) : jsonEnvelope({ id: "ok" });
+  };
+
+  const result = await apiFetch<{ id: string }>("/api/v1/auth/me");
+
+  assert.deepEqual(result, { id: "ok" });
+  assert.equal(resourceCalls, 2);
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/v1/auth/refresh").length, 1);
+  assert.equal(new Headers(fetchCalls[0].init.headers).get("Authorization"), `Bearer ${stale}`);
+  assert.equal(new Headers(fetchCalls[2].init.headers).get("Authorization"), `Bearer ${fresh}`);
+});
+
+test("401 then refresh 401 marks session anonymous and does not replay request", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  let resourceCalls = 0;
+  fetchHandler = async (url) => {
+    if (url === "/api/v1/auth/refresh") return jsonEnvelope({}, 401);
+    resourceCalls += 1;
+    return jsonEnvelope({}, 401);
+  };
+
+  await assert.rejects(
+    apiFetch("/api/v1/auth/me"),
+    (error: unknown) => error instanceof APIError && error.status === 401
+  );
+  assert.equal(resourceCalls, 1);
+  assert.equal(getCustomerAccessToken(), null);
+  assert.equal(readRefreshResult(store)?.status, "anonymous");
+});
+
+test("401 then refresh network failure stays network error without anonymous marker", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  let resourceCalls = 0;
+  fetchHandler = async (url) => {
+    if (url === "/api/v1/auth/refresh") throw new Error("network down");
+    resourceCalls += 1;
+    return jsonEnvelope({}, 401);
+  };
+
+  await assert.rejects(apiFetch("/api/v1/auth/me"), /Tidak dapat terhubung ke server/);
+  assert.equal(resourceCalls, 1);
+  assert.equal(readRefreshResult(store), null);
+});
+
+test("request replays at most once when fresh token also receives 401", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  const fresh = makeJWT(Math.floor(Date.now() / 1000) + 1800);
+  let resourceCalls = 0;
+  fetchHandler = async (url) => {
+    if (url === "/api/v1/auth/refresh") {
+      return jsonEnvelope({ access_token: fresh, expires_in: 1800 });
+    }
+    resourceCalls += 1;
+    return jsonEnvelope({}, 401);
+  };
+
+  await assert.rejects(
+    apiFetch("/api/v1/auth/me"),
+    (error: unknown) => error instanceof APIError && error.status === 401
+  );
+  assert.equal(resourceCalls, 2);
+  assert.equal(fetchCalls.filter((call) => call.url === "/api/v1/auth/refresh").length, 1);
+});
+
+test("concurrent 401 responses share one coordinated refresh", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  const fresh = makeJWT(Math.floor(Date.now() / 1000) + 1800);
+  let refreshCalls = 0;
+  let resourceCalls = 0;
+  fetchHandler = async (url, init) => {
+    if (url === "/api/v1/auth/refresh") {
+      refreshCalls += 1;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      return jsonEnvelope({ access_token: fresh, expires_in: 1800 });
+    }
+    resourceCalls += 1;
+    return new Headers(init.headers).get("Authorization") === `Bearer ${fresh}`
+      ? jsonEnvelope({ ok: true })
+      : jsonEnvelope({}, 401);
+  };
+
+  const results = await Promise.all([
+    apiFetch<{ ok: boolean }>("/api/v1/auth/me"),
+    apiFetch<{ ok: boolean }>("/api/v1/auth/me"),
+  ]);
+  assert.deepEqual(results, [{ ok: true }, { ok: true }]);
+  assert.equal(refreshCalls, 1);
+  assert.equal(resourceCalls, 4);
+});
+
+test("unsafe mutation without idempotency contract is not refreshed or replayed", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  fetchHandler = async () => jsonEnvelope({}, 401);
+
+  await assert.rejects(
+    apiFetch("/api/v1/chat/select-package", {
+      method: "POST",
+      body: JSON.stringify({ trip_id: "trip-1" }),
+    }),
+    (error: unknown) => error instanceof APIError && error.status === 401
+  );
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, "/api/v1/chat/select-package");
+});
+
+test("arbitrary idempotency header does not make unsupported mutation replayable", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  fetchHandler = async () => jsonEnvelope({}, 401);
+
+  await assert.rejects(
+    apiFetch("/api/v1/chat/select-package", {
+      method: "POST",
+      headers: { "Idempotency-Key": "unsupported-attempt-1234" },
+      body: JSON.stringify({ trip_id: "trip-1" }),
+    }),
+    (error: unknown) => error instanceof APIError && error.status === 401
+  );
+  assert.equal(fetchCalls.length, 1);
+});
+
+test("idempotency-key mutation may replay once using same key", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  const fresh = makeJWT(Math.floor(Date.now() / 1000) + 1800);
+  let orderCalls = 0;
+  fetchHandler = async (url) => {
+    if (url === "/api/v1/auth/refresh") {
+      return jsonEnvelope({ access_token: fresh, expires_in: 1800 });
+    }
+    orderCalls += 1;
+    return orderCalls === 1 ? jsonEnvelope({}, 401) : jsonEnvelope({ id: "order-1" });
+  };
+
+  const result = await apiFetch<{ id: string }>("/api/v1/bookings", {
+    method: "POST",
+    headers: { "Idempotency-Key": "order-attempt-1234" },
+    body: JSON.stringify({ trip_id: "trip-1" }),
+  });
+  assert.equal(result.id, "order-1");
+  assert.equal(orderCalls, 2);
+  const requests = fetchCalls.filter((call) => call.url === "/api/v1/bookings");
+  assert.equal(requests.length, 2);
+  assert.equal(new Headers(requests[0].init.headers).get("Idempotency-Key"), "order-attempt-1234");
+  assert.equal(new Headers(requests[1].init.headers).get("Idempotency-Key"), "order-attempt-1234");
+});
+
+test("normal successful request remains one request without refresh", async () => {
+  setCustomerAccessToken(futureToken(), 900);
+  fetchHandler = async () => jsonEnvelope({ id: "normal" });
+
+  assert.deepEqual(await apiFetch("/api/v1/auth/me"), { id: "normal" });
+  assert.equal(fetchCalls.length, 1);
 });
 
 // --- logout ------------------------------------------------------------------

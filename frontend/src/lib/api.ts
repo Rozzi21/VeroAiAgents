@@ -157,6 +157,17 @@ type RefreshResponse = { access_token: string; expires_in?: number };
 // refresh cookie + rotation machinery applies identically to password logins.
 export type CustomerSessionState = "active" | "anonymous";
 
+type EnsureCustomerSessionOptions = {
+  // F-07 callers need refresh transport/parse error itself. Default callers
+  // retain existing active/anonymous contract and graceful guest fallback.
+  throwOnRefreshFailure?: boolean;
+};
+
+type CustomerSessionResolution = {
+  state: CustomerSessionState;
+  refreshFailure?: unknown;
+};
+
 // ensureCustomerSession guarantees a usable access token for an authenticated
 // customer. If a token is already stored it is returned as-is; otherwise the
 // HttpOnly refresh cookie (set at login/Google callback, path /api/v1/auth) is
@@ -171,38 +182,53 @@ export type CustomerSessionState = "active" | "anonymous";
 // rotation — the loser reuses the winner's token from shared storage, and a
 // 401/logout marker makes every tab converge to logged-out. Only meaningful
 // client-side (needs localStorage + cookies).
-let refreshInFlight: Promise<CustomerSessionState> | null = null;
+let refreshInFlight: Promise<CustomerSessionResolution> | null = null;
 
-export function ensureCustomerSession(): Promise<CustomerSessionState> {
+export async function ensureCustomerSession(
+  options: EnsureCustomerSessionOptions = {}
+): Promise<CustomerSessionState> {
   if (typeof window === "undefined") return Promise.resolve("anonymous");
   if (getCustomerAccessToken()) return Promise.resolve("active");
-  if (refreshInFlight) return refreshInFlight;
+  if (!refreshInFlight) {
+    refreshInFlight = (async (): Promise<CustomerSessionResolution> => {
+      let refreshFailure: unknown;
+      try {
+        const state = await coordinatedRefresh(async () => {
+          try {
+            const result = await apiFetch<RefreshResponse>("/api/v1/auth/refresh", {
+              method: "POST",
+            });
+            if (result && result.access_token) {
+              return {
+                kind: "success",
+                accessToken: result.access_token,
+                expiresIn: result.expires_in,
+              };
+            }
+            return { kind: "failed" };
+          } catch (err) {
+            // 401 clears stale token and marks every tab anonymous. Other
+            // failures leave coordinator markers untouched and are retained
+            // for F-07's original request.
+            if (err instanceof APIError && err.status === 401) {
+              return { kind: "unauthorized" };
+            }
+            refreshFailure = err;
+            return { kind: "failed" };
+          }
+        });
+        return { state, refreshFailure };
+      } finally {
+        refreshInFlight = null;
+      }
+    })();
+  }
 
-  refreshInFlight = (async (): Promise<CustomerSessionState> => {
-    try {
-      return await coordinatedRefresh(async () => {
-        try {
-          const result = await apiFetch<RefreshResponse>("/api/v1/auth/refresh", { method: "POST" });
-          if (result && result.access_token) {
-            return { kind: "success", accessToken: result.access_token, expiresIn: result.expires_in };
-          }
-          return { kind: "failed" };
-        } catch (err) {
-          // 401 means the refresh session is gone (revoked/expired/reuse-
-          // detected): the coordinator clears the stale stored token and marks
-          // the session anonymous for every tab. Network failures keep the
-          // token — the session may still be valid once connectivity returns.
-          if (err instanceof APIError && err.status === 401) {
-            return { kind: "unauthorized" };
-          }
-          return { kind: "failed" };
-        }
-      });
-    } finally {
-      refreshInFlight = null;
-    }
-  })();
-  return refreshInFlight;
+  const resolution = await refreshInFlight;
+  if (options.throwOnRefreshFailure && resolution.refreshFailure !== undefined) {
+    throw resolution.refreshFailure;
+  }
+  return resolution.state;
 }
 
 // customerLogout performs a REAL sign-out: it revokes the server-side refresh
@@ -265,6 +291,20 @@ export function selectPackage(tripId: string): Promise<SelectPackageResponse> {
 // Abort requests that hang so the UI does not stay in a loading state forever.
 const REQUEST_TIMEOUT_MS = 35_000; // slightly above the max AI workflow timeout
 
+function hasIdempotentMutationContract(
+  path: string,
+  method: string,
+  headers: Headers
+): boolean {
+  // Only existing order-create endpoints guarantee Idempotency-Key semantics.
+  // Header presence alone cannot make arbitrary mutation safe to replay.
+  return (
+    method === "POST" &&
+    (path === "/api/v1/bookings" || path === "/api/v1/orders") &&
+    headers.has("Idempotency-Key")
+  );
+}
+
 async function parseJsonEnvelope<T>(response: Response): Promise<Envelope<T>> {
   const contentType = response.headers.get("content-type") || "";
   // Proxy errors (e.g. 502/504 from Next.js rewrite or nginx) often return HTML.
@@ -303,43 +343,87 @@ async function parseJsonEnvelope<T>(response: Response): Promise<Envelope<T>> {
 }
 
 export async function apiFetch<T>(path: string, options: RequestInit = {}) {
-  const headers = new Headers(options.headers);
-	const accessToken = getCustomerAccessToken();
-	if (accessToken && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${accessToken}`);
-  if (!(options.body instanceof FormData)) {
-    headers.set("Content-Type", "application/json");
-  }
+  const configuredHeaders = new Headers(options.headers);
+  const usesCustomerAuth = !configuredHeaders.has("Authorization");
+  const method = (options.method ?? "GET").toUpperCase();
+  const safeMethod = method === "GET" || method === "HEAD" || method === "OPTIONS";
+  const bodyIsStream =
+    typeof ReadableStream !== "undefined" && options.body instanceof ReadableStream;
+  // Unsafe mutations replay only for known existing idempotency contracts.
+  // Stream bodies remain one-shot even with key.
+  const mayRetryAfterRefresh =
+    safeMethod ||
+    (hasIdempotentMutationContract(path, method, configuredHeaders) && !bodyIsStream);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-  let response: Response;
-  try {
-    response = await fetch(`${resolveApiBase()}${path}`, {
-      ...options,
-      headers,
-      credentials: options.credentials ?? "include",
-      signal: controller.signal,
-    });
-  } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error(
-        "Server terlalu lama merespons. Pastikan backend berjalan dan coba lagi."
-      );
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const headers = new Headers(options.headers);
+    const accessToken = getCustomerAccessToken();
+    if (accessToken && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
     }
-    throw new Error(
-      `Tidak dapat terhubung ke server. Pastikan backend berjalan di ${SERVER_API_BASE_URL}.`
+    if (!(options.body instanceof FormData)) {
+      headers.set("Content-Type", "application/json");
+    }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let response: Response;
+    try {
+      response = await fetch(`${resolveApiBase()}${path}`, {
+        ...options,
+        headers,
+        credentials: options.credentials ?? "include",
+        signal: controller.signal,
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        throw new Error(
+          "Server terlalu lama merespons. Pastikan backend berjalan dan coba lagi."
+        );
+      }
+      throw new Error(
+        `Tidak dapat terhubung ke server. Pastikan backend berjalan di ${SERVER_API_BASE_URL}.`
+      );
+    } finally {
+      clearTimeout(timeoutId);
+    }
+
+    const payload = await parseJsonEnvelope<T>(response);
+    if (response.ok && payload.success) {
+      return payload.data;
+    }
+
+    const details = payload.error as { code?: string } | undefined;
+    const requestError = new APIError(
+      payload.message || "Request failed",
+      response.status,
+      details?.code,
+      payload.error
     );
-  } finally {
-    clearTimeout(timeoutId);
+    if (
+      response.status !== 401 ||
+      attempt > 0 ||
+      !usesCustomerAuth ||
+      !mayRetryAfterRefresh
+    ) {
+      throw requestError;
+    }
+
+    // Clear only token rejected by THIS request. Another concurrent 401 may
+    // already have stored newer token; never erase winner.
+    if (accessToken && getCustomerAccessToken() === accessToken) {
+      clearCustomerAccessToken();
+    }
+    const session = await ensureCustomerSession({ throwOnRefreshFailure: true });
+    if (session !== "active") {
+      throw requestError;
+    }
+    // Loop performs exactly one replay. Headers rebuild with fresh token;
+    // second 401 exits without another refresh.
   }
 
-  const payload = await parseJsonEnvelope<T>(response);
-  if (!response.ok || !payload.success) {
-    const details = payload.error as { code?: string } | undefined;
-    throw new APIError(payload.message || "Request failed", response.status, details?.code, payload.error);
-  }
-  return payload.data;
+  throw new Error("Request failed");
 }
 
 // ChatStreamHandlers describes the callbacks used while consuming the SSE

@@ -4,9 +4,9 @@ Tanggal: 9 Sep 2026. Scope: read-only, hanya frontend customer (`frontend/`).
 Backend hanya dibaca untuk memvalidasi kontrak (format fragment, `return_to`).
 Tidak ada kode yang diubah.
 
-**Status tindak lanjut (9 Sep 2026):** F-01, F-02, F-04, F-05, F-06, F-08 SUDAH
-diperbaiki (lihat §7 dan §8). Masih terbuka: F-03 (XSS pada localStorage —
-accepted risk), F-07 (retry 401 di apiFetch).
+**Status tindak lanjut (10 Sep 2026):** F-01, F-02, F-04, F-05, F-06, F-07,
+F-08 SUDAH diperbaiki (lihat §7, §8, dan §9). Masih terbuka: F-03 (XSS pada
+localStorage — accepted risk).
 
 ## 1. Flow Aktual Frontend
 
@@ -115,7 +115,7 @@ rusak; P2 = celah kualitas keamanan atau race nyata; P3 = kosmetik/UX.
 - Dampak: pesan error menyesatkan sesaat. Tidak ada risiko open redirect
   (sanitize server-side).
 
-### F-07 (P3) — Tidak ada retry 401 di apiFetch customer (beda dengan backoffice)
+### F-07 (P3) — [FIXED 10 Sep 2026] Tidak ada retry 401 di apiFetch customer (beda dengan backoffice)
 - File: `frontend/src/lib/api.ts:276-314`.
 - Bukti: backoffice punya retry 401 otomatis; customer tidak. Mitigasi parsial:
   `getCustomerAccessToken()` mem-purge token kedaluwarsa secara eager + skew 30
@@ -295,4 +295,28 @@ Test `refreshCoordinator.test.ts`: no-contention, 2 caller concurrent satu
 refresh, 401 propagation, network retry, logout race, owner release, stale lock,
 corrupt entry, dan deadline lock wedged. Validasi final: `npm test` 90/90 pass,
 `npx tsc --noEmit`, `npm run lint`, `npm run build`, `git diff --check` bersih.
+
+## 9. Fix F-07 — Retry 401 Terbatas dan Aman (10 Sep 2026)
+
+File: `frontend/src/lib/api.ts`; test: `frontend/tests/unit/lib/api.test.ts`.
+
+1. `apiFetch()` menangani 401 lewat `ensureCustomerSession()` yang tetap memakai
+   `coordinatedRefresh()` F-02. Token ditolak dibersihkan hanya bila masih menjadi
+   token terkini, sehingga 401 terlambat tidak menghapus token baru request lain.
+2. Refresh sukses membangun ulang request dengan access token baru dan mengulang
+   tepat satu kali. 401 kedua langsung dilempar; `/auth/refresh` tidak masuk loop.
+3. GET/HEAD/OPTIONS boleh diulang. Mutation hanya boleh diulang untuk allowlist
+   kontrak idempotency existing (`POST /bookings` dan `POST /orders`), bila caller
+   memasok `Idempotency-Key` dan body bukan `ReadableStream`. Header arbitrer
+   tidak membuat mutation lain aman. Key sama dipertahankan pada replay.
+4. Refresh 401 mempertahankan F-02: token dibersihkan, marker anonymous ditulis,
+   request awal tidak diulang. Kegagalan network/parse refresh tidak menulis
+   marker anonymous dan dilempar sebagai error refresh, bukan logout paksa.
+5. Header `Authorization` eksplisit milik caller tidak disentuh. Refresh token
+   tetap hanya di cookie HttpOnly; storage hanya memuat access token, lock, dan
+   result marker existing.
+
+Test mencakup refresh sukses, refresh 401, refresh network failure, batas satu
+replay, 401 concurrent dengan satu refresh, mutation tanpa idempotency, mutation
+order dengan key sama, dan jalur normal tanpa 401.
 
