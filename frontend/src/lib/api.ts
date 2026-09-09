@@ -1,10 +1,12 @@
 // Token storage lives in ./authToken (validated, expiry-aware). Re-exported
-// below so existing callers keep working unchanged.
+// below so existing callers keep working unchanged. Note: setCustomerAccessToken
+// is intentionally NOT imported here — refresh writes go through
+// refreshCoordinator (cross-tab safe); login/register/OAuth import it directly.
 import {
   clearCustomerAccessToken,
   getCustomerAccessToken,
-  setCustomerAccessToken,
 } from "./authToken.ts";
+import { coordinatedRefresh, markSessionAnonymous } from "./refreshCoordinator.ts";
 
 const SERVER_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
@@ -163,9 +165,12 @@ export type CustomerSessionState = "active" | "anonymous";
 // available, "anonymous" when there is no session (never logged in, or the
 // refresh session was revoked/expired/reused — e.g. after logout).
 //
-// Concurrent callers share ONE in-flight refresh so two tabs/components do not
-// race the single-use rotation (the loser would be rejected by reuse
-// detection). Only meaningful client-side (needs localStorage + cookies).
+// Concurrent callers IN THIS TAB share ONE in-flight refresh; across tabs the
+// refresh is serialized by coordinatedRefresh (Web Locks, or a localStorage
+// mutex with stale TTL as fallback) so two tabs never race the single-use
+// rotation — the loser reuses the winner's token from shared storage, and a
+// 401/logout marker makes every tab converge to logged-out. Only meaningful
+// client-side (needs localStorage + cookies).
 let refreshInFlight: Promise<CustomerSessionState> | null = null;
 
 export function ensureCustomerSession(): Promise<CustomerSessionState> {
@@ -175,20 +180,24 @@ export function ensureCustomerSession(): Promise<CustomerSessionState> {
 
   refreshInFlight = (async (): Promise<CustomerSessionState> => {
     try {
-      const result = await apiFetch<RefreshResponse>("/api/v1/auth/refresh", { method: "POST" });
-      if (result && result.access_token && setCustomerAccessToken(result.access_token, result.expires_in)) {
-        return "active";
-      }
-      return "anonymous";
-    } catch (err) {
-      // 401 means the refresh session is gone (revoked/expired/reuse-detected):
-      // drop any stale stored token so the client logs out safely instead of
-      // keeping a dead Bearer token around. Network failures keep the token —
-      // the session may still be valid once connectivity returns.
-      if (err instanceof APIError && err.status === 401) {
-        clearCustomerAccessToken();
-      }
-      return "anonymous";
+      return await coordinatedRefresh(async () => {
+        try {
+          const result = await apiFetch<RefreshResponse>("/api/v1/auth/refresh", { method: "POST" });
+          if (result && result.access_token) {
+            return { kind: "success", accessToken: result.access_token, expiresIn: result.expires_in };
+          }
+          return { kind: "failed" };
+        } catch (err) {
+          // 401 means the refresh session is gone (revoked/expired/reuse-
+          // detected): the coordinator clears the stale stored token and marks
+          // the session anonymous for every tab. Network failures keep the
+          // token — the session may still be valid once connectivity returns.
+          if (err instanceof APIError && err.status === 401) {
+            return { kind: "unauthorized" };
+          }
+          return { kind: "failed" };
+        }
+      });
     } finally {
       refreshInFlight = null;
     }
@@ -201,6 +210,8 @@ export function ensureCustomerSession(): Promise<CustomerSessionState> {
 // exactly like a password-login logout) and clears the stored access token.
 // Works identically for Google-authenticated sessions (same AuthSession). Safe
 // to call when already anonymous. Returns after the local token is cleared.
+// The anonymous marker tells every OTHER tab (and any in-flight refresh) that
+// the session is gone, so all tabs converge to logged-out (F-02).
 export async function customerLogout(): Promise<void> {
   if (typeof window === "undefined") return;
   try {
@@ -211,6 +222,7 @@ export async function customerLogout(): Promise<void> {
   } finally {
     refreshInFlight = null;
     clearCustomerAccessToken();
+    markSessionAnonymous();
   }
 }
 

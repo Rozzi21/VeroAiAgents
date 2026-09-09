@@ -4,9 +4,9 @@ Tanggal: 9 Sep 2026. Scope: read-only, hanya frontend customer (`frontend/`).
 Backend hanya dibaca untuk memvalidasi kontrak (format fragment, `return_to`).
 Tidak ada kode yang diubah.
 
-**Status tindak lanjut (9 Sep 2026):** F-01, F-04, F-05, F-06, F-08 SUDAH
-diperbaiki (lihat §7). Masih terbuka: F-02 (race refresh lintas-tab), F-03
-(XSS pada localStorage — accepted risk), F-07 (retry 401 di apiFetch).
+**Status tindak lanjut (9 Sep 2026):** F-01, F-02, F-04, F-05, F-06, F-08 SUDAH
+diperbaiki (lihat §7 dan §8). Masih terbuka: F-03 (XSS pada localStorage —
+accepted risk), F-07 (retry 401 di apiFetch).
 
 ## 1. Flow Aktual Frontend
 
@@ -59,7 +59,7 @@ rusak; P2 = celah kualitas keamanan atau race nyata; P3 = kosmetik/UX.
   token + aman saat network gagal), tapi tidak terjangkau. Pertanyaan audit
   "apakah logout membersihkan state frontend" → implementasi ya, reachable tidak.
 
-### F-02 (P2) — Race refresh lintas-tab: dedup hanya per-tab
+### F-02 (P2) — [FIXED 9 Sep 2026] Race refresh lintas-tab: dedup hanya per-tab
 - File: `frontend/src/lib/api.ts:169-197`.
 - Bukti: `refreshInFlight` adalah variabel modul JS — hanya dedup dalam SATU tab.
   Dua tab dengan token kedaluwarsa yang sama-sama memanggil `POST /auth/refresh`
@@ -70,6 +70,15 @@ rusak; P2 = celah kualitas keamanan atau race nyata; P3 = kosmetik/UX.
   komponen dalam satu tab yang ter-dedup. Test `api.test.ts:77` hanya menguji
   concurrency dalam satu proses.
 - Dampak: logout mendadak saat multi-tab, bukan kebocoran token.
+- **Perbaikan 9 Sep 2026:** `frontend/src/lib/refreshCoordinator.ts`. Primary
+  `navigator.locks` serialisasi cross-tab dan browser melepas lock otomatis
+  bila holder crash/tutup. Fallback: mutex localStorage dengan TTL stale 40 dtk
+  (> timeout request 35 dtk), event `storage` untuk membangunkan waiter (tanpa
+  refresh polling), dan re-check token setelah lock. Hanya entry lock + marker
+  outcome `active`/`anonymous` disimpan; refresh token tetap cookie HttpOnly.
+  401 menulis marker `anonymous` sehingga waiter tidak mengirim refresh kedua.
+  Logout juga menulis marker; token dari refresh yang selesai sesudah logout
+  dibuang. Lihat test `frontend/tests/unit/lib/refreshCoordinator.test.ts`.
 
 ### F-03 (P2) — Token di localStorage rentan XSS (accepted risk, terdokumentasi)
 - File: `frontend/src/lib/authToken.ts:1-17`.
@@ -196,7 +205,9 @@ Gap:
 - Tidak ada test komponen untuk `OAuthReceiver` (fragment → replaceState →
   reload) dan `GoogleButton` (konstruksi `return_to`) — butuh jsdom/happy-dom.
 - Tidak ada test untuk alur `?auth_error=` (tampil + strip).
-- Tidak ada test race refresh LINTAS-tab (F-02 tidak tertangkap test saat ini).
+- ~~Tidak ada test race refresh LINTAS-tab~~ — terpenuhi 9 Sep 2026 oleh
+  `refreshCoordinator.test.ts` (serialisasi, reuse hasil, 401, logout race,
+  stale lock).
 - Tidak ada test F-05/F-06 (perilaku pasca-sukses di halaman auth).
 - Duplikat nama test di `api.test.ts:103` dan `:111` (isi sama) — kosmetik.
 - Tidak ada E2E (Playwright/dsb) sama sekali.
@@ -248,7 +259,40 @@ Validasi: `npm test` 81/81 pass, `tsc --noEmit` bersih, `next lint` bersih,
 `next build` sukses, `git diff --check` bersih.
 
 Catatan E2E lokal (revisi §6): logout kini bisa di-E2E lewat tombol di Sidebar;
-status login tampak dari nama/email user. Yang masih belum bisa di-E2E tanpa
-mock: consent Google sungguhan (butuh akun test) dan race refresh lintas-tab
-(F-02, belum diperbaiki).
+status login tampak dari nama/email user. F-02 kini bisa diuji E2E dengan dua
+context/tab browser yang tokennya kedaluwarsa bersamaan: satu `POST /auth/refresh`,
+keduanya active dengan access token sama; lalu skenario 401/logout-during-refresh
+harus membuat keduanya anonymous. Consent Google sungguhan tetap butuh akun test
+atau mock backend callback.
+
+## 8. Fix F-02 — Koordinasi Refresh Lintas-Tab (9 Sep 2026)
+
+File: `frontend/src/lib/refreshCoordinator.ts`, dipanggil oleh
+`ensureCustomerSession()` di `frontend/src/lib/api.ts`.
+
+1. **Expired bersamaan:** `refreshInFlight` tetap dedup dalam tab. Antar-tab,
+   `navigator.locks.request("vero-customer-refresh", ...)` memastikan hanya satu
+   request refresh. Waiter masuk critical section setelah holder selesai, baca
+   token access baru dari localStorage, lalu return `active` tanpa HTTP refresh.
+2. **Fallback browser:** bila Web Locks tidak ada, lock
+   `vero_customer_refresh_lock` di localStorage. Holder lock diidentifikasi per
+   tab; hanya owner boleh release. Lock >40 dtk stale dan dapat diambil tab lain.
+   Waiter memakai `storage` event + timeout batas; tidak ada polling request.
+3. **Tab crash/tutup:** Web Locks auto-release. Fallback holder crash → TTL stale
+   40 dtk (lebih besar dari timeout API 35 dtk); setelah deadline koordinasi 90
+   dtk, satu refresh direct mencegah hang permanen.
+4. **401:** coordinator purge access token dan tulis result marker anonymous.
+   Waiter melihat marker segar dan return anonymous tanpa refresh kedua. Marker
+   berisi status+timestamp saja, tidak ada refresh token atau access token.
+5. **Logout saat refresh:** `customerLogout()` clear token lalu tulis marker
+   anonymous. Holder refresh cek marker setelah respons; bila logout terjadi
+   selama request, token baru dibuang. `AuthStatus` mendengar `storage` event
+   untuk sinkron UI antar-tab.
+6. **Network failure:** tidak ada marker anonymous dan token tidak dipurge;
+   refresh berikutnya boleh retry, mempertahankan behavior existing.
+
+Test `refreshCoordinator.test.ts`: no-contention, 2 caller concurrent satu
+refresh, 401 propagation, network retry, logout race, owner release, stale lock,
+corrupt entry, dan deadline lock wedged. Validasi final: `npm test` 90/90 pass,
+`npx tsc --noEmit`, `npm run lint`, `npm run build`, `git diff --check` bersih.
 

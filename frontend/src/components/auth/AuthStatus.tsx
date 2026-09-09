@@ -27,7 +27,7 @@ export function AuthStatus() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const resolve = async () => {
       if ((await ensureCustomerSession()) !== "active") {
         if (!cancelled) setState({ status: "anonymous" });
         return;
@@ -40,9 +40,20 @@ export function AuthStatus() {
         // anonymous UI instead of showing a stale identity.
         if (!cancelled) setState({ status: "anonymous" });
       }
-    })();
+    };
+    resolve();
+    // Cross-tab sync (F-02): a login, logout, refresh, or its result marker in
+    // ANOTHER tab rewrites the vero_customer_* keys and fires a storage event
+    // here — re-resolve so this tab's UI converges to the same auth state.
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key.startsWith("vero_customer_")) {
+        resolve();
+      }
+    };
+    window.addEventListener("storage", onStorage);
     return () => {
       cancelled = true;
+      window.removeEventListener("storage", onStorage);
     };
   }, []);
 
