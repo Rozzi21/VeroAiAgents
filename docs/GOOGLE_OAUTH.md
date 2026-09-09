@@ -628,7 +628,7 @@ audit dependency frontend, dan pertimbangkan token binding. Lihat
 
 ### 10.1 Prasyarat
 
-- Backend berjalan di port `8080` (`go run ./cmd/server`), frontend di `3000`
+- Backend berjalan di port `8081` (`go run ./cmd/server`), frontend di `3000`
   (`npm run dev`), PostgreSQL aktif (`docker compose up -d` atau instance lokal).
 - Akun Google dengan akses ke Google Cloud Console.
 
@@ -642,7 +642,7 @@ audit dependency frontend, dan pertimbangkan token binding. Lihat
    GOOGLE_OAUTH_ENABLED=true
    GOOGLE_CLIENT_ID=<dari console>
    GOOGLE_CLIENT_SECRET=<dari console>
-   GOOGLE_REDIRECT_URI=http://localhost:8080/api/v1/auth/google/callback
+   GOOGLE_REDIRECT_URI=http://localhost:8081/api/v1/auth/google/callback
    GOOGLE_OAUTH_FRONTEND_URL=http://localhost:3000
    ```
    (Bila tidak mau set `GOOGLE_LINK_REDIRECT_URI`, ia diturunkan otomatis dari

@@ -1256,7 +1256,7 @@ Verifikasi: `go build ./...` + `go vet` + `gofmt` bersih.
 Dua lapis perbaikan:
 
 1. `getAuthChannel().onmessage` kini memvalidasi pesan secara ketat sebelum mengadopsi token: pesan harus object, `type === "token_refreshed"`, `access_token` string non-kosong, dan `expires_at` number finite > 0. Pesan crafted dari tab terkompromosi ditolak, sehingga localStorage tab lain tidak bisa disuntik token palsu.
-2. Kedua `next.config.mjs` kini mengirim header keamanan di semua route: `Content-Security-Policy` (default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' untuk kompatibilitas Next.js dev; style-src 'self' 'unsafe-inline'; img/connect-src mengizinkan backend `:8080` dan WebSocket localhost; object-src 'none'; frame-ancestors 'none'; tanpa `upgrade-insecure-requests` agar dev lokal HTTP tetap bisa memanggil `localhost:8080`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, dan `Permissions-Policy` (camera/mic/geo off). CSP mempersempit permukaan XSS pencurian token dari `localStorage`. Untuk production dengan HTTPS, pertimbangkan menghapus `'unsafe-eval'`, mengganti `ws://` dengan `wss://`, dan menambahkan `upgrade-insecure-requests`.
+2. Kedua `next.config.mjs` kini mengirim header keamanan di semua route: `Content-Security-Policy` (default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' untuk kompatibilitas Next.js dev; style-src 'self' 'unsafe-inline'; img/connect-src mengizinkan backend `:8081` dan WebSocket localhost; object-src 'none'; frame-ancestors 'none'; tanpa `upgrade-insecure-requests` agar dev lokal HTTP tetap bisa memanggil `localhost:8081`), `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, dan `Permissions-Policy` (camera/mic/geo off). CSP mempersempit permukaan XSS pencurian token dari `localStorage`. Untuk production dengan HTTPS, pertimbangkan menghapus `'unsafe-eval'`, mengganti `ws://` dengan `wss://`, dan menambahkan `upgrade-insecure-requests`.
 
 Catatan: access token masih di `localStorage` (trade-off DX vs keamanan; refresh token tetap cookie HttpOnly). Migrasi penuh ke cookie HttpOnly + BFF tetap menjadi opsi hardening lanjutan.
 
@@ -1269,7 +1269,7 @@ Verifikasi: `tsc --noEmit` bersih di kedua frontend (`backoffice-frontend` exit 
 Perbaikan:
 
 1. `backend/Dockerfile` runtime sekarang memakai user non-root `app`; uploads dir dibuat dan dimiliki `app`.
-2. `backend/docker-compose.yml` menghapus `network_mode: host`, memakai bridge network + `ports: "8080:8080"`, `host.docker.internal` untuk DB host lokal, named volume `uploads_data`, dan placeholder password via env.
+2. `backend/docker-compose.yml` menghapus `network_mode: host`, memakai bridge network + `ports: "8081:8081"`, `host.docker.internal` untuk DB host lokal, named volume `uploads_data`, dan placeholder password via env.
 3. `backend/.dockerignore` mencegah `.env`, uploads, git metadata, log/temp masuk build context; Dockerfile tidak lagi menyalin `.env.example` ke image.
 4. `.gitignore` mengabaikan isi `backend/uploads/*` dan hanya mempertahankan `backend/uploads/.gitkeep`; file uploads lama dihapus dari index Git tanpa menghapus file lokal.
 5. `backend/.env.example` mengganti password dev lama `password_aman` menjadi placeholder `change_me_dev_password` dan menghapus typo `ds`.

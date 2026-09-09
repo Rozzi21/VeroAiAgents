@@ -2,7 +2,7 @@
 
 Dokumentasi seluruh endpoint HTTP backend Vero Travel Agents. Backend memakai Gin dan mengembalikan envelope respons seragam untuk semua endpoint.
 
-- Base URL (dev): `http://localhost:8080`
+- Base URL (dev): `http://localhost:8081`
 - Definisi rute: [backend/internal/routes/routes.go](../../backend/internal/routes/routes.go)
 - Handler: [backend/internal/handlers/handlers.go](../../backend/internal/handlers/handlers.go)
 - OpenAPI 3.1: [backend/internal/handlers/docs.go](../../backend/internal/handlers/docs.go) (live di `/openapi.json`, UI di `/docs`)

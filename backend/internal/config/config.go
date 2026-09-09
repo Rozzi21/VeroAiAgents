@@ -74,10 +74,6 @@ type Config struct {
 	GoogleLinkRedirectURI  string
 	GoogleOAuthFrontendURL string
 
-	// TrustedProxies is the list of reverse proxies that are trusted when
-	// resolving the real client IP (X-Forwarded-For). Empty disables proxy
-	// trust, which is the safest default for dev. Set to the real reverse proxy
-	// CIDR(s) in production (SEC-14).
 	TrustedProxies []string
 }
 
@@ -90,7 +86,7 @@ func Load() Config {
 
 	cfg := Config{
 		AppEnv:               getEnv("APP_ENV", "development"),
-		Port:                 getEnv("PORT", "8080"),
+		Port:                 getEnv("PORT", "8081"),
 		DatabaseHost:         getEnv("DATABASE_HOST", "localhost"),
 		DatabasePort:         getEnv("DATABASE_PORT", "5432"),
 		DatabaseUser:         getEnv("DATABASE_USER", "vero_user"),
@@ -129,7 +125,7 @@ func Load() Config {
 		// GOOGLE_REDIRECT_URI is the canonical OAuth2 name. GOOGLE_REDIRECT_URL
 		// is accepted as an alias fallback for operator convenience (23 Agu
 		// 2026); URI wins when both are set.
-		GoogleRedirectURI:      getEnvFirst([]string{"GOOGLE_REDIRECT_URI", "GOOGLE_REDIRECT_URL"}, "http://localhost:8080/api/v1/auth/google/callback"),
+		GoogleRedirectURI:      getEnvFirst([]string{"GOOGLE_REDIRECT_URI", "GOOGLE_REDIRECT_URL"}, "http://localhost:8081/api/v1/auth/google/callback"),
 		GoogleOAuthFrontendURL: getEnv("GOOGLE_OAUTH_FRONTEND_URL", "http://localhost:3000"),
 	}
 

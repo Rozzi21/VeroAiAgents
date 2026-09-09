@@ -21,7 +21,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const BACKEND_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
 
 export async function POST(request: NextRequest) {
   const body = await request.text();
@@ -44,8 +44,7 @@ export async function POST(request: NextRequest) {
     return new Response(
       JSON.stringify({
         success: false,
-        message:
-          "Tidak dapat terhubung ke server. Pastikan backend berjalan di http://localhost:8080.",
+        message: `Tidak dapat terhubung ke server. Pastikan backend berjalan di ${BACKEND_URL}.`,
         data: null,
       }),
       {

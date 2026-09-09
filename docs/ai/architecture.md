@@ -8,7 +8,7 @@ VeroAiTravelAgents adalah **monorepo** berisi tiga aplikasi independen yang di-d
 
 | Aplikasi | Stack | Peran | Port dev |
 |---|---|---|---|
-| `backend/` | Go 1.25.5, Gin, GORM, PostgreSQL 16 | Orkestrator inti: REST API, chat AI, booking, payment, SSE | `8080` |
+| `backend/` | Go 1.25.5, Gin, GORM, PostgreSQL 16 | Orkestrator inti: REST API, chat AI, booking, payment, SSE | `8081` |
 | `frontend/` | Next.js 14 (App Router), React 18, TS, Tailwind | UI chat AI untuk pelanggan/tamu | `3000` |
 | `backoffice-frontend/` | Next.js 14, React 18, TS, Tailwind | Dashboard operator/admin kelola paket trip | `3000` (jalankan di `3001` agar tidak bentrok) |
 
@@ -18,7 +18,7 @@ Tidak ada workspace manager pemersatu (tidak ada root `package.json`/`go.work`).
 flowchart LR
   Customer["Customer (browser)"] --> FE["frontend :3000"]
   Operator["Operator/Admin (browser)"] --> BO["backoffice-frontend :3001"]
-  FE -->|"/api proxy"| BE["backend :8080"]
+  FE -->|"/api proxy"| BE["backend :8081"]
   BO -->|"/api proxy"| BE
   BE --> PG[("PostgreSQL 16")]
   BE -->|"OpenAI-compatible"| AI["AI provider (OpenAI-compatible)"]

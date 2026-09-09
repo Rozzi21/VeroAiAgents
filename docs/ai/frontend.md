@@ -1,6 +1,6 @@
 # Frontend
 
-Dokumen ini mencakup KEDUA aplikasi Next.js di repo: `frontend/` (customer chat) dan `backoffice-frontend/` (operator/admin TravelOS). Keduanya Next.js 14 App Router + React 18 + TypeScript + TailwindCSS, dan sama-sama mem-proxy `/api/*` ke backend `:8080`.
+Dokumen ini mencakup KEDUA aplikasi Next.js di repo: `frontend/` (customer chat) dan `backoffice-frontend/` (operator/admin TravelOS). Keduanya Next.js 14 App Router + React 18 + TypeScript + TailwindCSS, dan sama-sama mem-proxy `/api/*` ke backend lokal `:8081`.
 
 > Untuk endpoint backend yang dipanggil, lihat [api.md](api.md). Untuk arsitektur sistem lihat [architecture.md](architecture.md).
 
@@ -227,7 +227,7 @@ Detail lengkap di [backend.md](backend.md) dan [api.md](api.md). Ringkasnya:
 
 | Pola | Implementasi |
 |---|---|
-| Proxy API | `next.config.mjs` rewrite `/api/:path*` → `http://localhost:8080/api/:path*` |
+| Proxy API | `next.config.mjs` rewrite `/api/:path*` → `http://localhost:8081/api/:path*` |
 | Base URL | Kosong di browser (same-origin proxy), `NEXT_PUBLIC_API_BASE_URL` di server |
 | Envelope-aware fetch | `apiFetch()` membaca `{ success, message, data }`, melempar `Error(message)` saat gagal |
 | Tipe `TripPackage` | Didefinisikan terpisah di tiap `lib/api.ts` (TIDAK di-share antar app) |

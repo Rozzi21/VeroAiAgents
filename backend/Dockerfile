@@ -22,5 +22,5 @@ RUN mkdir -p /app/uploads/trips && chown -R app:app /app
 
 USER app
 
-EXPOSE 8080
+EXPOSE 8081
 CMD ["/app/vero-travel-api"]

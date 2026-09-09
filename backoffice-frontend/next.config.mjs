@@ -1,8 +1,7 @@
 /** @type {import('next').NextConfig} */
-// Base URL backend untuk proxy rewrite + CSP. Default dev :8080; bisa di-override
-// lewat .env.local (mis. NEXT_PUBLIC_API_BASE_URL=http://localhost:8081 bila port
-// 8080 sedang dipakai proses lain).
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+// Base URL backend untuk proxy rewrite + CSP. Override lewat .env.local untuk
+// target non-local tanpa mengubah konfigurasi production.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
 
 const nextConfig = {
   async rewrites() {

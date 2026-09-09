@@ -8,11 +8,11 @@ VeroAiTravelAgents ("Vero Travel" / "TravelOS") adalah platform travel berbasis 
 
 | Aplikasi | Stack | Peran | Port dev |
 |---|---|---|---|
-| `backend/` | Go 1.25.5, Gin, GORM, PostgreSQL 16 | REST API + orkestrasi AI + realtime SSE | 8080 |
+| `backend/` | Go 1.25.5, Gin, GORM, PostgreSQL 16 | REST API + orkestrasi AI + realtime SSE | 8081 |
 | `frontend/` | Next.js 14, React 18, TypeScript, Tailwind | Chat AI untuk pelanggan/tamu | 3000 |
 | `backoffice-frontend/` | Next.js 14, React 18, TypeScript, Tailwind | Dashboard admin/operator kelola paket | 3001 (konvensi) |
 
-Backend adalah inti sistem. Kedua frontend memanggilnya lewat proxy `/api/*` -> `localhost:8080`.
+Backend adalah inti sistem. Kedua frontend memanggilnya lewat proxy `/api/*` -> `localhost:8081`.
 
 ## Struktur Folder Penting
 
@@ -63,7 +63,7 @@ VeroAiTravelAgents/
 
 ## Entry Point Utama
 
-- **Backend**: `backend/cmd/server/main.go` - `main()` memuat config, validasi, connect DB, AutoMigrate, wiring DI, daftar rute, jalankan server di `:8080` dengan graceful shutdown.
+- **Backend**: `backend/cmd/server/main.go` - `main()` memuat config, validasi, connect DB, AutoMigrate, wiring DI, daftar rute, jalankan server di port `PORT` (`8081` untuk konfigurasi lokal) dengan graceful shutdown.
 - **Frontend customer**: `frontend/src/app/page.tsx` - render `ChatInterface`.
 - **Backoffice**: `backoffice-frontend/src/app/page.tsx` dibungkus `app-shell.tsx` (guard auth).
 

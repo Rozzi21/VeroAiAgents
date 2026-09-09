@@ -28,7 +28,7 @@ services:
     container_name: vero-travel-api
     # SEC-20: no host networking; publish only API port to the host.
     ports:
-      - "8080:8080"
+      - "8081:8081"
     # Default bridge network can reach host services via host.docker.internal.
     # If using docker-db profile, set DATABASE_HOST=postgres in backend/.env.
     extra_hosts:
@@ -36,6 +36,7 @@ services:
     env_file:
       - .env
     environment:
+      PORT: "8081"
       # Override .env host-style defaults inside the container. For docker-db
       # profile set DOCKER_DATABASE_HOST=postgres (or DOCKER_DATABASE_URL).
       DATABASE_HOST: ${DOCKER_DATABASE_HOST:-host.docker.internal}
@@ -45,7 +46,7 @@ services:
       - uploads_data:/app/uploads
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/health"]
       interval: 30s
       timeout: 5s
       retries: 3

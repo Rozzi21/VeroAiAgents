@@ -70,14 +70,14 @@ go mod tidy
 go run ./cmd/server
 ```
 
-API berjalan di `http://localhost:8080`.
+API berjalan di `http://localhost:8081`.
 
 ## Konfigurasi Environment
 
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `APP_ENV` | `development` | Mode aplikasi (`production` mengaktifkan cookie secure by default) |
-| `PORT` | `8080` | Port HTTP |
+| `PORT` | `8081` | Port HTTP |
 | `DATABASE_HOST` | `localhost` | Host PostgreSQL |
 | `DATABASE_PORT` | `5432` | Port PostgreSQL |
 | `DATABASE_USER` | `vero_user` | User DB |
@@ -106,7 +106,7 @@ API berjalan di `http://localhost:8080`.
 
 ## Endpoint API
 
-Semua path diawali `http://localhost:8080`. Tanda 🔒 berarti butuh `Authorization: Bearer <access_token>`; (op/admin) berarti butuh peran operator atau admin.
+Semua path diawali `http://localhost:8081`. Tanda 🔒 berarti butuh `Authorization: Bearer <access_token>`; (op/admin) berarti butuh peran operator atau admin.
 
 ### Health
 - `GET /health` — status service

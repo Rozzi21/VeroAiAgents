@@ -34,10 +34,10 @@ Agar dokumentasi jujur, berikut elemen UI yang tampil tapi belum tersambung ke b
 
 ## Konfigurasi & Proxy API
 
-- Permintaan client memakai path relatif `/api/...`. `next.config.mjs` mem-proxy `/api/:path*` ke `http://localhost:8080/api/:path*`, sehingga aman dari CORS saat dev.
-- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8080`) dipakai untuk membangun URL aset gambar paket dan untuk pemanggilan sisi server.
+- Permintaan client memakai path relatif `/api/...`. `next.config.mjs` mem-proxy `/api/:path*` ke `http://localhost:8081/api/:path*`, sehingga aman dari CORS saat dev.
+- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8081`) dipakai untuk membangun URL aset gambar paket dan untuk pemanggilan sisi server.
 
-Pastikan backend berjalan di `http://localhost:8080` sebelum menjalankan frontend.
+Pastikan backend berjalan di `http://localhost:8081` sebelum menjalankan frontend.
 
 ## Menjalankan
 

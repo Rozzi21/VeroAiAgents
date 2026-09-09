@@ -4,7 +4,7 @@ Dashboard operator/admin untuk mengelola katalog paket trip ("TravelOS"). Operat
 
 - Framework: Next.js 14 (App Router) + React 18 + TypeScript
 - Styling: TailwindCSS, ikon lucide-react
-- Port dev: `http://localhost:3000`
+- Port dev: `http://localhost:3001`
 
 ## Fitur Aktif
 
@@ -45,10 +45,10 @@ Agar dokumentasi jujur:
 
 ## Konfigurasi & Proxy API
 
-- Permintaan client memakai path relatif `/api/...`. `next.config.mjs` mem-proxy `/api/:path*` ke `http://localhost:8080/api/:path*`.
-- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8080`) dipakai untuk membangun URL aset dan pemanggilan sisi server.
+- Permintaan client memakai path relatif `/api/...`. `next.config.mjs` mem-proxy `/api/:path*` ke `http://localhost:8081/api/:path*`.
+- `NEXT_PUBLIC_API_BASE_URL` (default `http://localhost:8081`) dipakai untuk membangun URL aset dan pemanggilan sisi server.
 
-Pastikan backend berjalan di `http://localhost:8080`, dan tersedia akun dengan peran `operator` atau `admin`.
+Pastikan backend berjalan di `http://localhost:8081`, dan tersedia akun dengan peran `operator` atau `admin`.
 
 ## Menjalankan
 
@@ -57,7 +57,7 @@ npm install
 npm run dev
 ```
 
-Buka `http://localhost:3000` lalu login di `/login`.
+Buka `http://localhost:3001` lalu login di `/login`.
 
 Skrip lain:
 

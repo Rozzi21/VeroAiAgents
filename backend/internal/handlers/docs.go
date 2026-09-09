@@ -19,7 +19,7 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 				"Temporary note: PAYMENTS_ENABLED defaults false, payment routes return 503, " +
 				"and the create_payment MCP tool is intentionally disabled/unregistered from the active chat workflow.",
 		},
-		"servers": []gin.H{{"url": "http://localhost:8080", "description": "Local development"}},
+		"servers": []gin.H{{"url": "http://localhost:8081", "description": "Local development"}},
 		"tags": []gin.H{
 			{"name": "Health", "description": "Service and database health"},
 			{"name": "Auth", "description": "Registration, login, refresh, logout, profile"},

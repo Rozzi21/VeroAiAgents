@@ -107,9 +107,22 @@ func TestLoadThenValidateRejectsGuestCookieSameSiteTypo(t *testing.T) {
 // cookie, Strict for the refresh cookie) pass their own validation.
 func TestLoadDefaultsAreValid(t *testing.T) {
 	t.Setenv("APP_ENV", "development")
+	t.Setenv("PORT", "")
 	t.Setenv("JWT_COOKIE_SAME_SITE", "")
 	t.Setenv("GUEST_COOKIE_SAME_SITE", "")
+	t.Setenv("GOOGLE_REDIRECT_URI", "")
+	t.Setenv("GOOGLE_REDIRECT_URL", "")
+	t.Setenv("GOOGLE_LINK_REDIRECT_URI", "")
 	cfg := Load()
+	if cfg.Port != "8081" {
+		t.Fatalf("local port default changed to %q", cfg.Port)
+	}
+	if cfg.GoogleRedirectURI != "http://localhost:8081/api/v1/auth/google/callback" {
+		t.Fatalf("Google login callback default changed to %q", cfg.GoogleRedirectURI)
+	}
+	if cfg.GoogleLinkRedirectURI != "http://localhost:8081/api/v1/auth/google/link/callback" {
+		t.Fatalf("Google link callback default changed to %q", cfg.GoogleLinkRedirectURI)
+	}
 	if cfg.GuestCookieSameSite != "Lax" {
 		t.Fatalf("guest cookie default changed to %q — the Google claim needs Lax or None", cfg.GuestCookieSameSite)
 	}

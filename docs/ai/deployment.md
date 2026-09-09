@@ -19,7 +19,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `APP_ENV` | `development` | `production` mengaktifkan gin release mode, cookie secure default, dan guard `Config.Validate()` |
-| `PORT` | `8080` | Port HTTP |
+| `PORT` | `8081` | Port HTTP lokal; production tetap wajib mengatur env sesuai deployment |
 
 ### Database
 | Variabel | Default | Keterangan |
@@ -77,7 +77,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `GOOGLE_OAUTH_ENABLED` | `false` | Feature flag. Endpoint `/auth/google/*` membalas 404 saat false |
 | `GOOGLE_CLIENT_ID` | _(kosong)_ | Client ID OAuth dari Google Cloud Console |
 | `GOOGLE_CLIENT_SECRET` | _(kosong)_ | Secret server. **Wajib di production saat `GOOGLE_OAUTH_ENABLED=true`** — `Config.Validate()` menolak start bila kosong (pola SEC-4) |
-| `GOOGLE_REDIRECT_URI` | `http://localhost:8080/api/v1/auth/google/callback` | Harus terdaftar PERSIS di Google Cloud Console (Authorized redirect URIs). Production: tolak start bila masih localhost saat enabled. Alias `GOOGLE_REDIRECT_URL` diterima sebagai fallback (23 Agu 2026); `GOOGLE_REDIRECT_URI` menang bila keduanya di-set |
+| `GOOGLE_REDIRECT_URI` | `http://localhost:8081/api/v1/auth/google/callback` | Harus terdaftar PERSIS di Google Cloud Console (Authorized redirect URIs). Production: tolak start bila masih localhost saat enabled. Alias `GOOGLE_REDIRECT_URL` diterima sebagai fallback (23 Agu 2026); `GOOGLE_REDIRECT_URI` menang bila keduanya di-set |
 | `GOOGLE_LINK_REDIRECT_URI` | derive dari `GOOGLE_REDIRECT_URI` (`…/auth/google/callback` → `…/auth/google/link/callback`) | Redirect URI alur "Link Google Account" (24 Agu 2026). Harus terdaftar PERSIS di Google Cloud Console juga. Production: ikut ditolak bila localhost saat enabled |
 | `GOOGLE_OAUTH_FRONTEND_URL` | `http://localhost:3000` | Origin FE untuk redirect final + allowlist `return_to`. Jangan ambil dari request (open-redirect guard). Production: tolak localhost saat enabled |
 | `TRUSTED_PROXIES` | _(kosong)_ | Daftar CIDR reverse proxy tepercaya untuk resolusi IP klien via `X-Forwarded-For`. Kosong berarti tidak mempercayai proxy sama sekali (default dev). Wajib diisi CIDR load balancer/nginx di production agar rate limit per-IP tidak di-bypass (SEC-14) |
@@ -88,7 +88,7 @@ Kedua Next.js app memakai satu variabel publik opsional:
 
 | Variabel | Default | Dipakai untuk |
 |---|---|---|
-| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8080` | Base URL aset gambar + pemanggilan sisi server. Request browser tetap relatif (`/api/...`) lewat proxy `next.config.mjs` |
+| `NEXT_PUBLIC_API_BASE_URL` | `http://localhost:8081` | Base URL aset gambar + pemanggilan sisi server. Request browser tetap relatif (`/api/...`) lewat proxy `next.config.mjs` |
 
 ## Build & Release Flow
 
@@ -108,7 +108,7 @@ cd backend
 docker compose up --build
 ```
 
-Pastikan Postgres lokal sudah jalan di `:5432` dan kredensial di `.env` cocok. API container memakai bridge network dan memetakan `8080:8080`; compose mengatur default `DATABASE_HOST=host.docker.internal`. Jangan gunakan `network_mode: host`.
+Pastikan Postgres lokal sudah jalan di `:5432` dan kredensial di `.env` cocok. API container memakai bridge network dan memetakan `8081:8081`; compose mengatur default `DATABASE_HOST=host.docker.internal`. Jangan gunakan `network_mode: host`.
 
 Jika ingin Postgres bawaan Docker (port host `:5433`), jalankan dengan profile:
 
@@ -126,7 +126,7 @@ Panduan lengkap di `backend/docs/server-deploy.md`:
 4. `go build -o vero-travel-api ./cmd/server`.
 5. Pasang systemd unit dari `backend/scripts/vero-travel-api.service`.
 6. `systemctl enable --now vero-travel-api`.
-7. Untuk production: taruh Nginx/Caddy di depan untuk HTTPS, jangan ekspos `:8080` langsung.
+7. Untuk production: taruh Nginx/Caddy di depan untuk HTTPS, jangan ekspos port backend langsung.
 
 ### Frontend (kedua app)
 ```bash
@@ -135,7 +135,7 @@ npm run build
 npm run start    # production
 # atau npm run dev untuk development
 ```
-Keduanya default ke port 3000 — jalankan salah satu dengan `--port` berbeda (mis. backoffice di 3001) untuk menghindari bentrok.
+Script `frontend` mengunci port 3000 dan `backoffice-frontend` mengunci port 3001.
 
 ## Infrastruktur
 
@@ -146,7 +146,7 @@ flowchart LR
     BO[Backoffice FE :3001]
   end
   subgraph server [Server]
-    API[vero-travel-api :8080]
+    API[vero-travel-api :8081]
     PG[(PostgreSQL 16 :5432)]
     UP[/uploads volume/]
   end

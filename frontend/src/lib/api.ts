@@ -7,7 +7,7 @@ import {
 } from "./authToken.ts";
 
 const SERVER_API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8080";
+  process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
 
 export const API_BASE_URL = SERVER_API_BASE_URL;
 
@@ -299,7 +299,7 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}) {
       );
     }
     throw new Error(
-      "Tidak dapat terhubung ke server. Pastikan backend berjalan di http://localhost:8080."
+      `Tidak dapat terhubung ke server. Pastikan backend berjalan di ${SERVER_API_BASE_URL}.`
     );
   } finally {
     clearTimeout(timeoutId);
@@ -378,7 +378,7 @@ export async function streamChat(
       return;
     }
     handlers.onError(
-      "Tidak dapat terhubung ke server. Pastikan backend berjalan di http://localhost:8080."
+      `Tidak dapat terhubung ke server. Pastikan backend berjalan di ${SERVER_API_BASE_URL}.`
     );
     return;
   }
