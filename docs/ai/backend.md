@@ -14,6 +14,13 @@ Dokumen ini menjelaskan lapisan backend Go: service layer, logika bisnis inti, m
 | `backend/internal/mcp/tools.go` | Katalog definisi tool MCP |
 | `backend/internal/events/bus.go` | Event bus in-memory untuk SSE |
 | `backend/internal/auth/` | JWTService, cookie refresh, audit log, Google OIDC client (`google.go`) |
+| `backend/internal/telemetry/chat.go` | P0.1 chat telemetry: stage/LLM/tool/SSE timing, provider usage, Prometheus + structured log, failure isolation |
+
+### Observability chat P0.1 (10 Sep 2026)
+
+`middlewares.ChatTelemetry()` aktif khusus `POST /api/v1/chat`, setelah `RequestID()`. Context membawa trace sampai handler → service → AI client/tool. `X-Request-ID` menjadi korelasi log backend ↔ request browser, tetapi tidak pernah menjadi label Prometheus. Label metric terbatas pada stage/status/round/mode/tool/milestone; tidak ada `user_id`, `session_id`, prompt, email, authorization, token, atau PII.
+
+Metric: `chat_requests_total`, `chat_request_duration_seconds`, `chat_stage_duration_seconds`, `chat_llm_round_duration_seconds`, `chat_llm_ttfb_seconds`, `chat_llm_tokens`, `chat_tool_duration_seconds`, `chat_milestone_seconds`. Structured log bernama `chat_telemetry` memberi sampel per request dengan nilai unavailable sebagai `null`. Provider usage tidak diestimasi: hanya field usage aktual yang dicatat. Instrumentation tidak mengubah response payload, call count LLM, memory-summary timing, atau persistence assistant+recommendation sebelum `done`; panic exporter direcover agar business flow tetap berjalan.
 
 ## Service Layer
 

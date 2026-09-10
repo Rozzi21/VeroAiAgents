@@ -75,6 +75,7 @@ func main() {
 	}
 	router.Use(
 		middlewares.RequestID(),
+		middlewares.ChatTelemetry(),
 		middlewares.SecureHeaders(),
 		middlewares.CORS(cfg.CORSAllowedOrigins),
 		middlewares.RateLimit(),

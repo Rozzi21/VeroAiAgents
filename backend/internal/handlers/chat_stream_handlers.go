@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 )
 
 // PERF-1 (3 Agu 2026): streaming chat over Server-Sent Events.
@@ -81,6 +82,10 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 		if err := rc.Flush(); err != nil {
 			return false
 		}
+		telemetry.Milestone(ctx, "first_sse_write")
+		if eventType == "delta" {
+			telemetry.Milestone(ctx, "first_delta")
+		}
 		return true
 	}
 
@@ -105,5 +110,10 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 	// Terminal event carries the full result (minus SessionID, which is
 	// json:"-"). The client uses `done` to finalize the message (packages,
 	// recommendation flags, workflow) exactly like the non-stream response.
-	_ = send("done", result)
+	if send("done", result) {
+		telemetry.Milestone(ctx, "done")
+		if trace := telemetry.FromContext(ctx); trace != nil {
+			trace.Complete(true)
+		}
+	}
 }

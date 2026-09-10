@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 )
 
 // maxAIResponseBytes caps the AI provider response body we will decode (SEC-9).
@@ -87,6 +89,16 @@ type CompletionResponse struct {
 	ToolCalls []ToolCall             `json:"tool_calls,omitempty"`
 	Metadata  map[string]interface{} `json:"metadata,omitempty"`
 	RawStatus int                    `json:"raw_status"`
+	Usage     Usage                  `json:"-"`
+	TTFB      *time.Duration         `json:"-"`
+}
+
+// Usage contains provider-reported values only. Nil means unavailable; no
+// tokenizer estimate is substituted.
+type Usage struct {
+	InputTokens       *int64
+	OutputTokens      *int64
+	CachedInputTokens *int64
 }
 
 func NewClient(apiKey, baseURL, model string, temperature float64, timeout time.Duration) *Client {
@@ -110,15 +122,23 @@ func NewClient(apiKey, baseURL, model string, temperature float64, timeout time.
 }
 
 func (c *Client) Generate(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
+	finishTelemetry := telemetry.StartLLM(ctx)
+	status := "failure"
+	var result CompletionResponse
+	defer func() {
+		finishTelemetry(status, result.TTFB, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CachedInputTokens)
+	}()
 	if c.APIKey == "" {
-		return CompletionResponse{
+		result = CompletionResponse{
 			Text: "AI API key is empty; using local travel assistant fallback response.",
 			Metadata: map[string]interface{}{
 				"mode":  "local_fallback",
 				"model": c.Model,
 			},
 			RawStatus: http.StatusOK,
-		}, nil
+		}
+		status = "success"
+		return result, nil
 	}
 
 	payload := map[string]interface{}{
@@ -141,11 +161,13 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 	httpReq.Header.Set("Authorization", "Bearer "+c.APIKey)
 	httpReq.Header.Set("Content-Type", "application/json")
 
+	requestStarted := time.Now()
 	res, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return CompletionResponse{}, err
 	}
 	defer res.Body.Close()
+	ttfb := time.Since(requestStarted)
 
 	// SEC-9: cap how much of the provider response we will read/decode so a
 	// runaway or malicious response cannot exhaust memory.
@@ -160,14 +182,55 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 		ToolCalls: extractToolCalls(raw),
 		Metadata:  raw,
 		RawStatus: res.StatusCode,
+		Usage:     extractUsage(raw),
+		TTFB:      &ttfb,
 	}
+	result = out
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return out, fmt.Errorf("ai provider returned status %d", res.StatusCode)
 	}
 	if len(out.ToolCalls) == 0 && out.Text == "" {
 		out.Text = "AI provider returned an empty text response."
 	}
+	status = "success"
 	return out, nil
+}
+
+func extractUsage(raw map[string]interface{}) Usage {
+	usageMap, _ := raw["usage"].(map[string]interface{})
+	if usageMap == nil {
+		return Usage{}
+	}
+	usage := Usage{
+		InputTokens:  integerPointer(usageMap["prompt_tokens"]),
+		OutputTokens: integerPointer(usageMap["completion_tokens"]),
+	}
+	if usage.InputTokens == nil {
+		usage.InputTokens = integerPointer(usageMap["input_tokens"])
+	}
+	if usage.OutputTokens == nil {
+		usage.OutputTokens = integerPointer(usageMap["output_tokens"])
+	}
+	if details, ok := usageMap["prompt_tokens_details"].(map[string]interface{}); ok {
+		usage.CachedInputTokens = integerPointer(details["cached_tokens"])
+	}
+	if usage.CachedInputTokens == nil {
+		usage.CachedInputTokens = integerPointer(usageMap["cached_tokens"])
+	}
+	return usage
+}
+
+func integerPointer(value interface{}) *int64 {
+	switch number := value.(type) {
+	case float64:
+		result := int64(number)
+		return &result
+	case json.Number:
+		if result, err := number.Int64(); err == nil {
+			return &result
+		}
+	}
+	return nil
 }
 
 // extractToolCalls parses tool_calls from an OpenAI-compatible response.
@@ -292,6 +355,12 @@ func extractString(m map[string]interface{}, key string) (string, string) {
 //     A malicious/buggy provider could still stream forever, which is bounded
 //     by the request timeout above.
 func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDelta func(text string)) (CompletionResponse, error) {
+	finishTelemetry := telemetry.StartLLM(ctx)
+	status := "failure"
+	var result CompletionResponse
+	defer func() {
+		finishTelemetry(status, result.TTFB, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CachedInputTokens)
+	}()
 	// Fallback path mirrors Generate: no key -> single synthetic delta so the
 	// UX of the streaming handler stays identical (one delta + done event).
 	if c.APIKey == "" {
@@ -299,14 +368,16 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		if onDelta != nil {
 			onDelta(fallback)
 		}
-		return CompletionResponse{
+		result = CompletionResponse{
 			Text: fallback,
 			Metadata: map[string]interface{}{
 				"mode":  "local_fallback",
 				"model": c.Model,
 			},
 			RawStatus: http.StatusOK,
-		}, nil
+		}
+		status = "success"
+		return result, nil
 	}
 
 	payload := map[string]interface{}{
@@ -331,11 +402,13 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Accept", "text/event-stream")
 
+	requestStarted := time.Now()
 	res, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return CompletionResponse{}, err
 	}
 	defer res.Body.Close()
+	var ttfb *time.Duration
 
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		// Non-2xx stream responses usually carry a JSON error body, not SSE.
@@ -350,6 +423,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		reasoningText strings.Builder       // reasoning_content, NOT streamed to user
 		toolCalls     = map[int]*ToolCall{} // accumulate deltas keyed by tool index
 		metadata      = map[string]interface{}{}
+		usage         Usage
 		finish        string
 	)
 
@@ -399,6 +473,13 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 			// Skip malformed chunks rather than aborting the whole stream.
 			log.Printf("[ai] stream: skipping unparseable chunk: %v", err)
 			continue
+		}
+		if ttfb == nil {
+			value := time.Since(requestStarted)
+			ttfb = &value
+		}
+		if chunkUsage := extractUsage(chunk); chunkUsage.InputTokens != nil || chunkUsage.OutputTokens != nil || chunkUsage.CachedInputTokens != nil {
+			usage = chunkUsage
 		}
 
 		choices, ok := chunk["choices"].([]interface{})
@@ -454,7 +535,10 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		ToolCalls: finalizeToolCalls(toolCalls),
 		Metadata:  metadata,
 		RawStatus: res.StatusCode,
+		Usage:     usage,
+		TTFB:      ttfb,
 	}
+	result = out
 	if len(out.ToolCalls) == 0 && out.Text == "" {
 		// No content streamed; fall back to reasoning_content if the provider
 		// sent any (pure reasoning models). It was not streamed live, so the
@@ -465,6 +549,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 			out.Text = "AI provider returned an empty text response."
 		}
 	}
+	status = "success"
 	return out, nil
 }
 

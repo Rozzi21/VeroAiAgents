@@ -432,6 +432,10 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}) {
 // the final ChatResult (packages/recommendation flags), onError fires if the
 // stream fails mid-flight.
 export type ChatStreamHandlers = {
+	requestID?: string;
+	onRequestStart?: () => void;
+	onResponseHeaders?: (requestID: string) => void;
+	onFirstEvent?: () => void;
   onDelta: (text: string) => void;
   onDone: (result: ChatResponse) => void;
   onError: (message: string) => void;
@@ -466,6 +470,7 @@ export async function streamChat(
 ): Promise<void> {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
+	if (handlers.requestID) headers.set("X-Request-ID", handlers.requestID);
   // Attach the customer access token when present (same rule as apiFetch):
   // POST /chat accepts an optional Bearer token (OptionalAuth) so a signed-in
   // customer — password or Google — creates chat orders on their ACCOUNT,
@@ -477,6 +482,7 @@ export async function streamChat(
 
   let response: Response;
   try {
+		handlers.onRequestStart?.();
     response = await fetch(`${resolveApiBase()}${path}`, {
       ...options,
       method: "POST",
@@ -495,6 +501,7 @@ export async function streamChat(
     );
     return;
   }
+	handlers.onResponseHeaders?.(response.headers.get("X-Request-ID") ?? handlers.requestID ?? "");
 
   if (!response.ok || !response.body) {
     // Non-2xx streaming responses are not expected (errors surface as an SSE
@@ -520,6 +527,7 @@ export async function streamChat(
   let buffer = "";
   let receivedDone = false;
   let reportedError = false;
+	let receivedFirstEvent = false;
   const reportError = (message: string) => {
     if (reportedError || receivedDone) {
       return;
@@ -550,6 +558,10 @@ export async function streamChat(
           continue;
         }
         try {
+				if (!receivedFirstEvent) {
+					receivedFirstEvent = true;
+					handlers.onFirstEvent?.();
+				}
           if (event === "delta") {
             const parsed = JSON.parse(data) as { content?: string };
             if (parsed.content) {

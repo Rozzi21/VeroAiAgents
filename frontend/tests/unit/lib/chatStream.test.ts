@@ -214,3 +214,22 @@ test("the access token is attached so the backend sees an account, not a guest",
   const headers = new Headers(lastInit?.headers);
   assert.equal(headers.get("Authorization"), `Bearer ${token}`);
 });
+
+test("telemetry callbacks receive request lifecycle and correlation id", async () => {
+  const marks: string[] = [];
+  stubFetch(new Response(
+    `event: done\ndata: ${JSON.stringify({ message: "ok", show_recommendations: false, recommendation_reason: "" })}\n\n`,
+    { status: 200, headers: { "content-type": "text/event-stream", "x-request-id": "req-chat-1" } }
+  ));
+  await streamChat("/api/v1/chat", { prompt: "x", stream: true }, {
+    requestID: "req-chat-1",
+    onRequestStart: () => marks.push("request-start"),
+    onResponseHeaders: (id) => marks.push(`headers:${id}`),
+    onFirstEvent: () => marks.push("first-event"),
+    onDelta: () => {},
+    onDone: () => marks.push("done"),
+    onError: (error) => assert.fail(error),
+  });
+  assert.deepEqual(marks, ["request-start", "headers:req-chat-1", "first-event", "done"]);
+  assert.equal(new Headers(lastInit?.headers).get("X-Request-ID"), "req-chat-1");
+});

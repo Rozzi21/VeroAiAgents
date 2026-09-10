@@ -52,6 +52,7 @@ import {
   selectionSynced,
 } from "@/lib/packageSelection";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
+import { createChatTelemetry } from "@/lib/chatTelemetry";
 
 type ChatMessage = {
   id: string;
@@ -103,6 +104,9 @@ export default function ChatInterface() {
   // PERF-1: AbortController for the in-flight streaming chat request so the
   // user can cancel a slow/long generation (and navigations abort cleanly).
   const streamAbortRef = useRef<AbortController | null>(null);
+  const turnTelemetryByMessageRef = useRef(
+    new Map<string, ReturnType<typeof createChatTelemetry>>()
+  );
 
   // Keep a mutable copy of messages so stream callbacks don't close over the
   // stale array, avoiding the need to recreate callbacks on every render.
@@ -244,6 +248,8 @@ export default function ChatInterface() {
       }
       setPrompt("");
       setLoading(true);
+		  const chatTelemetry = createChatTelemetry();
+		  chatTelemetry.mark("submit");
 
       const userId = nextMessageId();
       setMessages((items) => [
@@ -259,6 +265,7 @@ export default function ChatInterface() {
       streamAbortRef.current = abort;
 
       const assistantId = nextMessageId();
+	  turnTelemetryByMessageRef.current.set(assistantId, chatTelemetry);
       // A stream can report one terminal failure (including EOF without done).
       // Keep finalization per-turn so a late callback cannot replace or append
       // the recovered message a second time.
@@ -283,12 +290,18 @@ export default function ChatInterface() {
         // endpoint and orders are created on their account, not limited by
         // the one-order guest policy. Anonymous users: resolves "anonymous"
         // and the request proceeds as a pure guest (unchanged).
-        await ensureCustomerSession();
+		await ensureCustomerSession();
+		chatTelemetry.mark("auth-ready");
         await streamChat(
           "/api/v1/chat",
           { prompt: text, stream: true },
           {
+			requestID: chatTelemetry.requestID,
+			onRequestStart: () => chatTelemetry.mark("request-start"),
+			onResponseHeaders: () => chatTelemetry.mark("response-headers"),
+			onFirstEvent: () => chatTelemetry.mark("first-sse-event"),
             onDelta: (fragment) => {
+			  chatTelemetry.mark("first-delta");
               const state = streamStateRef.current;
               if (!state.active || state.assistantId !== assistantId) {
                 return;
@@ -297,6 +310,7 @@ export default function ChatInterface() {
               scheduleStreamFlush();
             },
             onDone: (result) => {
+			  chatTelemetry.mark("done", "success");
               if (!completion.completeNormally()) {
                 return;
               }
@@ -316,6 +330,7 @@ export default function ChatInterface() {
               // that survives reload. Fall back to the placeholder if an
               // older backend omits message_id.
               const finalId = result.message_id ?? assistantId;
+			  turnTelemetryByMessageRef.current.set(finalId, chatTelemetry);
               setMessages((items) => {
                 const targetIndex = items.findIndex((m) => m.id === assistantId);
                 const target = targetIndex !== -1 ? items[targetIndex] : null;
@@ -363,6 +378,7 @@ export default function ChatInterface() {
               }));
             },
             onError: (message) => {
+			  chatTelemetry.mark("done", "failure");
               if (!completion.beginRecovery()) {
                 return;
               }
@@ -484,6 +500,12 @@ export default function ChatInterface() {
                   pendingTripId={selection.pendingTripId}
                   scrollToBottom={scrollToBottom}
                   onTypingDone={setCompletedTyping}
+				  onPaint={(id, renderedRecommendation) => {
+					const telemetry = turnTelemetryByMessageRef.current.get(id);
+					if (!telemetry) return;
+					telemetry.mark("first-react-paint");
+					if (renderedRecommendation) telemetry.mark("recommendation-card-rendered");
+				  }}
                 />
               )
             )
@@ -570,6 +592,7 @@ type AssistantMessageProps = {
   pendingTripId: string | null;
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   onTypingDone: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+  onPaint: (id: string, renderedRecommendation: boolean) => void;
 };
 
 const AssistantMessage = memo(function AssistantMessage({
@@ -582,10 +605,22 @@ const AssistantMessage = memo(function AssistantMessage({
   pendingTripId,
   scrollToBottom,
   onTypingDone,
+  onPaint,
 }: AssistantMessageProps) {
   const handleTypingDone = useCallback(() => {
     onTypingDone((items) => ({ ...items, [id]: true }));
   }, [onTypingDone, id]);
+
+  useEffect(() => {
+    onPaint(
+      id,
+      Boolean(
+        message.showRecommendations &&
+          message.packages?.length &&
+          completedTyping
+      )
+    );
+  }, [completedTyping, id, message.packages, message.showRecommendations, onPaint]);
 
   return (
     <div className="flex items-start gap-4">

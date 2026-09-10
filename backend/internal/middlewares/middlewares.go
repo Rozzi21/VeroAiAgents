@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/auth"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 	"golang.org/x/time/rate"
 )
@@ -52,6 +53,22 @@ func RequestID() gin.HandlerFunc {
 		c.Set("request_id", requestID)
 		ctx := context.WithValue(c.Request.Context(), "request_id", requestID)
 		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	}
+}
+
+// ChatTelemetry creates request-scoped chat instrumentation after RequestID is
+// available. Exporter failures are isolated inside telemetry.Trace.
+func ChatTelemetry() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Method != http.MethodPost || c.Request.URL.Path != "/api/v1/chat" {
+			c.Next()
+			return
+		}
+		ctx := telemetry.WithRequestID(c.Request.Context(), c.GetString("request_id"))
+		ctx, trace := telemetry.StartChat(ctx)
+		c.Request = c.Request.WithContext(ctx)
+		defer trace.EndRequest()
 		c.Next()
 	}
 }
@@ -251,19 +268,23 @@ func Auth(jwtService *auth.JWTService) gin.HandlerFunc {
 // applies — a refresh token presented here is ignored, not accepted.
 func OptionalAuth(jwtService *auth.JWTService) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		stageDone := telemetry.StartStage(c.Request.Context(), "auth_preparation")
 		header := c.GetHeader("Authorization")
 		if header == "" || !strings.HasPrefix(header, "Bearer ") {
+			stageDone("success")
 			c.Next()
 			return
 		}
 		claims, err := jwtService.ParseWithAudience(strings.TrimPrefix(header, "Bearer "), auth.AudienceAccess)
 		if err != nil {
+			stageDone("success")
 			c.Next()
 			return
 		}
 		c.Set(ContextUserID, claims.UserID)
 		c.Set(ContextRole, claims.Role)
 		c.Set(ContextEmail, claims.Email)
+		stageDone("success")
 		c.Next()
 	}
 }

@@ -92,7 +92,7 @@ const (
 func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error) {
 	start := time.Now()
 	var result ToolResult
-	log.Printf("[mcp] tool selected session=%s tool=%s payload=%+v", sessionID, toolName, payload)
+	log.Printf("[mcp] tool selected tool=%s", toolName)
 
 	switch toolName {
 	case mcp.ToolCreatePayment:
@@ -133,7 +133,7 @@ func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *u
 		}
 	}
 
-	log.Printf("[mcp] tool executed session=%s tool=%s status=%s duration_ms=%d", sessionID, toolName, result.Status, time.Since(start).Milliseconds())
+	log.Printf("[mcp] tool executed tool=%s status=%s duration_ms=%d", toolName, result.Status, time.Since(start).Milliseconds())
 
 	// PERF-3 #2: Persist tool call + AI log audit trail asynchronously via a
 	// bounded worker pool, detached from the synchronous LLM response path.
@@ -750,7 +750,7 @@ func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 }
 
 func (s *MCPService) executeCreateBooking(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, payload map[string]interface{}) ToolResult {
-	log.Printf("[mcp] create_booking called args=%+v", payload)
+	log.Printf("[mcp] create_booking called")
 
 	// AIW-8 duplicate-order guard: if an order already exists for THIS session,
 	// refuse to create a second one and return the existing order instead. This

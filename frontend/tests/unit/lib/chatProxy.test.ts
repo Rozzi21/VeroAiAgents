@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { forwardedChatHeaders } from "../../../src/lib/chatProxy.ts";
+import { forwardedChatHeaders, forwardedChatResponseHeaders } from "../../../src/lib/chatProxy.ts";
 
 test("Authorization is forwarded so a signed-in customer is not treated as a guest", () => {
   const headers = forwardedChatHeaders(
@@ -42,4 +42,11 @@ test("headers outside the allowlist are dropped", () => {
     })
   );
   assert.deepEqual(Object.keys(headers).sort(), ["Authorization", "Content-Type"]);
+});
+
+test("backend request id is exposed to browser without other response headers", () => {
+  assert.deepEqual(
+    forwardedChatResponseHeaders(new Headers({ "x-request-id": "req-2", authorization: "secret" })),
+    { "X-Request-ID": "req-2" }
+  );
 });

@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestExtractUsageProviderValues(t *testing.T) {
+	raw := map[string]interface{}{"usage": map[string]interface{}{
+		"prompt_tokens": float64(120), "completion_tokens": float64(30),
+		"prompt_tokens_details": map[string]interface{}{"cached_tokens": float64(64)},
+	}}
+	usage := extractUsage(raw)
+	if usage.InputTokens == nil || *usage.InputTokens != 120 {
+		t.Fatalf("input = %v", usage.InputTokens)
+	}
+	if usage.OutputTokens == nil || *usage.OutputTokens != 30 {
+		t.Fatalf("output = %v", usage.OutputTokens)
+	}
+	if usage.CachedInputTokens == nil || *usage.CachedInputTokens != 64 {
+		t.Fatalf("cached = %v", usage.CachedInputTokens)
+	}
+}
+
+func TestExtractUsageUnavailableRemainsNil(t *testing.T) {
+	usage := extractUsage(map[string]interface{}{})
+	if usage.InputTokens != nil || usage.OutputTokens != nil || usage.CachedInputTokens != nil {
+		t.Fatalf("usage should be unavailable: %+v", usage)
+	}
+}
+
 func TestExtractText_NormalContent(t *testing.T) {
 	raw := map[string]interface{}{
 		"choices": []interface{}{

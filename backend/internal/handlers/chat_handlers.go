@@ -11,10 +11,14 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/mcp"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
 
 func (h *Handler) Chat(c *gin.Context) {
+	finishPreparation := telemetry.StartStage(c.Request.Context(), "session_preparation")
+	preparationStatus := "failure"
+	defer func() { finishPreparation(preparationStatus) }()
 	var req dto.ChatRequest
 	if !bind(c, &req) {
 		return
@@ -25,6 +29,8 @@ func (h *Handler) Chat(c *gin.Context) {
 	}
 	userID := currentUserID(c)
 	chatCtx := services.ChatContext{SessionID: *req.SessionID, UserID: &userID}
+	preparationStatus = "success"
+	finishPreparation(preparationStatus)
 
 	// PERF-1: streaming path. The authenticated endpoint does not manage
 	// cookies, so setCookie is nil.
@@ -39,9 +45,15 @@ func (h *Handler) Chat(c *gin.Context) {
 		return
 	}
 	utils.Success(c, http.StatusOK, "AI workflow completed", res)
+	if trace := telemetry.FromContext(c.Request.Context()); trace != nil {
+		trace.Complete(true)
+	}
 }
 
 func (h *Handler) GuestChat(c *gin.Context) {
+	finishPreparation := telemetry.StartStage(c.Request.Context(), "session_preparation")
+	preparationStatus := "failure"
+	defer func() { finishPreparation(preparationStatus) }()
 	var req dto.ChatRequest
 	if !bind(c, &req) {
 		return
@@ -84,6 +96,8 @@ func (h *Handler) GuestChat(c *gin.Context) {
 	if uid := currentUserID(c); uid != uuid.Nil {
 		chatCtx.UserID = &uid
 	}
+	preparationStatus = "success"
+	finishPreparation(preparationStatus)
 
 	// PERF-1: streaming path. The guest session cookie must be set BEFORE the
 	// first byte of the SSE body is written (headers cannot change after the
@@ -112,6 +126,9 @@ func (h *Handler) GuestChat(c *gin.Context) {
 	}
 	auth.SetGuestSessionCookie(c, h.Services.Config, sessionID.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
 	utils.Success(c, http.StatusOK, "AI workflow completed", res)
+	if trace := telemetry.FromContext(c.Request.Context()); trace != nil {
+		trace.Complete(true)
+	}
 }
 
 func (h *Handler) ChatSessions(c *gin.Context) {

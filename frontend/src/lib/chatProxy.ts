@@ -41,6 +41,11 @@ export function forwardedChatHeaders(incoming: Headers): Record<string, string> 
   return headers;
 }
 
+export function forwardedChatResponseHeaders(incoming: Headers): Record<string, string> {
+  const requestID = incoming.get("x-request-id");
+  return requestID ? { "X-Request-ID": requestID } : {};
+}
+
 function canonicalHeaderName(lower: string): string {
   return lower
     .split("-")

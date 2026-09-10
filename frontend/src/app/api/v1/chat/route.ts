@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { forwardedChatHeaders } from "@/lib/chatProxy";
+import { forwardedChatHeaders, forwardedChatResponseHeaders } from "@/lib/chatProxy";
 
 // SSE streaming proxy for POST /api/v1/chat.
 //
@@ -57,6 +57,9 @@ export async function POST(request: NextRequest) {
   // Build response headers. We must preserve the SSE content type and
   // disable buffering at every layer.
   const responseHeaders = new Headers();
+	for (const [name, value] of Object.entries(forwardedChatResponseHeaders(backendResponse.headers))) {
+		responseHeaders.set(name, value);
+	}
   const contentType = backendResponse.headers.get("Content-Type");
   responseHeaders.set(
     "Content-Type",

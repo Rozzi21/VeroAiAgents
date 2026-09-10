@@ -17,6 +17,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/mcp"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -181,6 +182,9 @@ func (s *AIService) Chat(ctx context.Context, chatCtx ChatContext, req dto.ChatR
 // errgroup cancels the group on first error so a failure in one write
 // cancels the other; the first error is returned.
 func (s *AIService) prepareChatPreLLM(ctx context.Context, session models.ChatSession, prompt string) error {
+	finishStage := telemetry.StartStage(ctx, "pre_llm_db_writes")
+	status := "failure"
+	defer func() { finishStage(status) }()
 	var g errgroup.Group
 	g.Go(func() error {
 		return s.repo.UpdateChatSessionActivity(ctx, session.ID, *session.ExpiresAt, *session.LastActivityAt)
@@ -188,7 +192,11 @@ func (s *AIService) prepareChatPreLLM(ctx context.Context, session models.ChatSe
 	g.Go(func() error {
 		return s.repo.AddChatMessage(ctx, &models.ChatMessage{SessionID: session.ID, Role: "user", Content: prompt})
 	})
-	return g.Wait()
+	err := g.Wait()
+	if err == nil {
+		status = "success"
+	}
+	return err
 }
 
 func sessionOwnedByContext(session models.ChatSession, chatCtx ChatContext) bool {
@@ -373,10 +381,25 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 			RecommendedPackages:  recommendedPackages,
 		}
 	}
+	persistStarted := time.Now()
 	if err := s.repo.AddChatMessage(ctx, assistantMsg); err != nil {
+		telemetry.RecordDuration(ctx, "assistant_persistence", "failure", time.Since(persistStarted))
+		if assistantMsg.Recommendation != nil {
+			telemetry.RecordDuration(ctx, "recommendation_persistence", "failure", time.Since(persistStarted))
+		}
 		return ChatResult{}, err
 	}
-	_ = s.refreshMemorySummary(ctx, sessionID)
+	persistDuration := time.Since(persistStarted)
+	telemetry.RecordDuration(ctx, "assistant_persistence", "success", persistDuration)
+	if assistantMsg.Recommendation != nil {
+		telemetry.RecordDuration(ctx, "recommendation_persistence", "success", persistDuration)
+	}
+	memoryStarted := time.Now()
+	memoryStatus := "success"
+	if err := s.refreshMemorySummary(ctx, sessionID); err != nil {
+		memoryStatus = "failure"
+	}
+	telemetry.RecordDuration(ctx, "memory_summary_refresh", memoryStatus, time.Since(memoryStarted))
 
 	// SEC-18: broadcast only session_id as completion signal.
 	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID})
@@ -775,7 +798,9 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	// the 35s budget before the final round, causing "context deadline
 	// exceeded" on create_booking.
 	sessionID := session.ID
+	contextStarted := time.Now()
 	messages := s.buildMessages(ctx, session, prompt)
+	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 	tools := mcp.OpenAITools()
 
 	var allToolResults []ToolResult
@@ -784,7 +809,8 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	calledTools := make(map[string]bool)
 
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
-		resp, err := s.client.Generate(ctx, ai.CompletionRequest{
+		llmCtx := telemetry.WithLLMCall(ctx, round+1, "non_stream")
+		resp, err := s.client.Generate(llmCtx, ai.CompletionRequest{
 			Messages: messages,
 			Tools:    tools,
 		})
@@ -812,7 +838,8 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	}
 
 	log.Printf("[ai] exhausted %d tool call rounds, forcing final text response", ai.MaxToolCallRounds)
-	resp, err := s.client.Generate(ctx, ai.CompletionRequest{Messages: messages})
+	llmCtx := telemetry.WithLLMCall(ctx, ai.MaxToolCallRounds+1, "non_stream")
+	resp, err := s.client.Generate(llmCtx, ai.CompletionRequest{Messages: messages})
 	return resp, allToolResults, err
 }
 
@@ -834,7 +861,9 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	// bounded by MaxToolCallRounds (5). A single context.WithTimeout wrapping
 	// the entire loop would exhaust before multi-round workflows complete.
 	sessionID := session.ID
+	contextStarted := time.Now()
 	messages := s.buildMessages(ctx, session, prompt)
+	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 	tools := mcp.OpenAITools()
 
 	var allToolResults []ToolResult
@@ -853,7 +882,8 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 		// streams the full text again → duplicated prefix ("TheTheHalo!").
 		// Only the FINAL text round (no tool_calls, or exhausted rounds)
 		// forwards deltas to the user.
-		resp, err := s.client.GenerateStream(ctx, ai.CompletionRequest{
+		llmCtx := telemetry.WithLLMCall(ctx, round+1, "stream")
+		resp, err := s.client.GenerateStream(llmCtx, ai.CompletionRequest{
 			Messages: messages,
 			Tools:    tools,
 		}, nil)
@@ -863,7 +893,8 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 			// shouldAnimate fallback will animate the text so the user still
 			// sees a typing effect.
 			log.Printf("[ai] stream with tools failed (round %d), falling back to non-streaming: %v", round+1, err)
-			resp, err = s.client.Generate(ctx, ai.CompletionRequest{
+			fallbackCtx := telemetry.WithLLMCall(ctx, round+1, "non_stream_fallback")
+			resp, err = s.client.Generate(fallbackCtx, ai.CompletionRequest{
 				Messages: messages,
 				Tools:    tools,
 			})
@@ -900,7 +931,8 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	}
 
 	log.Printf("[ai] exhausted %d tool call rounds, forcing streamed final text response", ai.MaxToolCallRounds)
-	resp, err := s.client.GenerateStream(ctx, ai.CompletionRequest{Messages: messages}, onDelta)
+	llmCtx := telemetry.WithLLMCall(ctx, ai.MaxToolCallRounds+1, "stream")
+	resp, err := s.client.GenerateStream(llmCtx, ai.CompletionRequest{Messages: messages}, onDelta)
 	return resp, allToolResults, err
 }
 
@@ -916,7 +948,7 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 // here — rather than in the two loops — so the streaming and non-streaming paths
 // can never enforce it differently.
 func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, tc ai.ToolCall, calledTools map[string]bool, prior []ToolResult) (ToolResult, ai.Message) {
-	log.Printf("[ai] executing tool: %s (call_id=%s) args=%s", tc.Function.Name, tc.ID, tc.Function.Arguments)
+	toolStarted := time.Now()
 
 	// Guest allowance already refused a create_booking in this request: refuse
 	// the retry here, before MCP/BookingService/DB are touched. Different
@@ -924,6 +956,7 @@ func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, us
 	// below cannot cover this case.
 	if blocked, ok := blockedRetryAfterGuestOrderLimit(prior, tc.Function.Name); ok {
 		log.Printf("[ai] blocked create_booking retry after %s session=%s", CodeGuestOrderLimitReached, sessionID)
+		telemetry.RecordTool(ctx, tc.Function.Name, "failure", time.Since(toolStarted))
 		return blocked, toolResultMessage(tc, blocked)
 	}
 
@@ -942,6 +975,7 @@ func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, us
 			Status: models.ToolResultStatusSuccess,
 			Data:   map[string]interface{}{"info": "already executed with same arguments in this session round"},
 		}
+		telemetry.RecordTool(ctx, tc.Function.Name, "success", time.Since(toolStarted))
 		return toolResult, toolResultMessage(tc, toolResult)
 	}
 	calledTools[callKey] = true
@@ -955,6 +989,11 @@ func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, us
 			Data:   map[string]interface{}{"error": execErr.Error()},
 		}
 	}
+	toolStatus := "success"
+	if execErr != nil || toolResult.Status != models.ToolResultStatusSuccess {
+		toolStatus = "failure"
+	}
+	telemetry.RecordTool(ctx, tc.Function.Name, toolStatus, time.Since(toolStarted))
 	return toolResult, toolResultMessage(tc, toolResult)
 }
 
@@ -962,7 +1001,6 @@ func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, us
 // message that is appended back into the conversation (SEC-30 helper).
 func toolResultMessage(tc ai.ToolCall, result ToolResult) ai.Message {
 	resultJSON, _ := json.Marshal(result)
-	log.Printf("[ai] tool result for %s: %s", tc.Function.Name, string(resultJSON))
 	return ai.Message{
 		Role:       "tool",
 		Content:    string(resultJSON),
