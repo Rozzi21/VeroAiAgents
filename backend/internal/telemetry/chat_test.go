@@ -92,3 +92,22 @@ func TestStartLLMRecordsProviderTokenUsageWithoutPromptData(t *testing.T) {
 	// other free-form payload field. Only bounded metadata and numeric usage are
 	// available to telemetry sinks.
 }
+
+func TestRecordContextBudgetContainsOnlyNumericDecisionData(t *testing.T) {
+	sink := &collectingSink{}
+	ctx, _ := NewTrace(WithRequestID(context.Background(), "req-context-budget"), sink)
+	RecordContextBudget(ctx, 14000, 9000, 4, 12000)
+	if len(sink.events) != 1 {
+		t.Fatalf("events=%d, want 1", len(sink.events))
+	}
+	event := sink.events[0]
+	if event.Status != "trimmed" || event.EstimatedSaved != 5000 || event.MessagesRemoved != 4 {
+		t.Fatalf("unexpected context decision event: %+v", event)
+	}
+	if event.EstimatedBefore != 14000 || event.EstimatedAfter != 9000 || event.ContextTokenLimit != 12000 {
+		t.Fatalf("numeric context telemetry changed: %+v", event)
+	}
+	// Context-budget telemetry accepts numeric decisions only; no prompt,
+	// message content, tool argument/result, identity, credential, or PII value
+	// can be passed to RecordContextBudget.
+}

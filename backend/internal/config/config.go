@@ -19,6 +19,12 @@ const defaultJWTSecret = "super_secret_vero_travel"
 // must provide a real database password so Docker/.env examples are never reused.
 const defaultDatabasePassword = "change_me_dev_password"
 
+// DefaultAIContextMaxTokens is a cost/context budget for one provider request,
+// not a claim about any provider model's context-window size. The backend has no
+// provider tokenizer or model-limit metadata, so AIService uses a deterministic
+// conservative serialized-byte estimator.
+const DefaultAIContextMaxTokens = 12000
+
 type Config struct {
 	AppEnv string
 	Port   string
@@ -47,6 +53,7 @@ type Config struct {
 	AITemperature        float64
 	AITimeout            time.Duration
 	AIRecentMessages     int
+	AIContextMaxTokens   int
 	AIMemorySummaryAfter int
 	AIMemoryMaxChars     int
 	// PaymentsEnabled is a temporary feature flag for the DOKU payment flow.
@@ -83,6 +90,14 @@ func Load() Config {
 	accessMinutes := getInt("JWT_ACCESS_TTL_MINUTES", 15)
 	refreshHours := getInt("JWT_REFRESH_TTL_HOURS", 720)
 	aiTimeoutSeconds := getInt("AI_TIMEOUT_SECONDS", 35)
+	aiContextMaxTokens := getInt("AI_CONTEXT_MAX_TOKENS", DefaultAIContextMaxTokens)
+	// Values below 8k cannot reliably hold the fixed system prompt, active tool
+	// catalog, maximum accepted user prompt, and provider serialization overhead.
+	// Fall back instead of silently configuring a budget that protected content
+	// must exceed on normal requests.
+	if aiContextMaxTokens < 8000 {
+		aiContextMaxTokens = DefaultAIContextMaxTokens
+	}
 
 	cfg := Config{
 		AppEnv:               getEnv("APP_ENV", "development"),
@@ -110,6 +125,7 @@ func Load() Config {
 		AITemperature:        getFloat("AI_TEMPERATURE", 0.4),
 		AITimeout:            time.Duration(aiTimeoutSeconds) * time.Second,
 		AIRecentMessages:     getInt("AI_CONTEXT_RECENT_MESSAGES", 8),
+		AIContextMaxTokens:   aiContextMaxTokens,
 		AIMemorySummaryAfter: getInt("AI_MEMORY_SUMMARY_AFTER", 12),
 		AIMemoryMaxChars:     getInt("AI_MEMORY_MAX_CHARS", 1800),
 		PaymentsEnabled:      getBoolEnv("PAYMENTS_ENABLED", false),

@@ -97,6 +97,7 @@ API berjalan di `http://localhost:8081`.
 | `AI_TEMPERATURE` | `0.4` | Temperature generasi |
 | `AI_TIMEOUT_SECONDS` | `35` | Timeout permintaan AI |
 | `AI_CONTEXT_RECENT_MESSAGES` | `8` | Jumlah pesan terakhir sebagai konteks |
+| `AI_CONTEXT_MAX_TOKENS` | `12000` | Soft budget estimasi input per request LLM; minimum 8000, nilai lebih kecil kembali ke default |
 | `AI_MEMORY_SUMMARY_AFTER` | `12` | Jumlah pesan sebelum ringkasan memory dibuat |
 | `AI_MEMORY_MAX_CHARS` | `1800` | Batas panjang ringkasan memory |
 | `DOKU_CLIENT_ID` | _(kosong)_ | Client ID DOKU |

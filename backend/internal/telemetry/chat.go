@@ -31,6 +31,11 @@ type Event struct {
 	InputTokens       *int64
 	OutputTokens      *int64
 	CachedInputTokens *int64
+	EstimatedBefore   int
+	EstimatedAfter    int
+	EstimatedSaved    int
+	MessagesRemoved   int
+	ContextTokenLimit int
 }
 
 type Sink interface {
@@ -91,6 +96,9 @@ func recordDefault(ctx context.Context, event Event) {
 		chatToolDuration.WithLabelValues(event.ToolName, event.Status).Observe(event.Duration.Seconds())
 	case "first_sse_write", "first_delta", "done":
 		chatMilestone.WithLabelValues(event.Name).Observe(event.SinceRequest.Seconds())
+	case "context_budget":
+		// Decision telemetry is emitted in the structured event below. Keep
+		// estimates separate from authoritative provider token histograms.
 	default:
 		chatStageDuration.WithLabelValues(event.Name, event.Status).Observe(event.Duration.Seconds())
 	}
@@ -108,6 +116,11 @@ func recordDefault(ctx context.Context, event Event) {
 		"input_tokens", nullableInt64(event.InputTokens),
 		"output_tokens", nullableInt64(event.OutputTokens),
 		"cached_input_tokens", nullableInt64(event.CachedInputTokens),
+		"estimated_context_tokens_before", nullablePositiveInt(event.EstimatedBefore),
+		"estimated_context_tokens_after", nullablePositiveInt(event.EstimatedAfter),
+		"estimated_context_tokens_saved", event.EstimatedSaved,
+		"context_messages_removed", event.MessagesRemoved,
+		"context_token_limit", nullablePositiveInt(event.ContextTokenLimit),
 	)
 }
 
@@ -141,6 +154,12 @@ func nullableInt64(value *int64) any {
 		return nil
 	}
 	return *value
+}
+func nullablePositiveInt(value int) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
 }
 
 func WithRequestID(ctx context.Context, requestID string) context.Context {
@@ -306,5 +325,29 @@ func StartLLM(ctx context.Context) func(string, *time.Duration, *int64, *int64, 
 func RecordTool(ctx context.Context, name, status string, duration time.Duration) {
 	if trace := FromContext(ctx); trace != nil {
 		trace.emit(Event{Name: "tool", ToolName: name, Status: status, Duration: duration, SinceRequest: time.Since(trace.start)})
+	}
+}
+
+// RecordContextBudget records numeric estimates and decisions only. It has no
+// fields for prompts, messages, tool arguments/results, identity, or PII.
+func RecordContextBudget(ctx context.Context, before, after, removed, limit int) {
+	if trace := FromContext(ctx); trace != nil {
+		status := "within_budget"
+		if removed > 0 {
+			status = "trimmed"
+		}
+		if after > limit {
+			status = "protected_over_budget"
+		}
+		trace.emit(Event{
+			Name:              "context_budget",
+			Status:            status,
+			SinceRequest:      time.Since(trace.start),
+			EstimatedBefore:   before,
+			EstimatedAfter:    after,
+			EstimatedSaved:    max(0, before-after),
+			MessagesRemoved:   removed,
+			ContextTokenLimit: limit,
+		})
 	}
 }

@@ -59,6 +59,7 @@ Sumber kebenaran: `backend/internal/config/config.go` (fungsi `Load()`), contoh 
 | `AI_TEMPERATURE` | `0.4` | Temperature |
 | `AI_TIMEOUT_SECONDS` | `35` | Timeout request AI |
 | `AI_CONTEXT_RECENT_MESSAGES` | `8` | Jumlah pesan terakhir sebagai konteks |
+| `AI_CONTEXT_MAX_TOKENS` | `12000` | Soft budget estimasi input per provider call (messages + tool schema). Estimator konservatif memakai serialized bytes/2 karena tokenizer/model limit provider tidak tersedia; minimum 8000, nilai lebih kecil kembali ke default. Konten protected dapat melewati soft budget dan tidak dipotong. |
 | `AI_MEMORY_SUMMARY_AFTER` | `12` | Ambang pesan sebelum ringkasan memory dibuat |
 | `AI_MEMORY_MAX_CHARS` | `1800` | Batas panjang ringkasan memory |
 

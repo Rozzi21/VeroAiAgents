@@ -820,9 +820,9 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	// exceeded" on create_booking.
 	sessionID := session.ID
 	contextStarted := time.Now()
-	messages := s.buildMessages(ctx, session, prompt)
-	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 	tools := mcp.OpenAITools()
+	llmContext := s.buildMessages(ctx, session, prompt)
+	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 
 	var allToolResults []ToolResult
 
@@ -830,6 +830,8 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	calledTools := make(map[string]bool)
 
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
+		messages, budgetDecision := llmContext.messagesForRequest(tools, s.contextTokenBudget())
+		telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
 		llmCtx := telemetry.WithLLMCall(ctx, round+1, "non_stream")
 		resp, err := s.client.Generate(llmCtx, ai.CompletionRequest{
 			Messages: messages,
@@ -849,16 +851,18 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 			Role:      "assistant",
 			ToolCalls: resp.ToolCalls,
 		}
-		messages = append(messages, assistantMsg)
+		llmContext.append(assistantMsg)
 
 		for _, tc := range resp.ToolCalls {
 			toolResult, toolMsg := s.executeToolCall(ctx, sessionID, userID, tc, calledTools, allToolResults)
 			allToolResults = append(allToolResults, toolResult)
-			messages = append(messages, toolMsg)
+			llmContext.append(toolMsg)
 		}
 	}
 
 	log.Printf("[ai] exhausted %d tool call rounds, forcing final text response", ai.MaxToolCallRounds)
+	messages, budgetDecision := llmContext.messagesForRequest(nil, s.contextTokenBudget())
+	telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
 	llmCtx := telemetry.WithLLMCall(ctx, ai.MaxToolCallRounds+1, "non_stream")
 	resp, err := s.client.Generate(llmCtx, ai.CompletionRequest{Messages: messages})
 	return resp, allToolResults, err
@@ -883,14 +887,16 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	// the entire loop would exhaust before multi-round workflows complete.
 	sessionID := session.ID
 	contextStarted := time.Now()
-	messages := s.buildMessages(ctx, session, prompt)
-	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 	tools := mcp.OpenAITools()
+	llmContext := s.buildMessages(ctx, session, prompt)
+	telemetry.RecordDuration(ctx, "context_query_build", "success", time.Since(contextStarted))
 
 	var allToolResults []ToolResult
 	calledTools := make(map[string]bool)
 
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
+		messages, budgetDecision := llmContext.messagesForRequest(tools, s.contextTokenBudget())
+		telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
 		// PERF-1: stream directly with tools. GenerateStream accumulates
 		// tool_calls deltas and returns them in the response, so we can
 		// still dispatch tools after the stream completes. This halves the
@@ -942,16 +948,18 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 			Role:      "assistant",
 			ToolCalls: resp.ToolCalls,
 		}
-		messages = append(messages, assistantMsg)
+		llmContext.append(assistantMsg)
 
 		for _, tc := range resp.ToolCalls {
 			toolResult, toolMsg := s.executeToolCall(ctx, sessionID, userID, tc, calledTools, allToolResults)
 			allToolResults = append(allToolResults, toolResult)
-			messages = append(messages, toolMsg)
+			llmContext.append(toolMsg)
 		}
 	}
 
 	log.Printf("[ai] exhausted %d tool call rounds, forcing streamed final text response", ai.MaxToolCallRounds)
+	messages, budgetDecision := llmContext.messagesForRequest(nil, s.contextTokenBudget())
+	telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
 	llmCtx := telemetry.WithLLMCall(ctx, ai.MaxToolCallRounds+1, "stream")
 	resp, err := s.client.GenerateStream(llmCtx, ai.CompletionRequest{Messages: messages}, onDelta)
 	return resp, allToolResults, err
@@ -1030,7 +1038,134 @@ func toolResultMessage(tc ai.ToolCall, result ToolResult) ai.Message {
 	}
 }
 
-func (s *AIService) buildMessages(ctx context.Context, session models.ChatSession, prompt string) []ai.Message {
+type chatLLMContext struct {
+	messages                 []ai.Message
+	currentTurnStart         int
+	protectHistoricalContext bool
+}
+
+type contextBudgetDecision struct {
+	Before  int
+	After   int
+	Removed int
+	Limit   int
+}
+
+func (s *AIService) contextTokenBudget() int {
+	if s.cfg.AIContextMaxTokens > 0 {
+		return s.cfg.AIContextMaxTokens
+	}
+	return config.DefaultAIContextMaxTokens
+}
+
+// estimateContextTokens is deterministic and deliberately conservative. Exact
+// provider tokenizers are unavailable for arbitrary OpenAI-compatible models,
+// so serialized request bytes are divided by 2 (rounded up), plus fixed framing
+// reserve. Provider-reported usage remains authoritative telemetry.
+func estimateContextTokens(messages []ai.Message, tools []ai.ToolDef) int {
+	raw, err := json.Marshal(ai.CompletionRequest{Messages: messages, Tools: tools})
+	if err != nil {
+		// Message/tool structs contain only JSON-compatible fields today. Fail
+		// closed if that changes: force trimming attempts rather than returning 0.
+		return int(^uint(0) >> 1)
+	}
+	return (len(raw)+1)/2 + 16
+}
+
+func (c *chatLLMContext) append(message ai.Message) {
+	c.messages = append(c.messages, message)
+}
+
+// messagesForRequest trims only complete, oldest persisted conversation turns.
+// It never removes system messages (including memory/order state), latest user
+// message, or assistant/tool messages appended during current tool loop.
+func (c *chatLLMContext) messagesForRequest(tools []ai.ToolDef, limit int) ([]ai.Message, contextBudgetDecision) {
+	decision := contextBudgetDecision{Limit: limit}
+	decision.Before = estimateContextTokens(c.messages, tools)
+	if decision.Before <= limit {
+		decision.After = decision.Before
+		return c.messages, decision
+	}
+	// selected_trip_id is authoritative application state, but its value is not
+	// separately injected into the LLM request. Keep existing transcript intact
+	// while selected so selection, alternatives, and booking context cannot be
+	// lost through token budgeting.
+	if c.protectHistoricalContext {
+		decision.After = decision.Before
+		return c.messages, decision
+	}
+
+	for decision.After = decision.Before; decision.After > limit; {
+		group := c.oldestEligibleTurn()
+		if len(group) == 0 {
+			break
+		}
+		remove := make(map[int]struct{}, len(group))
+		for _, index := range group {
+			remove[index] = struct{}{}
+		}
+		kept := make([]ai.Message, 0, len(c.messages)-len(group))
+		removedBeforeCurrent := 0
+		for index, message := range c.messages {
+			if _, drop := remove[index]; drop {
+				if index < c.currentTurnStart {
+					removedBeforeCurrent++
+				}
+				continue
+			}
+			kept = append(kept, message)
+		}
+		c.messages = kept
+		c.currentTurnStart -= removedBeforeCurrent
+		decision.Removed += len(group)
+		decision.After = estimateContextTokens(c.messages, tools)
+	}
+	return c.messages, decision
+}
+
+func (c *chatLLMContext) oldestEligibleTurn() []int {
+	// Keep four historical rows (normally two complete turns) immediately before
+	// current user input. This protects active conversational workflow without
+	// semantic/keyword inference; only older rows can become trim candidates.
+	eligibleEnd := c.currentTurnStart - 4
+	if eligibleEnd <= 1 {
+		return nil
+	}
+	// Move boundary to beginning of containing user turn so trimming cannot
+	// leave an assistant response without its user message (or vice versa).
+	for eligibleEnd > 1 && c.messages[eligibleEnd].Role != "user" {
+		eligibleEnd--
+	}
+	if eligibleEnd <= 1 {
+		return nil
+	}
+	start := -1
+	for index := 1; index < eligibleEnd; index++ {
+		if c.messages[index].Role == "system" {
+			continue
+		}
+		start = index
+		break
+	}
+	if start < 0 {
+		return nil
+	}
+
+	group := []int{start}
+	for index := start + 1; index < eligibleEnd; index++ {
+		message := c.messages[index]
+		if message.Role == "system" {
+			continue
+		}
+		if message.Role == "user" {
+			break
+		}
+		group = append(group, index)
+	}
+	return group
+}
+
+func (s *AIService) buildMessages(ctx context.Context, session models.ChatSession, prompt string) *chatLLMContext {
 	sessionID := session.ID
 	messages := []ai.Message{
 		{
@@ -1119,11 +1254,18 @@ func (s *AIService) buildMessages(ctx context.Context, session models.ChatSessio
 	for _, message := range recent {
 		messages = append(messages, ai.Message{Role: message.Role, Content: message.Content})
 	}
-	if len(recent) == 0 {
+	// Normal path already contains the just-persisted user message. Explicitly
+	// append only when a stale/empty repository result does not, guaranteeing the
+	// current user turn is always present without duplicating it.
+	if len(messages) == 0 || messages[len(messages)-1].Role != "user" || messages[len(messages)-1].Content != prompt {
 		messages = append(messages, ai.Message{Role: "user", Content: prompt})
 	}
 
-	return messages
+	return &chatLLMContext{
+		messages:                 messages,
+		currentTurnStart:         len(messages) - 1,
+		protectHistoricalContext: session.SelectedTripID != nil,
+	}
 }
 
 func (s *AIService) refreshMemorySummary(ctx context.Context, sessionID uuid.UUID) error {

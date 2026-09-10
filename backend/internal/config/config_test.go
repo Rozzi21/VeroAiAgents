@@ -129,7 +129,21 @@ func TestLoadDefaultsAreValid(t *testing.T) {
 	if cfg.JWTCookieSameSite != "Strict" {
 		t.Fatalf("refresh cookie default changed to %q", cfg.JWTCookieSameSite)
 	}
+	if cfg.AIContextMaxTokens != DefaultAIContextMaxTokens {
+		t.Fatalf("AI context budget default = %d, want %d", cfg.AIContextMaxTokens, DefaultAIContextMaxTokens)
+	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("default configuration must validate: %v", err)
+	}
+}
+
+func TestLoadAIContextTokenBudget(t *testing.T) {
+	t.Setenv("AI_CONTEXT_MAX_TOKENS", "9000")
+	if got := Load().AIContextMaxTokens; got != 9000 {
+		t.Fatalf("configured context budget = %d, want 9000", got)
+	}
+	t.Setenv("AI_CONTEXT_MAX_TOKENS", "7999")
+	if got := Load().AIContextMaxTokens; got != DefaultAIContextMaxTokens {
+		t.Fatalf("unsafe context budget = %d, want default %d", got, DefaultAIContextMaxTokens)
 	}
 }

@@ -4,6 +4,8 @@
 
 > **P0.2 memory summary pasca-`done` — IMPLEMENTED 11 Sep 2026.** Assistant+recommendation tetap dipersist atomik sebelum `done`; refresh summary kini disubmit setelah terminal response lewat shared bounded `AuditPool` (2 worker, buffer 64, timeout 10 detik), best-effort dan non-blocking. Context request tidak dipakai worker: detached context hanya mempertahankan trace P0.1 dan `X-Request-ID`. Job per session di-coalesce agar tidak overlap; submission saat refresh aktif menghasilkan maksimal satu follow-up terhadap tail terbaru. Failure, timeout, pool penuh, atau shutdown tidak mengubah chat/SSE/recovery.
 
+> **P0.4 token-aware context — IMPLEMENTED 11 Sep 2026.** `AI_CONTEXT_MAX_TOKENS` default 12.000 menambah soft budget per provider request memakai estimator deterministic konservatif `ceil(serialized CompletionRequest bytes/2)+16` karena tokenizer/model limit tidak tersedia. Hanya complete oldest conversation turns yang dapat dipangkas; system prompt/memory/system markers, latest user, empat recent history row, dan seluruh current-turn assistant/tool chain dilindungi. Saat `selected_trip_id` ada, seluruh recent history dilindungi. Tool result tidak dikompaksi. Provider usage P0.1 tetap authoritative.
+
 ### Status implementasi P0.1
 
 - Backend: `backend/internal/telemetry/chat.go` mencatat request total; `auth_preparation`; `session_preparation`; `pre_llm_db_writes`; `context_query_build`; tiap `llm_round` (round/mode/status, duration, provider-reported TTFB/usage); tiap tool (name/status/duration); `assistant_persistence`; `recommendation_persistence`; `memory_summary_refresh`; `first_sse_write`; `first_delta`; `done`.
@@ -155,7 +157,7 @@ Baseline turn awal tanpa history/tool result diperkirakan sekitar **2.0–2.6k i
 ### 3.2 History dan summary
 
 - Tidak seluruh history dikirim setiap turn. Model menerima last `AI_CONTEXT_RECENT_MESSAGES=8` rows + `MemorySummary` session.
-- Tidak ada token budget, turn-aware window, role-aware compaction, atau per-model context guard. Delapan pesan panjang/tool markers dapat jauh lebih mahal daripada delapan pesan pendek.
+- P0.4 menambah soft token budget setelah query maksimum 8 row existing. Budget bersifat turn-aware untuk oldest eligible history; bukan per-model hard context window karena provider/model limit tidak tersedia dari konfigurasi/API.
 - `refreshMemorySummary` bukan semantic summary. Ia mengambil tail minimum 20 messages, menggabungkan `role: content`, lalu menyimpan suffix 1,800 rune. Setelah threshold, ini dijalankan setiap turn.
 - Overlap protection mencoba menghapus summary line bila `strings.Contains(line, recent.Content)`. Ini heuristic rapuh: multiline message, truncation di tengah message, repeated short answers (“ya”), atau role/system marker dapat lolos/terhapus salah.
 - Karena summary dibentuk dari tail terbaru, bukan pesan yang jatuh keluar window, summary dan recent punya overlap konseptual tinggi. Token dapat diduplikasi meski exact-line filter ada.
