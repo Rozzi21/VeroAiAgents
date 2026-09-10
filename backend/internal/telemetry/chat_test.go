@@ -67,3 +67,28 @@ func TestDetachDropsRequestCancellationAndPreservesCorrelation(t *testing.T) {
 		t.Fatal("detached context must preserve telemetry trace")
 	}
 }
+
+func TestStartLLMRecordsProviderTokenUsageWithoutPromptData(t *testing.T) {
+	sink := &collectingSink{}
+	ctx, _ := NewTrace(WithRequestID(context.Background(), "req-token-usage"), sink)
+	ctx = WithLLMCall(ctx, 2, "stream")
+	input, output, cached := int64(321), int64(45), int64(123)
+	finish := StartLLM(ctx)
+	finish("success", nil, &input, &output, &cached)
+
+	if len(sink.events) != 1 {
+		t.Fatalf("events = %d, want 1", len(sink.events))
+	}
+	event := sink.events[0]
+	if event.Name != "llm_round" || event.Round != 2 || event.Mode != "stream" {
+		t.Fatalf("unexpected event metadata: %+v", event)
+	}
+	if event.InputTokens == nil || *event.InputTokens != input ||
+		event.OutputTokens == nil || *event.OutputTokens != output ||
+		event.CachedInputTokens == nil || *event.CachedInputTokens != cached {
+		t.Fatalf("provider token usage not preserved: %+v", event)
+	}
+	// Event has no prompt, message, tool schema, user data, token credential, or
+	// other free-form payload field. Only bounded metadata and numeric usage are
+	// available to telemetry sinks.
+}

@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -167,8 +169,18 @@ func TestOpenAITools_OnlyActiveToolsExposed(t *testing.T) {
 			t.Errorf("disabled tool %q leaked into OpenAITools() catalog", td.Function.Name)
 		}
 	}
-	// The four live workflow tools must be present.
-	wantActive := []string{ToolSearchTrips, ToolSelectPackage, ToolCollectOrderDetail, ToolCreateBooking}
+	// Every live business tool must remain present. Enabled is authoritative
+	// application state; conversation keywords are never used to filter this set.
+	wantActive := []string{
+		ToolSearchTrips,
+		ToolSelectPackage,
+		ToolCollectOrderDetail,
+		ToolCreateBooking,
+		ToolGetTripDetail,
+		ToolCalculateTripPrice,
+		ToolCheckTripAvailability,
+		ToolCheckOrderStatus,
+	}
 	present := make(map[string]bool, len(tools))
 	for _, td := range tools {
 		present[td.Function.Name] = true
@@ -176,6 +188,44 @@ func TestOpenAITools_OnlyActiveToolsExposed(t *testing.T) {
 	for _, name := range wantActive {
 		if !present[name] {
 			t.Errorf("active tool %q missing from OpenAITools() catalog", name)
+		}
+	}
+}
+
+// Parameter descriptions previously repeated the exact JSON property name
+// (for example, `"trip_id":{"description":"trip_id"}`). The property key
+// already communicates that information, so retaining the annotation adds
+// request tokens without adding semantics.
+func TestOpenAITools_OmitRedundantParameterDescriptions(t *testing.T) {
+	for _, tool := range OpenAITools() {
+		params, ok := tool.Function.Parameters.(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool %s: parameters not a map", tool.Function.Name)
+		}
+		props, ok := params["properties"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("tool %s: properties missing", tool.Function.Name)
+		}
+		for name, raw := range props {
+			prop, ok := raw.(map[string]interface{})
+			if !ok {
+				t.Fatalf("tool %s prop %s: not a map", tool.Function.Name, name)
+			}
+			if _, exists := prop["description"]; exists {
+				t.Errorf("tool %s prop %s retains redundant description", tool.Function.Name, name)
+			}
+		}
+	}
+}
+
+func TestOpenAITools_SchemaContainsNoSecretOrPIIValues(t *testing.T) {
+	raw, err := json.Marshal(OpenAITools())
+	if err != nil {
+		t.Fatalf("marshal tools: %v", err)
+	}
+	for _, forbidden := range []string{"API_KEY", "Authorization", "Bearer ", "password", "@vero.local"} {
+		if strings.Contains(strings.ToLower(string(raw)), strings.ToLower(forbidden)) {
+			t.Errorf("tool schema contains forbidden secret/PII marker %q", forbidden)
 		}
 	}
 }

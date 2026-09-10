@@ -122,8 +122,7 @@ func OpenAITools() []ai.ToolDef {
 				inputType = ParamTypeString
 			}
 			props[input.Name] = map[string]interface{}{
-				"type":        inputType,
-				"description": input.Name,
+				"type": inputType,
 			}
 		}
 		required := requiredInputs(tool)

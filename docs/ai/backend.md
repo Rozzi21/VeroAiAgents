@@ -22,6 +22,10 @@ Dokumen ini menjelaskan lapisan backend Go: service layer, logika bisnis inti, m
 
 Metric: `chat_requests_total`, `chat_request_duration_seconds`, `chat_stage_duration_seconds`, `chat_llm_round_duration_seconds`, `chat_llm_ttfb_seconds`, `chat_llm_tokens`, `chat_tool_duration_seconds`, `chat_milestone_seconds`. Structured log bernama `chat_telemetry` memberi sampel per request dengan nilai unavailable sebagai `null`. Provider usage tidak diestimasi: hanya field usage aktual yang dicatat. Instrumentation tidak mengubah response payload, call count LLM, memory-summary timing, atau persistence assistant+recommendation sebelum `done`; panic exporter direcover agar business flow tetap berjalan.
 
+### Optimasi input-token P0.3 (11 Sep 2026)
+
+Schema delapan tool aktif tetap dikirim utuh pada setiap round karena state server yang tersedia (`selected_trip_id` ada/tidak ada) belum cukup membuktikan tool bisnis tertentu mustahil dipakai; filtering berbasis keyword/intent tidak digunakan. Overhead aman dikurangi di `backend/internal/mcp/tools.go` dengan menghapus anotasi parameter `description` yang nilainya persis sama dengan nama property JSON Schema. Nama tool, argumen, tipe, daftar required, return shape, guard bisnis, system prompt, recent messages, memory summary, dan telemetry provider usage tidak berubah. Serialized catalog turun sekitar 4,95 KB menjadi 4,29 KB (664 byte, sekitar 166 token dengan estimasi konservatif 4 karakter/token) per provider round; angka token observasi produksi tetap berasal dari `chat_llm_tokens`, bukan estimasi ini.
+
 ## Service Layer
 
 Service di-wiring di `services.New()` (`services.go`). Container `Services` berisi: `Auth`, `Google`, `AI`, `MCP`, `Trips`, `Bookings`, `Payments`, `Logs`, `Analytics`, `Guests`.

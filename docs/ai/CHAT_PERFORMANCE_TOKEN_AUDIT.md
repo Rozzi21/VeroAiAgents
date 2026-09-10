@@ -144,7 +144,7 @@ Kode menyatakan streaming, tetapi jalur umum bukan token streaming. `generateWit
 | Komponen | Perilaku aktual | Estimasi |
 |---|---|---|
 | System prompt | Dikirim ulang setiap round. Berisi flow, pricing, availability, guest limit, safety, style, payment-disabled, injection rule | Besar; sekitar 4–5k karakter source, kira-kira 1.0–1.3k token |
-| Tool schema | Semua 8 tool aktif dikirim pada setiap round | Source declaration 4,091 karakter; serialized schema sekitar 1k+ token |
+| Tool schema | Semua 8 tool aktif dikirim pada setiap round; sejak P0.3 anotasi parameter yang hanya mengulang nama property dihapus | Serialized schema sekitar 4,29 KB setelah P0.3 (sebelumnya 4,95 KB), kira-kira 1,07k token dengan heuristik 4 karakter/token |
 | Recent history | Default 8 row DB, bukan 8 turn | Variabel; dapat memuat 4 turn, atau campuran system/order marker |
 | Memory summary | Maksimum 1,800 rune; sebenarnya raw tail transcript | Sampai kira-kira 450–700 token tergantung Bahasa Indonesia/JSON |
 | Current user prompt | Sudah dipersist sebelum `buildMessages`, sehingga biasanya termasuk recent query; fallback append hanya bila recent kosong | Tidak diduplikasi pada normal path |
@@ -167,6 +167,7 @@ Baseline turn awal tanpa history/tool result diperkirakan sekitar **2.0–2.6k i
 ### 3.3 Tool schema dan result
 
 - Delapan tool aktif: `search_trips`, `select_package`, `collect_order_detail`, `create_booking`, `get_trip_detail`, `calculate_trip_price`, `check_trip_availability`, `check_order_status`.
+- P0.3 (11 Sep 2026): dynamic tool filtering sengaja tidak diterapkan. `selected_trip_id` saja tidak membuktikan tool aktif mana pun mustahil digunakan tanpa membaca intent user; filtering intent/keyword berisiko menghilangkan operasi valid. Optimasi aman hanya menghapus `description` parameter schema yang identik dengan nama property, menghemat 664 byte serialized schema per provider round tanpa mengubah kontrak.
 - Schema mengulang business rules yang juga ada di system prompt, khususnya booking completeness, source of truth, availability, dan alternative. Duplikasi ini meningkatkan reliability, tetapi sebagian dapat dipadatkan setelah eval.
 - `search_trips` mengembalikan maksimum 3 paket dengan sekitar 18 field/paket. Redundansi nyata: `price`, `adult_price`, `adult_effective_price`; `count` dapat dihitung; `query` sudah ada dalam tool arguments; `reason` berasal dari `alternative`; slug/category/location kadang tidak dipakai reasoning.
 - Field B-GENUI-5 (normal/effective adult, child, discount flags/amount, destination, duration, image/title/id) dibutuhkan UI/persistensi. Masalah utamanya satu object dipakai untuk tiga consumer berbeda: LLM reasoning, frontend GenUI, dan audit/persistence.
