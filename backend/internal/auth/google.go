@@ -10,7 +10,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// Google OIDC client (19 Agu 2026). Server side of the Authorization Code flow
 // built on Google-endorsed libraries — NO hand-rolled JWT/JWKS/cryptography:
 //
 //   - golang.org/x/oauth2      → the Authorization Code exchange (token endpoint).
@@ -22,9 +21,6 @@ import (
 // The provider is pinned to Google's issuer, so arbitrary OIDC providers are
 // rejected — only Google-issued id_tokens are accepted.
 
-// googleIssuer is the canonical Google OIDC issuer. go-oidc resolves the
-// discovery document (https://accounts.google.com/.well-known/openid-configuration)
-// from it, which pins the JWKS URI and token endpoint to Google's.
 const googleIssuer = "https://accounts.google.com"
 
 // googleScope is the minimal OIDC scope set: identity + email + display name.
@@ -90,15 +86,7 @@ func (g *GoogleClient) AuthCodeURL(state, nonce, codeVerifier string) string {
 	return g.AuthCodeURLForRedirect(g.oauthConfig.RedirectURL, state, nonce, codeVerifier)
 }
 
-// AuthCodeURLForRedirect is AuthCodeURL with an explicit redirect URI. The
-// login flow uses the configured /google/callback URI; the "Link Google
-// Account" flow uses its own /google/link/callback URI so the two endpoints
-// stay distinct. `state` (CSRF) and `nonce` (id_token binding) are generated
-// by the caller and persisted server-side; both are echoed back and
-// re-validated on callback. `codeVerifier` is the RAW PKCE verifier —
-// oauth2.S256ChallengeOption derives the S256 code_challenge from it
-// internally; passing a pre-hashed challenge here would double-hash it and
-// break the token exchange (invalid_grant "Invalid code verifier.").
+
 func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeVerifier string) string {
 	cfg := g.oauthConfig
 	cfg.RedirectURL = redirectURI

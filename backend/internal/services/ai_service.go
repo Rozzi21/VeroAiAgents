@@ -26,11 +26,12 @@ import (
 // *repositories.Repository / *MCPService. Tests can mock the MCP executor and
 // the repository without a DB or a real tool pipeline.
 type AIService struct {
-	repo   AIRepository
-	mcp    MCPToolExecutor
-	bus    *events.Bus
-	client *ai.Client
-	cfg    config.Config
+	repo       AIRepository
+	mcp        MCPToolExecutor
+	bus        *events.Bus
+	client     *ai.Client
+	cfg        config.Config
+	background *AuditPool
 }
 
 // AIRepository is the repository contract AIService uses (SEC-27): chat
@@ -99,8 +100,8 @@ type ChatOrderGate struct {
 
 // chatSessionCleanupGraceExtra is the safety buffer added on top of AITimeout
 // for the cleanup grace window. It covers the non-LLM work that still runs
-// after the tool loop (persist assistant message, memory summary refresh,
-// handler cookie write) before the request fully finishes.
+// after the tool loop (persist assistant message and handler cookie write)
+// before the request fully finishes.
 const chatSessionCleanupGraceExtra = 30 * time.Second
 
 // CleanupExpiredChatSessions is intentionally a small service operation so an
@@ -215,7 +216,7 @@ func sessionOwnedByContext(session models.ChatSession, chatCtx ChatContext) bool
 // finalizeChat completes the post-LLM work that is identical whether the final
 // assistant message was produced by the non-streaming or the streaming path
 // (PERF-1): defense-in-depth order-claim guard, fail-closed recommendation
-// state (BUG-5), persist assistant message, refresh memory summary, broadcast
+// state (BUG-5), persist assistant message, broadcast
 // workflow_completed. Extracting it keeps Chat and ChatStream in lockstep so a
 // change to the finalization rules never drifts between the two paths.
 func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiResponse ai.CompletionResponse, toolResults []ToolResult, genErr error) (ChatResult, error) {
@@ -394,13 +395,6 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 	if assistantMsg.Recommendation != nil {
 		telemetry.RecordDuration(ctx, "recommendation_persistence", "success", persistDuration)
 	}
-	memoryStarted := time.Now()
-	memoryStatus := "success"
-	if err := s.refreshMemorySummary(ctx, sessionID); err != nil {
-		memoryStatus = "failure"
-	}
-	telemetry.RecordDuration(ctx, "memory_summary_refresh", memoryStatus, time.Since(memoryStarted))
-
 	// SEC-18: broadcast only session_id as completion signal.
 	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID})
 
@@ -419,6 +413,33 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		// selected card after ANY turn (including an LLM-driven select_package).
 		SelectedTripID: selectedTripID,
 	}, nil
+}
+
+// ScheduleMemorySummary enqueues a best-effort refresh after the response has
+// crossed its client-visible completion milestone. Submission never blocks.
+// The worker uses a detached, timeout-bounded context and coalesces concurrent
+// submissions for the same session.
+func (s *AIService) ScheduleMemorySummary(ctx context.Context, sessionID uuid.UUID) bool {
+	detachedCtx := telemetry.Detach(ctx)
+	if s.background == nil {
+		telemetry.RecordDuration(detachedCtx, "memory_summary_refresh", "unavailable", 0)
+		return false
+	}
+	accepted := s.background.SubmitMemorySummary(detachedCtx, sessionID, func(runCtx context.Context) {
+		started := time.Now()
+		status := "success"
+		if err := s.refreshMemorySummary(runCtx, sessionID); err != nil {
+			status = "failure"
+			if errors.Is(err, context.DeadlineExceeded) {
+				status = "timeout"
+			}
+		}
+		telemetry.RecordDuration(runCtx, "memory_summary_refresh", status, time.Since(started))
+	})
+	if !accepted {
+		telemetry.RecordDuration(detachedCtx, "memory_summary_refresh", "unavailable", 0)
+	}
+	return accepted
 }
 
 // ChatStream is the streaming counterpart of Chat (PERF-1, 3 Agu 2026). It runs

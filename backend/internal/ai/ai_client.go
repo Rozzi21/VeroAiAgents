@@ -16,7 +16,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 )
 
-// maxAIResponseBytes caps the AI provider response body we will decode (SEC-9).
+// maxAIResponseBytes caps the AI provider response body we will decode.
 const maxAIResponseBytes = 1 << 20 // 1 MiB
 
 // MaxToolCallRounds limits how many tool-call round-trips we allow before
@@ -334,26 +334,6 @@ func extractString(m map[string]interface{}, key string) (string, string) {
 	return "", ""
 }
 
-// GenerateStream runs a streaming chat completion (PERF-1). The provider sends
-// Server-Sent Events chunks; each `choices[0].delta.content` text fragment is
-// forwarded to onDelta as soon as it arrives so the caller can flush it to the
-// client and lower Time-To-First-Token. Tool-call deltas are accumulated into
-// full ToolCalls and returned together with the final metadata, mirroring the
-// non-streaming CompletionResponse contract.
-//
-// Design notes (PERF-1, 3 Agu 2026):
-//   - Only the FINAL text round is streamed. Tool-call rounds still use the
-//     non-streaming Generate because they need the complete tool_calls array
-//     up front to dispatch via MCP. Streaming the assistant text after the
-//     tool loop is where the bulk of user-perceived latency lives.
-//   - The HTTP client Timeout is the overall request budget (cfg.AITimeout);
-//     the request ctx (SEC-26) adds cancellation on client disconnect so
-//     whichever fires first cancels the stream mid-flight.
-//   - Response body is NOT capped by io.LimitReader here: a stream is read
-//     incrementally and each chunk is a small JSON object, so peak memory is
-//     bounded by the accumulated text length rather than one giant buffer.
-//     A malicious/buggy provider could still stream forever, which is bounded
-//     by the request timeout above.
 func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDelta func(text string)) (CompletionResponse, error) {
 	finishTelemetry := telemetry.StartLLM(ctx)
 	status := "failure"
@@ -361,8 +341,6 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 	defer func() {
 		finishTelemetry(status, result.TTFB, result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.CachedInputTokens)
 	}()
-	// Fallback path mirrors Generate: no key -> single synthetic delta so the
-	// UX of the streaming handler stays identical (one delta + done event).
 	if c.APIKey == "" {
 		fallback := "AI API key is empty; using local travel assistant fallback response."
 		if onDelta != nil {
@@ -438,10 +416,6 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 			return CompletionResponse{}, ctx.Err()
 		}
 
-		// Read until the SSE blank-line delimiter. We still block on the
-		// reader (which in turn reads from the HTTP response body), so a
-		// context cancellation will unblock the underlying connection close
-		// and return an error.
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			if err == io.EOF {
@@ -498,18 +472,9 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 					onDelta(content)
 				}
 			}
-			// Accumulate tool-call deltas (some providers stream them in pieces).
 			if tcsRaw, ok := delta["tool_calls"].([]interface{}); ok {
 				accumulateToolCallDeltas(toolCalls, tcsRaw)
 			}
-			// Reasoning models (DeepSeek/Qwen) stream reasoning_content during
-			// the "thinking" phase BEFORE content arrives. Accumulate it
-			// separately as a fallback (used only if the stream ends with
-			// zero content, matching extractText semantics) but NEVER forward
-			// it to onDelta. Previously the per-chunk `fullText.Len() == 0`
-			// guard let the FIRST reasoning token ("The") leak into fullText
-			// and onDelta; when real content ("Halo!") arrived it appended to
-			// "The" -> "TheHalo!". Reasoning tokens must not reach the user.
 			if rc, _ := delta["reasoning_content"].(string); rc != "" {
 				reasoningText.WriteString(rc)
 			}
@@ -540,9 +505,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 	}
 	result = out
 	if len(out.ToolCalls) == 0 && out.Text == "" {
-		// No content streamed; fall back to reasoning_content if the provider
-		// sent any (pure reasoning models). It was not streamed live, so the
-		// frontend handler animates it via shouldAnimate.
+
 		if reasoningText.Len() > 0 {
 			out.Text = reasoningText.String()
 		} else {
@@ -552,11 +515,6 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 	status = "success"
 	return out, nil
 }
-
-// accumulateToolCallDeltas merges streaming tool-call fragments into the
-// running ToolCall map keyed by the tool index. OpenAI-compatible providers
-// send the function name in the first delta for an index and append argument
-// token fragments in subsequent deltas for the same index.
 func accumulateToolCallDeltas(toolCalls map[int]*ToolCall, deltas []interface{}) {
 	for _, d := range deltas {
 		dMap, ok := d.(map[string]interface{})

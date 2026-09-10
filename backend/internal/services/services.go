@@ -64,7 +64,7 @@ func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService,
 	s.audit.Start()
 	s.MCP = &MCPService{repo: repo, bus: bus, bookings: s.Bookings, auth: s.Auth, audit: s.audit}
 	aiClient := ai.NewClient(cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, cfg.AITemperature, cfg.AITimeout)
-	s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, client: aiClient, cfg: cfg}
+	s.AI = &AIService{repo: repo, mcp: s.MCP, bus: bus, client: aiClient, cfg: cfg, background: s.audit}
 	s.Trips = &TripService{repo: repo, bus: bus}
 	s.Payments = &PaymentService{repo: repo, bus: bus, cfg: cfg}
 	s.Logs = &LogService{repo: repo}
@@ -72,9 +72,8 @@ func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService,
 	return s
 }
 
-// StopAudit drains the MCP audit worker pool (PERF-3 #2). Call during graceful
-// shutdown so in-flight tool-call + AI-log records are persisted before the
-// process exits. Safe to call multiple times.
+// StopAudit drains the shared bounded background pool used by MCP audit writes
+// and memory-summary refreshes. Safe to call multiple times.
 func (s *Services) StopAudit() {
 	if s.audit != nil {
 		s.audit.Stop()

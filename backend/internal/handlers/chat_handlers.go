@@ -48,6 +48,7 @@ func (h *Handler) Chat(c *gin.Context) {
 	if trace := telemetry.FromContext(c.Request.Context()); trace != nil {
 		trace.Complete(true)
 	}
+	h.Services.AI.ScheduleMemorySummary(c.Request.Context(), res.SessionID)
 }
 
 func (h *Handler) GuestChat(c *gin.Context) {
@@ -129,6 +130,7 @@ func (h *Handler) GuestChat(c *gin.Context) {
 	if trace := telemetry.FromContext(c.Request.Context()); trace != nil {
 		trace.Complete(true)
 	}
+	h.Services.AI.ScheduleMemorySummary(c.Request.Context(), res.SessionID)
 }
 
 func (h *Handler) ChatSessions(c *gin.Context) {

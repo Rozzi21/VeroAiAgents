@@ -33,6 +33,28 @@ func TestAuditPoolSubmitConcurrentWithStop(t *testing.T) {
 	}
 }
 
+func TestMemorySummarySubmitConcurrentWithStop(t *testing.T) {
+	pool := NewAuditPool(&mockAuditWriter{})
+	pool.Start()
+
+	var submitters sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		submitters.Add(1)
+		go func() {
+			defer submitters.Done()
+			for j := 0; j < 100; j++ {
+				pool.SubmitMemorySummary(context.Background(), uuid.New(), func(context.Context) {})
+			}
+		}()
+	}
+	pool.Stop()
+	submitters.Wait()
+
+	if pool.SubmitMemorySummary(context.Background(), uuid.New(), func(context.Context) {}) {
+		t.Fatal("memory summary submit after stop must be rejected")
+	}
+}
+
 // mockAuditWriter records calls to CreateToolCall / CreateAILog for assertions.
 type mockAuditWriter struct {
 	mu        sync.Mutex

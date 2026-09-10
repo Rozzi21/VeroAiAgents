@@ -1,50 +1,24 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/dto"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 )
 
-// PERF-1 (3 Agu 2026): streaming chat over Server-Sent Events.
-//
-// When a client sends `{"stream": true}` to POST /chat (guest or authenticated),
-// the assistant's final text response is streamed token-by-token instead of
-// being buffered whole. Each `delta` SSE event carries a text fragment; a
-// terminal `done` event carries the full ChatResult (recommendations, workflow,
-// recommendation_reason) so the client can render package cards after the text
-// finishes. An `error` event is emitted (then the connection closed) if the
-// tool loop or stream fails mid-flight.
-//
-// Transport notes:
-//   - We reuse the BUG-4 SSE hardening pattern (ResponseController write
-//     deadline per write + Flush) so a half-open client connection is detected
-//     and the goroutine exits instead of leaking. The global WriteTimeout=15s
-//     is disabled dynamically for this long-lived response, exactly like the
-//     /events/stream handler.
-//   - The response is text/event-stream, NOT the standard JSON envelope. The
-//     envelope contract (coding-rules §1.3) governs regular JSON HTTP
-//     responses; SSE is a separate streaming transport where each event is a
-//     small JSON object. Non-stream requests still go through utils.Success.
-//   - Context propagation (SEC-26) is preserved: c.Request.Context() flows
-//     into ChatStream and into the streaming HTTP call to the provider, so a
-//     client disconnect cancels the upstream stream too.
-
-// chatStreamWriteDeadline is the per-write deadline for SSE chunks. If a write
-// (delta/flush) does not complete within this window the connection is treated
-// as dead and the handler returns. Mirrors the 10s window used by the
-// /events/stream handler (BUG-4).
 const chatStreamWriteDeadline = 10 * time.Second
 
-// streamChat runs AIService.ChatStream and forwards deltas to the client as SSE.
-// It is shared by the guest and authenticated chat endpoints. `setCookie` is an
-// optional callback invoked BEFORE the first byte of the body is written (so
-// the guest session cookie is still set on a streaming response); nil skips it.
+// PERF-1 (3 Agu 2026): streaming chat over Server-Sent Events.
+// Each `delta` carries a text fragment and terminal `done` carries full
+// ChatResult. Response remains SSE rather than standard JSON envelope.
+
 func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req dto.ChatRequest, setCookie func()) {
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
@@ -57,17 +31,13 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 	}
 
 	rc := http.NewResponseController(c.Writer)
-	// ARCH-3/BUG-4: disable the global 15s WriteTimeout for this long-lived
-	// streaming response; we manage write deadlines per-write instead.
+	// Disable global WriteTimeout; each SSE write has its own deadline.
 	_ = rc.SetWriteDeadline(time.Time{})
 
-	// ctx tracks the request lifecycle so we can stop writing as soon as the
-	// client disconnects, avoiding wasted work and goroutine hang.
+	// Request context cancels provider work and writes after disconnect.
 	ctx := c.Request.Context()
 
-	// send writes one SSE event and flushes. Returns false if the connection
-	// is dead (write/flush error) or the request has been cancelled so the
-	// caller can stop streaming.
+	// send writes and flushes one event, returning false for dead connections.
 	send := func(eventType string, data interface{}) bool {
 		if ctx.Err() != nil {
 			return false
@@ -89,11 +59,7 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 		return true
 	}
 
-	// onDelta is invoked inline by the AI client while scanning the upstream
-	// SSE stream. We forward each fragment immediately so TTFT stays low.
 	onDelta := func(text string) {
-		// If the client already disconnected, the ctx will be cancelled and
-		// GenerateStream will return shortly; ignore further write attempts.
 		if !send("delta", map[string]string{"content": text}) {
 			return
 		}
@@ -107,13 +73,23 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 		return
 	}
 
-	// Terminal event carries the full result (minus SessionID, which is
-	// json:"-"). The client uses `done` to finalize the message (packages,
-	// recommendation flags, workflow) exactly like the non-stream response.
+	// Terminal event carries full result; SessionID remains excluded by JSON tag.
+	completeChatStream(ctx, result, send, h.Services.AI.ScheduleMemorySummary)
+}
+
+func completeChatStream(
+	ctx context.Context,
+	result services.ChatResult,
+	send func(string, interface{}) bool,
+	scheduleSummary func(context.Context, uuid.UUID) bool,
+) {
 	if send("done", result) {
 		telemetry.Milestone(ctx, "done")
 		if trace := telemetry.FromContext(ctx); trace != nil {
 			trace.Complete(true)
 		}
 	}
+	// Enqueue only after the terminal write attempt. On successful streams,
+	// telemetry's done milestone is therefore always earlier than summary work.
+	scheduleSummary(ctx, result.SessionID)
 }

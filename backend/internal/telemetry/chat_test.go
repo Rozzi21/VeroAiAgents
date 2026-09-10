@@ -50,3 +50,20 @@ func TestInstrumentationFailureDoesNotChangeBehavior(t *testing.T) {
 	trace.Milestone("done")
 	trace.EndRequest()
 }
+
+func TestDetachDropsRequestCancellationAndPreservesCorrelation(t *testing.T) {
+	requestCtx, cancel := context.WithCancel(WithRequestID(context.Background(), "req-detached"))
+	requestCtx, trace := NewTrace(requestCtx, &collectingSink{})
+	cancel()
+
+	detached := Detach(requestCtx)
+	if err := detached.Err(); err != nil {
+		t.Fatalf("detached context inherited request cancellation: %v", err)
+	}
+	if RequestID(detached) != "req-detached" {
+		t.Fatalf("detached request id = %q", RequestID(detached))
+	}
+	if FromContext(detached) != trace {
+		t.Fatal("detached context must preserve telemetry trace")
+	}
+}

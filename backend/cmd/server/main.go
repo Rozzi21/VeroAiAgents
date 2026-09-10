@@ -106,15 +106,14 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	// PERF-3 #2: drain the MCP audit worker pool so in-flight tool-call + AI-log
-	// records are persisted before exit. Bounded by auditDrainTimeout.
-	serviceContainer.StopAudit()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
+	// Stop accepting requests before draining detached work. This prevents a
+	// completed chat from submitting a summary after the pool has closed.
+	serviceContainer.StopAudit()
 	log.Println("server stopped gracefully")
 }
 

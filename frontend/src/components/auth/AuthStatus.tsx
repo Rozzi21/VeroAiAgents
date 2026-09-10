@@ -42,9 +42,7 @@ export function AuthStatus() {
       }
     };
     resolve();
-    // Cross-tab sync (F-02): a login, logout, refresh, or its result marker in
-    // ANOTHER tab rewrites the vero_customer_* keys and fires a storage event
-    // here — re-resolve so this tab's UI converges to the same auth state.
+
     const onStorage = (event: StorageEvent) => {
       if (event.key === null || event.key.startsWith("vero_customer_")) {
         resolve();
@@ -63,8 +61,7 @@ export function AuthStatus() {
     }
     setLoggingOut(true);
     // customerLogout revokes the server refresh session AND clears the local
-    // token even when the network fails; the full-page navigation then drops
-    // every component's in-memory auth state.
+    // token even when the network fails
     await customerLogout();
     window.location.href = "/login";
   }, [loggingOut]);

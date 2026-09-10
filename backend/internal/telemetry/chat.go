@@ -18,8 +18,6 @@ const (
 	llmCallKey   contextKey = "chat_telemetry_llm_call"
 )
 
-// Event contains only bounded operational dimensions. RequestID is used in
-// structured logs for cross-tier correlation, never as a Prometheus label.
 type Event struct {
 	Name              string
 	RequestID         string
@@ -157,6 +155,27 @@ func RequestID(ctx context.Context) string {
 	return requestID
 }
 
+// Detach preserves only bounded chat telemetry state needed by post-response
+// work. It deliberately does not retain request cancellation, deadlines, auth,
+// session, prompt, or other request-scoped values.
+func Detach(ctx context.Context) context.Context {
+	detached := WithRequestID(context.Background(), RequestID(ctx))
+	if trace := FromContext(ctx); trace != nil {
+		detached = context.WithValue(detached, traceKey, trace)
+	}
+	return detached
+}
+
+// AttachTrace gives bounded worker context correlation for one coalesced job
+// without reintroducing request cancellation or arbitrary request values.
+func AttachTrace(ctx context.Context, trace *Trace, requestID string) context.Context {
+	ctx = WithRequestID(ctx, requestID)
+	if trace != nil {
+		ctx = context.WithValue(ctx, traceKey, trace)
+	}
+	return ctx
+}
+
 type Trace struct {
 	ctx        context.Context
 	start      time.Time
@@ -172,9 +191,9 @@ func StartChat(ctx context.Context) (context.Context, *Trace) {
 
 // NewTrace accepts an explicit sink for tests and alternate exporters.
 func NewTrace(ctx context.Context, sink Sink) (context.Context, *Trace) {
-	trace := &Trace{ctx: ctx, start: time.Now(), sink: sink, milestones: make(map[string]struct{})}
+	telemetryCtx := WithRequestID(context.Background(), RequestID(ctx))
+	trace := &Trace{ctx: telemetryCtx, start: time.Now(), sink: sink, milestones: make(map[string]struct{})}
 	ctx = context.WithValue(ctx, traceKey, trace)
-	trace.ctx = ctx
 	return ctx, trace
 }
 

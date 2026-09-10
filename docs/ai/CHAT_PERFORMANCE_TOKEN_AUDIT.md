@@ -2,6 +2,8 @@
 
 > **P0.1 baseline observability — IMPLEMENTED 10 Sep 2026.** Implementasi menambah telemetry tanpa mengubah prompt, tool/GenUI/OAuth/order behavior, response payload, jumlah call LLM, streaming behavior, memory-summary placement, atau commit boundary assistant+recommendation sebelum `done`. Backend memakai `X-Request-ID` existing sebagai korelasi structured log dan frontend mengirim ID sama lewat proxy. Prometheus tidak memakai request/user/session/PII sebagai label.
 
+> **P0.2 memory summary pasca-`done` — IMPLEMENTED 11 Sep 2026.** Assistant+recommendation tetap dipersist atomik sebelum `done`; refresh summary kini disubmit setelah terminal response lewat shared bounded `AuditPool` (2 worker, buffer 64, timeout 10 detik), best-effort dan non-blocking. Context request tidak dipakai worker: detached context hanya mempertahankan trace P0.1 dan `X-Request-ID`. Job per session di-coalesce agar tidak overlap; submission saat refresh aktif menghasilkan maksimal satu follow-up terhadap tail terbaru. Failure, timeout, pool penuh, atau shutdown tidak mengubah chat/SSE/recovery.
+
 ### Status implementasi P0.1
 
 - Backend: `backend/internal/telemetry/chat.go` mencatat request total; `auth_preparation`; `session_preparation`; `pre_llm_db_writes`; `context_query_build`; tiap `llm_round` (round/mode/status, duration, provider-reported TTFB/usage); tiap tool (name/status/duration); `assistant_persistence`; `recommendation_persistence`; `memory_summary_refresh`; `first_sse_write`; `first_delta`; `done`.
