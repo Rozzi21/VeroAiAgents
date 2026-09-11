@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -91,6 +92,24 @@ type CompletionResponse struct {
 	RawStatus int                    `json:"raw_status"`
 	Usage     Usage                  `json:"-"`
 	TTFB      *time.Duration         `json:"-"`
+}
+
+type StreamEventType string
+
+const (
+	StreamEventTextDelta StreamEventType = "text_delta"
+	StreamEventToolCall  StreamEventType = "tool_call"
+)
+
+// StreamEvent exposes provider stream classification to orchestration without
+// exposing partial tool arguments outside package ai. Text contains only
+// provider-generated assistant content; tool-call events are signals only.
+type StreamEvent struct {
+	Type StreamEventType
+	Text string
+	// ProviderGenerated is false for intentional local fallback output. This
+	// keeps first_delta telemetry tied to real provider text.
+	ProviderGenerated bool
 }
 
 // Usage contains provider-reported values only. Nil means unavailable; no
@@ -335,6 +354,18 @@ func extractString(m map[string]interface{}, key string) (string, string) {
 }
 
 func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDelta func(text string)) (CompletionResponse, error) {
+	return c.GenerateStreamEvents(ctx, req, func(event StreamEvent) {
+		if event.Type == StreamEventTextDelta && onDelta != nil {
+			onDelta(event.Text)
+		}
+	})
+}
+
+// GenerateStreamEvents consumes OpenAI-compatible SSE events inline. It emits
+// each real text delta before reading the next provider event and emits only a
+// classification signal for tool-call fragments; incomplete tool arguments
+// never leave package ai.
+func (c *Client) GenerateStreamEvents(ctx context.Context, req CompletionRequest, onEvent func(StreamEvent)) (CompletionResponse, error) {
 	finishTelemetry := telemetry.StartLLM(ctx)
 	status := "failure"
 	var result CompletionResponse
@@ -343,8 +374,8 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 	}()
 	if c.APIKey == "" {
 		fallback := "AI API key is empty; using local travel assistant fallback response."
-		if onDelta != nil {
-			onDelta(fallback)
+		if onEvent != nil {
+			onEvent(StreamEvent{Type: StreamEventTextDelta, Text: fallback})
 		}
 		result = CompletionResponse{
 			Text: fallback,
@@ -403,6 +434,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		metadata      = map[string]interface{}{}
 		usage         Usage
 		finish        string
+		providerDone  bool
 	)
 
 	// Use a bufio.Reader instead of bufio.Scanner for byte-level streaming.
@@ -439,6 +471,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		}
 		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
 		if data == "[DONE]" {
+			providerDone = true
 			break
 		}
 
@@ -451,6 +484,12 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		if ttfb == nil {
 			value := time.Since(requestStarted)
 			ttfb = &value
+		}
+		if rawError, exists := chunk["error"]; exists {
+			return CompletionResponse{
+				Text: fullText.String(), Metadata: map[string]interface{}{"error": rawError},
+				RawStatus: res.StatusCode, Usage: usage, TTFB: ttfb,
+			}, errors.New("ai provider stream returned an error event")
 		}
 		if chunkUsage := extractUsage(chunk); chunkUsage.InputTokens != nil || chunkUsage.OutputTokens != nil || chunkUsage.CachedInputTokens != nil {
 			usage = chunkUsage
@@ -466,14 +505,20 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		}
 
 		if delta, ok := choice["delta"].(map[string]interface{}); ok {
+			// Classify tool-call chunks before content. Providers may include a
+			// prose preamble and tool_calls in the same delta; orchestration must
+			// see tool classification first so that preamble is not user text.
+			if tcsRaw, ok := delta["tool_calls"].([]interface{}); ok {
+				if len(tcsRaw) > 0 && onEvent != nil {
+					onEvent(StreamEvent{Type: StreamEventToolCall, ProviderGenerated: true})
+				}
+				accumulateToolCallDeltas(toolCalls, tcsRaw)
+			}
 			if content, _ := delta["content"].(string); content != "" {
 				fullText.WriteString(content)
-				if onDelta != nil {
-					onDelta(content)
+				if onEvent != nil {
+					onEvent(StreamEvent{Type: StreamEventTextDelta, Text: content, ProviderGenerated: true})
 				}
-			}
-			if tcsRaw, ok := delta["tool_calls"].([]interface{}); ok {
-				accumulateToolCallDeltas(toolCalls, tcsRaw)
 			}
 			if rc, _ := delta["reasoning_content"].(string); rc != "" {
 				reasoningText.WriteString(rc)
@@ -482,6 +527,7 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 
 		if fr, _ := choice["finish_reason"].(string); fr != "" {
 			finish = fr
+			providerDone = true
 		}
 
 		// Keep the last chunk's id/model for metadata parity with Generate.
@@ -491,6 +537,12 @@ func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDe
 		if m, _ := chunk["model"].(string); m != "" {
 			metadata["model"] = m
 		}
+	}
+	if !providerDone {
+		return CompletionResponse{
+			Text: fullText.String(), ToolCalls: finalizeToolCalls(toolCalls), Metadata: metadata,
+			RawStatus: res.StatusCode, Usage: usage, TTFB: ttfb,
+		}, io.ErrUnexpectedEOF
 	}
 	metadata["finish_reason"] = finish
 	metadata["mode"] = "stream"

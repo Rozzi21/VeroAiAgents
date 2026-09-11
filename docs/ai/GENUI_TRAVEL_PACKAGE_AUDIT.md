@@ -244,11 +244,10 @@ highlights, image_url). Field pricing AIW-5 (`adult_price`, `discount_price`,
    (`streaming:true`).
 2. Round tool (`GenerateStream` dengan `onDelta=nil` — delta dibuang, BUG-12):
    LLM panggil `search_trips`/`select_package`/dst.
-3. Round final: umumnya TANPA delta live (B-GENUI-7); teks utuh tiba di `done`.
-4. `done`: `setMessages` finalisasi — id placeholder diganti `message_id`
-   server, packages/workflow/orderGate dipasang, `shouldAnimate` true bila tak
-   ada delta → `TypingText` mengetik; `completedTyping` diset.
-5. Render: teks → kartu (gated) → OrderGateBlock.
+3. Setelah `search_trips`, event `recommendation` dapat memasang kartu segera.
+4. Round final: provider content diteruskan sebagai `delta` dan dirender live.
+5. `done`: id placeholder diganti `message_id`; persist/workflow/orderGate
+   difinalkan tanpa animasi teks lokal.
 6. Klik kartu → panel detail (client-only; tidak mengubah state server).
 7. Reload → kartu pulih dari DB; `order_gate` + `workflow` hilang.
 
@@ -270,13 +269,12 @@ highlights, image_url). Field pricing AIW-5 (`adult_price`, `discount_price`,
 - **B-GENUI-6: tertutup 9 Sep 2026.** Pembacaan `update_order_draft` yang
   disabled dihapus. Panel tetap menampilkan default `1 Dewasa` dan durasi
   paket; tidak ada kontrak draft persisten yang bisa dipulihkan.
-- **B-GENUI-7 (sedang, baru): delta live nyaris tidak pernah mengalir.** Sejak
-  fix BUG-12, SEMUA round tool memakai `GenerateStream(..., nil)`; bila LLM
-  berhenti minta tool sebelum round habis, teks tidak di-stream — `done`
-  membawa teks utuh dan frontend mensimulasikan ketikan via `TypingText`.
-  Event `delta` hanya mengalir pada forced-final setelah `MaxToolCallRounds`
-  (5) habis. Seluruh mesin streaming frontend (buffer rAF, caret) praktis
-  jarang terpakai; TTFT jalur umum tidak lebih baik dari non-stream.
+- **B-GENUI-7: tertutup P1.1 (11 Sep 2026).** `GenerateStreamEvents` meneruskan
+  content delta provider nyata pada round final; sinyal tool-call menjaga
+  preamble/argumen tool tidak tampil. Event `recommendation` dapat merender
+  kartu segera setelah `search_trips`, sementara round final masih streaming.
+  Live request tidak lagi menjalankan `TypingText`; persist assistant tetap
+  selesai sebelum `done`.
 - **B-GENUI-8 (sedang): `order_gate` dan `workflow` tidak dipersist.** Reload
   menghilangkan auth-gate/tracking block dan konteks panel (§2.12). Backend
   punya `check_order_status` tapi tidak diekspos ke history.

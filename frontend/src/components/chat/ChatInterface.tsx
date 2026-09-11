@@ -62,14 +62,11 @@ type ChatMessage = {
   packages?: TripPackage[];
   showRecommendations?: boolean;
   recommendationReason?: "initial" | "alternative" | "";
-  shouldAnimate?: boolean;
   // Structured ordering outcome of the turn (backend-owned code). Drives the
   // sign-in / order-tracking block; never inferred from `content`.
   orderGate?: ChatOrderGate;
-  // PERF-1: while streaming, the assistant message is appended incrementally.
-  // `streaming` shows a caret and suppresses the post-stream typing animation
-  // (the text already appeared token-by-token, so animating again would
-  // re-type the whole message).
+  // While streaming, provider deltas append incrementally. `streaming` shows
+  // caret; live requests never run local TypingText.
   streaming?: boolean;
 };
 
@@ -95,7 +92,6 @@ export default function ChatInterface() {
   // restore. Opening the detail panel NEVER touches it; assistant text is
   // never parsed for it.
   const [selection, setSelection] = useState<PackageSelectionState>(initialPackageSelection);
-  const [completedTyping, setCompletedTyping] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   // Surfaces Google sign-in failures (auth_error query, invalid fragment,
   // storage rejection) delivered by OAuthReceiver below.
@@ -209,11 +205,8 @@ export default function ChatInterface() {
         const nextMessages: ChatMessage[] = mapHistoryMessages(
           data.messages,
           nextMessageId
-        ).map((message) => ({ ...message, shouldAnimate: false }));
-        setMessages(nextMessages);
-        setCompletedTyping(
-          Object.fromEntries(nextMessages.map((m) => [m.id, true]))
         );
+        setMessages(nextMessages);
       })
       .catch(() => {
         // A missing/expired guest cookie simply starts a fresh chat.
@@ -256,7 +249,6 @@ export default function ChatInterface() {
         ...items,
         { id: userId, role: "user" as const, content: text },
       ]);
-      setCompletedTyping((prev) => ({ ...prev, [userId]: true }));
 
       // PERF-1: stream the assistant response. The assistant message is added
       // incrementally as deltas arrive so we don't show an empty chat bubble
@@ -309,6 +301,18 @@ export default function ChatInterface() {
               state.buffer += fragment;
               scheduleStreamFlush();
             },
+			onRecommendation: (recommendation) => {
+				setMessages((items) => items.map((message) =>
+					message.id === assistantId
+						? {
+							...message,
+							packages: recommendation.recommended_packages ?? [],
+							showRecommendations: recommendation.show_recommendations,
+							recommendationReason: recommendation.recommendation_reason,
+						}
+						: message
+				));
+			},
             onDone: (result) => {
 			  chatTelemetry.mark("done", "success");
               if (!completion.completeNormally()) {
@@ -343,12 +347,6 @@ export default function ChatInterface() {
                 const content = wasStreaming
                   ? (target.content + pending || result.message)
                   : result.message;
-                // BUG-12: wasStreaming=true but no deltas arrived (round 1
-                // was final, onDelta was nil for tool-selection rounds).
-                // In that case target.content === "" and pending === "".
-                // Animate via TypingText so text appears token-by-token
-                // (ChatGPT-style) instead of all at once.
-                const noDeltasReceived = wasStreaming && target.content === "" && pending === "";
                 const newMsg: ChatMessage = {
                   id: finalId,
                   role: "assistant",
@@ -362,20 +360,9 @@ export default function ChatInterface() {
                   // the assistant's reply.
                   orderGate: result.order_gate,
                   streaming: false,
-                  // PERF-1 fallback: if no deltas were received (streaming
-                  // failed or was buffered), animate the text so the user
-                  // still sees a ChatGPT-style typing effect instead of the
-                  // full block appearing instantaneously.
-                  shouldAnimate: !wasStreaming || noDeltasReceived,
                 };
                 return replaceAssistantPlaceholder(items, assistantId, newMsg);
               });
-              // Mark the finalized assistant message as done typing so the
-              // recommendations block can render (it gates on completedTyping).
-              setCompletedTyping((items) => ({
-                ...items,
-                [finalId]: true,
-              }));
             },
             onError: (message) => {
 			  chatTelemetry.mark("done", "failure");
@@ -405,7 +392,7 @@ export default function ChatInterface() {
                       text,
                       assistantId,
                       nextMessageId,
-                      (historyMessage) => ({ ...historyMessage, shouldAnimate: false })
+                      (historyMessage) => historyMessage
                     );
                   const preview = reconcile(messagesRef.current);
                   if (!preview.recovered) {
@@ -414,7 +401,6 @@ export default function ChatInterface() {
                   }
                   setSelection((s) => selectionSynced(s, data.selected_trip_id ?? null));
                   setMessages((items) => reconcile(items).messages);
-                  setCompletedTyping((items) => ({ ...items, [preview.recovered!.id]: true }));
                 })
                 .catch(() => {
                   if (completion.completeRecovery()) {
@@ -493,13 +479,10 @@ export default function ChatInterface() {
                   key={message.id}
                   id={message.id}
                   message={message}
-                  completedTyping={completedTyping[message.id]}
                   onViewDetails={setSelectedPackage}
                   onSelectPackage={handleSelectPackage}
                   selectedTripId={selection.selectedTripId}
                   pendingTripId={selection.pendingTripId}
-                  scrollToBottom={scrollToBottom}
-                  onTypingDone={setCompletedTyping}
 				  onPaint={(id, renderedRecommendation) => {
 					const telemetry = turnTelemetryByMessageRef.current.get(id);
 					if (!telemetry) return;
@@ -582,7 +565,6 @@ export default function ChatInterface() {
 type AssistantMessageProps = {
   id: string;
   message: ChatMessage;
-  completedTyping: boolean;
   // View Details: opens the PackageDetailPanel only — never selects (B-GENUI-3).
   onViewDetails: (trip: TripPackage) => void;
   // Select Package: the backend-authoritative selection flow (B-GENUI-3).
@@ -590,37 +572,26 @@ type AssistantMessageProps = {
   // Backend-echoed selection state used to mark the active card.
   selectedTripId: string | null;
   pendingTripId: string | null;
-  scrollToBottom: (behavior?: ScrollBehavior) => void;
-  onTypingDone: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   onPaint: (id: string, renderedRecommendation: boolean) => void;
 };
 
 const AssistantMessage = memo(function AssistantMessage({
   id,
   message,
-  completedTyping,
   onViewDetails,
   onSelectPackage,
   selectedTripId,
   pendingTripId,
-  scrollToBottom,
-  onTypingDone,
   onPaint,
 }: AssistantMessageProps) {
-  const handleTypingDone = useCallback(() => {
-    onTypingDone((items) => ({ ...items, [id]: true }));
-  }, [onTypingDone, id]);
-
   useEffect(() => {
     onPaint(
       id,
       Boolean(
-        message.showRecommendations &&
-          message.packages?.length &&
-          completedTyping
+			message.showRecommendations && message.packages?.length
       )
     );
-  }, [completedTyping, id, message.packages, message.showRecommendations, onPaint]);
+  }, [id, message.packages, message.showRecommendations, onPaint]);
 
   return (
     <div className="flex items-start gap-4">
@@ -639,20 +610,13 @@ const AssistantMessage = memo(function AssistantMessage({
               {message.content}
               <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded bg-[#df3333] align-[-2px]" />
             </p>
-          ) : message.shouldAnimate ? (
-            <TypingText
-              text={message.content}
-              onUpdate={scrollToBottom}
-              onDone={handleTypingDone}
-            />
           ) : (
             <p className="whitespace-pre-wrap">{message.content}</p>
           )}
         </div>
         {message.showRecommendations &&
           message.packages &&
-          message.packages.length > 0 &&
-          completedTyping && (
+		  message.packages.length > 0 && (
             <PackageRecommendations
               packages={message.packages}
               reason={message.recommendationReason}
@@ -716,64 +680,6 @@ function OrderGateBlock({ gate }: { gate?: ChatOrderGate }) {
         </div>
       ) : null}
     </div>
-  );
-}
-
-function TypingText({
-  text,
-  onUpdate,
-  onDone,
-}: {
-  text: string;
-  onUpdate?: () => void;
-  onDone: () => void;
-}) {
-  const [visibleLength, setVisibleLength] = useState(0);
-  const doneRef = useRef(false);
-  const onDoneRef = useRef(onDone);
-  const onUpdateRef = useRef(onUpdate);
-  const charsPerTick = text.length > 500 ? 4 : 2;
-
-  useEffect(() => {
-    onDoneRef.current = onDone;
-  }, [onDone]);
-
-  useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
-
-  useEffect(() => {
-    setVisibleLength(0);
-    doneRef.current = false;
-  }, [text]);
-
-  useEffect(() => {
-    if (visibleLength >= text.length) {
-      if (!doneRef.current) {
-        doneRef.current = true;
-        onDoneRef.current();
-      }
-      return;
-    }
-    const timer = window.setTimeout(() => {
-      setVisibleLength((current) => Math.min(current + charsPerTick, text.length));
-    }, 16);
-    return () => window.clearTimeout(timer);
-  }, [charsPerTick, text.length, visibleLength]);
-
-  // Drive scroll from a separate effect so the typing effect itself doesn't
-  // re-render on every scroll callback identity change.
-  useEffect(() => {
-    onUpdateRef.current?.();
-  }, [visibleLength]);
-
-  return (
-    <p className="whitespace-pre-wrap">
-      {text.slice(0, visibleLength)}
-      {visibleLength < text.length && (
-        <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded bg-[#df3333] align-[-2px]" />
-      )}
-    </p>
   );
 }
 

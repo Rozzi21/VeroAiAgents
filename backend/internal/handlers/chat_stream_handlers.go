@@ -35,7 +35,8 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 	_ = rc.SetWriteDeadline(time.Time{})
 
 	// Request context cancels provider work and writes after disconnect.
-	ctx := c.Request.Context()
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
 
 	// send writes and flushes one event, returning false for dead connections.
 	send := func(eventType string, data interface{}) bool {
@@ -50,22 +51,31 @@ func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req d
 		_, _ = c.Writer.WriteString("event: " + eventType + "\n")
 		_, _ = c.Writer.WriteString("data: " + string(payload) + "\n\n")
 		if err := rc.Flush(); err != nil {
+			cancel()
 			return false
 		}
 		telemetry.Milestone(ctx, "first_sse_write")
-		if eventType == "delta" {
-			telemetry.Milestone(ctx, "first_delta")
-		}
 		return true
 	}
 
-	onDelta := func(text string) {
-		if !send("delta", map[string]string{"content": text}) {
-			return
+	onEvent := func(event services.ChatStreamEvent) {
+		switch event.Type {
+		case "delta":
+			if send("delta", map[string]string{"content": event.Content}) && event.ProviderGenerated {
+				telemetry.Milestone(ctx, "first_delta")
+			}
+		case "recommendation":
+			if !send("recommendation", map[string]interface{}{
+				"show_recommendations":  event.ShowRecommendations,
+				"recommendation_reason": event.RecommendationReason,
+				"recommended_packages":  event.RecommendedPackages,
+			}) {
+				return
+			}
 		}
 	}
 
-	result, err := h.Services.AI.ChatStream(ctx, chatCtx, req, onDelta)
+	result, err := h.Services.AI.ChatStream(ctx, chatCtx, req, onEvent)
 	if err != nil {
 		// Try to surface the error to the client; if the connection is already
 		// dead the send is a no-op and we just return.

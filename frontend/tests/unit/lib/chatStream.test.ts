@@ -21,6 +21,15 @@ function sseResponse(blocks: Array<{ event: string; data: unknown }>): Response 
   });
 }
 
+function chunkedSseResponse(chunks: Uint8Array[]): Response {
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(chunk);
+      controller.close();
+    },
+  }), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
 type Collected = { deltas: string[]; done: ChatResponse[]; errors: string[] };
 
 async function run(): Promise<Collected> {
@@ -232,4 +241,52 @@ test("telemetry callbacks receive request lifecycle and correlation id", async (
   });
   assert.deepEqual(marks, ["request-start", "headers:req-chat-1", "first-event", "done"]);
   assert.equal(new Headers(lastInit?.headers).get("X-Request-ID"), "req-chat-1");
+});
+
+test("multiple events per chunk and one split event preserve delta order", async () => {
+  const encoder = new TextEncoder();
+  stubFetch(chunkedSseResponse([
+    encoder.encode('event: delta\ndata: {"content":"A"}\n\nevent: del'),
+    encoder.encode('ta\ndata: {"content":"B"}\n\nevent: done\ndata: {"message":"AB","show_recommendations":false,"recommendation_reason":""}\n\n'),
+  ]));
+  const result = await run();
+  assert.deepEqual(result.deltas, ["A", "B"]);
+  assert.equal(result.done[0].message, "AB");
+  assert.deepEqual(result.errors, []);
+});
+
+test("streaming TextDecoder preserves multibyte UTF-8 split across chunks", async () => {
+  const bytes = new TextEncoder().encode('event: delta\ndata: {"content":"Bali 🌴"}\n\nevent: done\ndata: {"message":"Bali 🌴","show_recommendations":false,"recommendation_reason":""}\n\n');
+  const emojiStart = bytes.findIndex((value) => value === 0xf0);
+  stubFetch(chunkedSseResponse([bytes.slice(0, emojiStart + 2), bytes.slice(emojiStart + 2)]));
+  const result = await run();
+  assert.deepEqual(result.deltas, ["Bali 🌴"]);
+  assert.equal(result.done[0].message, "Bali 🌴");
+});
+
+test("final done without trailing blank line is processed at EOF", async () => {
+  stubFetch(chunkedSseResponse([new TextEncoder().encode(
+    'event: delta\ndata: {"content":"tail"}\n\nevent: done\ndata: {"message":"tail","show_recommendations":false,"recommendation_reason":""}'
+  )]));
+  const result = await run();
+  assert.deepEqual(result.deltas, ["tail"]);
+  assert.equal(result.done.length, 1);
+  assert.deepEqual(result.errors, []);
+});
+
+test("recommendation event arrives before remaining text and done", async () => {
+  const order: string[] = [];
+  stubFetch(sseResponse([
+    { event: "delta", data: { content: "Pilihan: " } },
+    { event: "recommendation", data: { show_recommendations: true, recommendation_reason: "initial", recommended_packages: [{ id: "trip-1", title: "Bali" }] } },
+    { event: "delta", data: { content: "silakan pilih." } },
+    { event: "done", data: { message: "Pilihan: silakan pilih.", show_recommendations: true, recommendation_reason: "initial", recommended_packages: [] } },
+  ]));
+  await streamChat("/api/v1/chat", { prompt: "x", stream: true }, {
+    onDelta: (text) => order.push(`delta:${text}`),
+    onRecommendation: () => order.push("recommendation"),
+    onDone: () => order.push("done"),
+    onError: (error) => assert.fail(error),
+  });
+  assert.deepEqual(order, ["delta:Pilihan: ", "recommendation", "delta:silakan pilih.", "done"]);
 });

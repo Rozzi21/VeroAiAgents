@@ -437,6 +437,7 @@ export type ChatStreamHandlers = {
 	onResponseHeaders?: (requestID: string) => void;
 	onFirstEvent?: () => void;
   onDelta: (text: string) => void;
+	onRecommendation?: (result: Pick<ChatResponse, "show_recommendations" | "recommendation_reason" | "recommended_packages">) => void;
   onDone: (result: ChatResponse) => void;
   onError: (message: string) => void;
 };
@@ -445,15 +446,23 @@ export type ChatStreamHandlers = {
 // separators) into its `event` and `data` fields per the SSE wire format.
 function parseSSEBlock(raw: string): { event: string; data: string } {
   let event = "message";
-  let data = "";
-  for (const line of raw.split("\n")) {
+	const dataLines: string[] = [];
+  for (const line of raw.replace(/\r\n/g, "\n").split("\n")) {
     if (line.startsWith("event:")) {
       event = line.slice("event:".length).trim();
     } else if (line.startsWith("data:")) {
-      data += line.slice("data:".length).trim();
+		dataLines.push(line.slice("data:".length).replace(/^ /, ""));
     }
   }
-  return { event, data };
+  return { event, data: dataLines.join("\n") };
+}
+
+function nextSSESeparator(buffer: string): { index: number; length: number } | null {
+	const lf = buffer.indexOf("\n\n");
+	const crlf = buffer.indexOf("\r\n\r\n");
+	if (lf < 0 && crlf < 0) return null;
+	if (crlf >= 0 && (lf < 0 || crlf < lf)) return { index: crlf, length: 4 };
+	return { index: lf, length: 2 };
 }
 
 // streamChat POSTs a chat request with `stream: true` and consumes the SSE
@@ -535,6 +544,31 @@ export async function streamChat(
     reportedError = true;
     handlers.onError(message);
   };
+	const processBlock = (rawBlock: string) => {
+		if (rawBlock.trim() === "") return;
+		const { event, data } = parseSSEBlock(rawBlock);
+		if (!data) return;
+		try {
+			if (!receivedFirstEvent) {
+				receivedFirstEvent = true;
+				handlers.onFirstEvent?.();
+			}
+			if (event === "delta") {
+				const parsed = JSON.parse(data) as { content?: string };
+				if (parsed.content) handlers.onDelta(parsed.content);
+			} else if (event === "recommendation") {
+				handlers.onRecommendation?.(JSON.parse(data));
+			} else if (event === "done") {
+				receivedDone = true;
+				handlers.onDone(JSON.parse(data) as ChatResponse);
+			} else if (event === "error") {
+				const parsed = JSON.parse(data) as { message?: string };
+				reportError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
+			}
+		} catch {
+			// Skip malformed event payloads without aborting stream.
+		}
+	};
 
   try {
     for (;;) {
@@ -546,44 +580,21 @@ export async function streamChat(
 
       // SSE events are separated by a blank line. Process every complete block
       // in the buffer; keep the trailing partial block for the next iteration.
-      let sep: number;
-      while ((sep = buffer.indexOf("\n\n")) >= 0) {
-        const rawBlock = buffer.slice(0, sep);
-        buffer = buffer.slice(sep + 2);
-        if (rawBlock.trim() === "") {
-          continue;
-        }
-        const { event, data } = parseSSEBlock(rawBlock);
-        if (!data) {
-          continue;
-        }
-        try {
-				if (!receivedFirstEvent) {
-					receivedFirstEvent = true;
-					handlers.onFirstEvent?.();
-				}
-          if (event === "delta") {
-            const parsed = JSON.parse(data) as { content?: string };
-            if (parsed.content) {
-              handlers.onDelta(parsed.content);
-            }
-          } else if (event === "done") {
-            const parsed = JSON.parse(data) as ChatResponse;
-            receivedDone = true;
-            handlers.onDone(parsed);
-          } else if (event === "error") {
-            const parsed = JSON.parse(data) as { message?: string };
-            reportError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
-          }
-        } catch {
-          // Skip malformed event payloads without aborting the stream.
-        }
+		let separator: ReturnType<typeof nextSSESeparator>;
+		while ((separator = nextSSESeparator(buffer)) !== null) {
+			const rawBlock = buffer.slice(0, separator.index);
+			buffer = buffer.slice(separator.index + separator.length);
+			processBlock(rawBlock);
       }
     }
   } catch {
-    reportError("Koneksi terputus saat memuat respons. Coba lagi.");
+		reportError(options.signal?.aborted
+			? "Permintaan dibatalkan."
+			: "Koneksi terputus saat memuat respons. Coba lagi.");
     return;
   }
+	buffer += decoder.decode();
+	if (buffer.trim() !== "") processBlock(buffer);
 
   // A successful HTTP response can still end before the backend's terminal
   // `done` event reaches this client. Tell the UI exactly once so it can

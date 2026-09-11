@@ -84,3 +84,25 @@ func TestCompleteChatStreamSummaryFailureDoesNotChangeDone(t *testing.T) {
 		t.Fatal("summary scheduling failure must not fail successful done")
 	}
 }
+
+func TestProviderDeltaTelemetryUsesRealProviderFlagAndRequestCorrelation(t *testing.T) {
+	sink := &orderedTelemetrySink{}
+	ctx := telemetry.WithRequestID(context.Background(), "req-stream-1")
+	ctx, _ = telemetry.NewTrace(ctx, sink)
+	write := func(event services.ChatStreamEvent) {
+		if event.Type == "delta" && event.ProviderGenerated {
+			telemetry.Milestone(ctx, "first_delta")
+		}
+	}
+	write(services.ChatStreamEvent{Type: "delta", Content: "local fallback"})
+	write(services.ChatStreamEvent{Type: "delta", Content: "real", ProviderGenerated: true})
+	write(services.ChatStreamEvent{Type: "delta", Content: "later", ProviderGenerated: true})
+	if names := sink.names(); len(names) != 1 || names[0] != "first_delta" {
+		t.Fatalf("milestones = %v, want one real first_delta", names)
+	}
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if sink.events[0].RequestID != "req-stream-1" {
+		t.Fatalf("request id = %q", sink.events[0].RequestID)
+	}
+}

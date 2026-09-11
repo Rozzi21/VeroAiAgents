@@ -77,6 +77,18 @@ type ChatResult struct {
 	SelectedTripID *uuid.UUID `json:"selected_trip_id,omitempty"`
 }
 
+// ChatStreamEvent is transport-neutral output produced during orchestration.
+// Recommendation events contain only structured GenUI data already returned
+// in ChatResult; delta events contain real provider text only.
+type ChatStreamEvent struct {
+	Type                 string
+	Content              string
+	ProviderGenerated    bool
+	ShowRecommendations  bool
+	RecommendationReason string
+	RecommendedPackages  []models.Trip
+}
+
 // ChatOrderGate mirrors, for the chat transport, what `error.code` already does
 // for the REST transport: a stable code plus the single bit of intent the client
 // needs. The backend stays the authority — this only reports a decision the
@@ -442,23 +454,19 @@ func (s *AIService) ScheduleMemorySummary(ctx context.Context, sessionID uuid.UU
 	return accepted
 }
 
-// ChatStream is the streaming counterpart of Chat (PERF-1, 3 Agu 2026). It runs
-// the same tool loop, but the FINAL assistant text response is produced with
-// GenerateStream: each token delta is forwarded to onDelta as soon as it
-// arrives so the HTTP handler can flush it to the client over SSE and slash
-// Time-To-First-Token. Tool-call rounds stay non-streaming (they need the full
-// tool_calls array before dispatching via MCP); only the final text round —
-// where user-perceived latency concentrates — is streamed.
+// ChatStream is streaming counterpart of Chat. Every provider round uses
+// GenerateStreamEvents. Text-only rounds forward real provider deltas inline;
+// tool-call fragments remain private until complete MCP dispatch.
 //
-// onDelta is invoked from the AI client goroutine inline with the SSE scan, so
+// onEvent is invoked inline with provider SSE scan, so
 // the handler must flush promptly (it already does, per BUG-4 write-detection).
-// If onDelta is nil the call degrades to a non-streaming final round but still
+// If onEvent is nil call still
 // returns a ChatResult, which keeps the streaming handler resilient.
 //
 // Context propagation (SEC-26) is unchanged: the same request ctx flows into
 // the streaming HTTP request, so a client disconnect cancels the stream
 // mid-flight and ChatStream returns ctx.Err().
-func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto.ChatRequest, onDelta func(text string)) (ChatResult, error) {
+func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto.ChatRequest, onEvent func(ChatStreamEvent)) (ChatResult, error) {
 	sessionID := chatCtx.SessionID
 	if sessionID == uuid.Nil {
 		return ChatResult{}, errors.New("chat session is required")
@@ -487,8 +495,41 @@ func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto
 
 	// PERF-4: pass the already-fetched `session` struct (same rationale as
 	// Chat above) to avoid a redundant FindChatSession in buildMessages.
-	aiResponse, toolResults, err := s.generateWithToolLoopStream(ctx, session, req.Prompt, chatCtx.UserID, onDelta)
+	providerDeltaSent := false
+	forward := func(event ChatStreamEvent) {
+		if event.Type == "delta" && event.ProviderGenerated {
+			providerDeltaSent = true
+		}
+		if onEvent != nil {
+			onEvent(event)
+		}
+	}
+	aiResponse, toolResults, err := s.generateWithToolLoopStream(ctx, session, req.Prompt, chatCtx.UserID, forward)
+	if ctx.Err() != nil {
+		return ChatResult{}, ctx.Err()
+	}
+	// Once real provider text is client-visible, failure must remain terminal:
+	// persisting a friendly replacement and emitting done would turn a partial
+	// failed generation into a false success and corrupt history reconciliation.
+	if err != nil && providerDeltaSent {
+		return ChatResult{}, err
+	}
 	return s.finalizeChat(ctx, sessionID, aiResponse, toolResults, err)
+}
+
+func recommendationStreamEvent(toolResults []ToolResult) *ChatStreamEvent {
+	packages := extractRecommendedPackages(toolResults, nil)
+	if len(packages) == 0 || hasSuccessfulCreateBooking(toolResults) {
+		return nil
+	}
+	reason := recommendationReasonFromToolResults(toolResults)
+	if reason == "" {
+		reason = "initial"
+	}
+	return &ChatStreamEvent{
+		Type: "recommendation", ShowRecommendations: true,
+		RecommendationReason: reason, RecommendedPackages: packages,
+	}
 }
 
 func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.UUID) []models.Trip {
@@ -842,6 +883,8 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 		}
 
 		if len(resp.ToolCalls) == 0 {
+			// Local fallback intentionally remains non-streaming. No provider
+			// delta or first_delta milestone is fabricated for it.
 			return resp, allToolResults, nil
 		}
 
@@ -876,11 +919,9 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 // wasted an API call and could cause the second call to fail when the first
 // consumed most of the AITimeout budget.
 //
-// If GenerateStream with tools fails (some providers reject stream + tools
-// combinations), we fall back to non-streaming Generate. The frontend's
-// shouldAnimate fallback then animates the text so the user still sees a
-// typing effect.
-func (s *AIService) generateWithToolLoopStream(ctx context.Context, session models.ChatSession, prompt string, userID *uuid.UUID, onDelta func(text string)) (ai.CompletionResponse, []ToolResult, error) {
+// If GenerateStream with tools fails before visible content (some providers
+// reject stream + tools combinations), fallback remains non-streaming Generate.
+func (s *AIService) generateWithToolLoopStream(ctx context.Context, session models.ChatSession, prompt string, userID *uuid.UUID, onEvent func(ChatStreamEvent)) (ai.CompletionResponse, []ToolResult, error) {
 	// Same rationale as generateWithToolLoop: each individual API call is guarded
 	// by the HTTP client's timeout (cfg.AITimeout, 35s). The overall loop is
 	// bounded by MaxToolCallRounds (5). A single context.WithTimeout wrapping
@@ -893,6 +934,7 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 
 	var allToolResults []ToolResult
 	calledTools := make(map[string]bool)
+	recommendationSent := false
 
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
 		messages, budgetDecision := llmContext.messagesForRequest(tools, s.contextTokenBudget())
@@ -902,23 +944,36 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 		// still dispatch tools after the stream completes. This halves the
 		// API call count vs the old Generate+GenerateStream double-call.
 		//
-		// BUG-12 (11 Agu 2026): pass nil onDelta here. Some providers emit
-		// partial `content` alongside `tool_calls` in tool-selection rounds
-		// (e.g. reasoning preamble "The..."). If forwarded to onDelta, that
-		// fragment is appended to the frontend buffer; the final round then
-		// streams the full text again → duplicated prefix ("TheTheHalo!").
-		// Only the FINAL text round (no tool_calls, or exhausted rounds)
-		// forwards deltas to the user.
+		// Forward provider text inline. ai.Client emits tool classification before
+		// content from a mixed chunk, preserving BUG-12 without buffering plain
+		// final rounds. Tool arguments remain private and accumulated by ai.Client.
+		toolRound := false
+		textCommitted := false
+		handleProviderEvent := func(event ai.StreamEvent) {
+			if event.Type == ai.StreamEventToolCall {
+				toolRound = true
+				return
+			}
+			if event.Type != ai.StreamEventTextDelta || event.Text == "" || !event.ProviderGenerated || toolRound {
+				return
+			}
+			textCommitted = true
+			if onEvent != nil {
+				onEvent(ChatStreamEvent{Type: "delta", Content: event.Text, ProviderGenerated: event.ProviderGenerated})
+			}
+		}
 		llmCtx := telemetry.WithLLMCall(ctx, round+1, "stream")
-		resp, err := s.client.GenerateStream(llmCtx, ai.CompletionRequest{
+		resp, err := s.client.GenerateStreamEvents(llmCtx, ai.CompletionRequest{
 			Messages: messages,
 			Tools:    tools,
-		}, nil)
+		}, handleProviderEvent)
 		if err != nil {
+			// Never retry after user-visible provider text or cancellation.
+			// Replaying could duplicate output; cancellation must stop work.
+			if textCommitted || ctx.Err() != nil {
+				return resp, allToolResults, err
+			}
 			// Fallback: some providers reject stream + tools combinations.
-			// Use non-streaming Generate to get the response. The frontend's
-			// shouldAnimate fallback will animate the text so the user still
-			// sees a typing effect.
 			log.Printf("[ai] stream with tools failed (round %d), falling back to non-streaming: %v", round+1, err)
 			fallbackCtx := telemetry.WithLLMCall(ctx, round+1, "non_stream_fallback")
 			resp, err = s.client.Generate(fallbackCtx, ai.CompletionRequest{
@@ -931,14 +986,6 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 		}
 
 		if len(resp.ToolCalls) == 0 {
-			// No tools requested — this is the final text response, but it
-			// was produced with nil onDelta (see BUG-12 above), so the text
-			// was NOT streamed live. Do NOT emit a single-shot delta here:
-			// that would make the text appear all at once (wasStreaming=true
-			// → shouldAnimate=false → no typing effect). Instead, return the
-			// response as-is; since no deltas arrived, the frontend's onDone
-			// handler sets shouldAnimate=!wasStreaming=true, and TypingText
-			// animates the text token-by-token (ChatGPT-style typing effect).
 			return resp, allToolResults, nil
 		}
 
@@ -955,13 +1002,23 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 			allToolResults = append(allToolResults, toolResult)
 			llmContext.append(toolMsg)
 		}
+		if !recommendationSent && onEvent != nil {
+			if recommendation := recommendationStreamEvent(allToolResults); recommendation != nil {
+				onEvent(*recommendation)
+				recommendationSent = true
+			}
+		}
 	}
 
 	log.Printf("[ai] exhausted %d tool call rounds, forcing streamed final text response", ai.MaxToolCallRounds)
 	messages, budgetDecision := llmContext.messagesForRequest(nil, s.contextTokenBudget())
 	telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
 	llmCtx := telemetry.WithLLMCall(ctx, ai.MaxToolCallRounds+1, "stream")
-	resp, err := s.client.GenerateStream(llmCtx, ai.CompletionRequest{Messages: messages}, onDelta)
+	resp, err := s.client.GenerateStreamEvents(llmCtx, ai.CompletionRequest{Messages: messages}, func(event ai.StreamEvent) {
+		if event.Type == ai.StreamEventTextDelta && event.Text != "" && event.ProviderGenerated && onEvent != nil {
+			onEvent(ChatStreamEvent{Type: "delta", Content: event.Text, ProviderGenerated: event.ProviderGenerated})
+		}
+	})
 	return resp, allToolResults, err
 }
 

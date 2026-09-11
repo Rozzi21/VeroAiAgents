@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers,
       body,
+	  signal: request.signal,
     });
   } catch {
     return new Response(
