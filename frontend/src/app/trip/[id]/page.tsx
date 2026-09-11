@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, use, useEffect, useRef, useState } from "react";
 import { ArrowLeft, MapPin, Clock, CheckCircle2, Plane, BedDouble, Ticket, ShieldCheck } from "lucide-react";
 import { APIError, apiFetch, assetURL, BookingOrder, ensureCustomerSession, TripPackage } from "@/lib/api";
 import { getTripAdultPrice, getTripChildPrice } from "@/lib/format";
@@ -9,7 +9,8 @@ import { TripPriceBlock, TripPriceInline } from "@/components/pricing/TripPriceB
 import { GoogleButton } from "@/components/auth/GoogleButton";
 import { OAuthReceiver } from "@/components/auth/OAuthReceiver";
 
-export default function TripDetailPage({ params }: { params: { id: string } }) {
+export default function TripDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [trip, setTrip] = useState<TripPackage | null>(null);
   const [creatingOrder, setCreatingOrder] = useState(false);
   const [order, setOrder] = useState<BookingOrder | null>(null);
@@ -20,10 +21,10 @@ export default function TripDetailPage({ params }: { params: { id: string } }) {
   const idempotencyKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    apiFetch<TripPackage>(`/api/v1/packages/${params.id}`)
+    apiFetch<TripPackage>(`/api/v1/packages/${id}`)
       .then(setTrip)
       .catch(() => setTrip(null));
-  }, [params.id]);
+  }, [id]);
 
   if (!trip) {
     return (

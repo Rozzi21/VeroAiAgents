@@ -15,19 +15,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 )
 
-// GenUI persistence (6 Sep 2026): the Travel Package recommendation of an
-// assistant turn is persisted TOGETHER with the assistant message, keyed by
-// the stable server-owned ChatMessage.ID, so a reload reconstructs the cards
-// from the DB alone — without re-running search_trips or the LLM.
-//
-// No DB, no network, no LLM: the repository is mocked through the SEC-27
-// AIRepository interface and the AIService under test is built WITHOUT an AI
-// client (client == nil), which structurally proves the history path cannot
-// call the LLM.
-
-// mockAIRepo implements AIRepository (ChatRepository + CreateAILog) in memory.
-// AddChatMessage assigns the ID exactly like GORM's BeforeCreate hook so the
-// stable-message-id contract is exercised end to end.
 type mockAIRepo struct {
 	session  models.ChatSession
 	messages []models.ChatMessage
@@ -39,7 +26,7 @@ func (m *mockAIRepo) FindChatSession(_ context.Context, id uuid.UUID) (models.Ch
 }
 func (m *mockAIRepo) AddChatMessage(_ context.Context, msg *models.ChatMessage) error {
 	if msg.ID == uuid.Nil {
-		msg.ID = uuid.New() // mirrors models.BaseModel.BeforeCreate
+		msg.ID = uuid.New()
 	}
 	m.messages = append(m.messages, *msg)
 	return nil
@@ -89,15 +76,10 @@ func newGenUIAIService(repo *mockAIRepo) *AIService {
 	return &AIService{
 		repo: repo,
 		bus:  events.NewBus(),
-		// client stays nil on purpose: any accidental LLM call panics.
-		cfg: config.Config{AIMemorySummaryAfter: 1000},
+		cfg:  config.Config{AIMemorySummaryAfter: 1000},
 	}
 }
 
-// TestFinalizeChatPersistsRecommendation locks requirements 1+2+7: the
-// recommendation metadata is persisted with the assistant message, the
-// returned MessageID is the persisted message's stable id, and the
-// recommendation belongs to THAT message (not a second one).
 func TestFinalizeChatPersistsRecommendation(t *testing.T) {
 	repo := &mockAIRepo{session: models.ChatSession{}}
 	svc := newGenUIAIService(repo)
@@ -124,8 +106,6 @@ func TestFinalizeChatPersistsRecommendation(t *testing.T) {
 		t.Fatal("MessageID must be the stable id of the persisted assistant message")
 	}
 
-	// Exactly ONE assistant message persisted — the recommendation rides on
-	// it, it is never a second independent message.
 	if len(repo.messages) != 1 {
 		t.Fatalf("expected exactly 1 persisted message, got %d", len(repo.messages))
 	}
@@ -147,10 +127,6 @@ func TestFinalizeChatPersistsRecommendation(t *testing.T) {
 	}
 }
 
-// TestFinalizeChatNoRecommendationWhenSelected locks backward compatibility
-// and the existing BUG-13 guard: a session with a selected package persists a
-// plain assistant message (Recommendation nil), which reload renders as
-// text-only like every old message.
 func TestFinalizeChatNoRecommendationWhenSelected(t *testing.T) {
 	selected := uuid.New()
 	repo := &mockAIRepo{session: models.ChatSession{SelectedTripID: &selected}}
@@ -178,15 +154,11 @@ func TestFinalizeChatNoRecommendationWhenSelected(t *testing.T) {
 	}
 }
 
-// TestGetGuestHistoryReconstructsWithoutLLM locks requirements 3+4+5: history
-// reload returns the persisted recommendation metadata untouched, and the
-// path structurally cannot call search_trips (MCP executor is nil) or the LLM
-// (client is nil) — any such call would panic.
 func TestGetGuestHistoryReconstructsWithoutLLM(t *testing.T) {
 	sessionID := uuid.New()
 	tripID := uuid.New()
 	repo := &mockAIRepo{
-		session: models.ChatSession{}, // guest session: UserID nil, not expired
+		session: models.ChatSession{},
 		messages: []models.ChatMessage{
 			{BaseModel: models.BaseModel{ID: uuid.New()}, SessionID: sessionID, Role: "user", Content: "cari paket bali"},
 			{
@@ -198,7 +170,6 @@ func TestGetGuestHistoryReconstructsWithoutLLM(t *testing.T) {
 					RecommendedPackages:  []models.Trip{{BaseModel: models.BaseModel{ID: tripID}, Title: "Bali Adventure 3D2N"}},
 				},
 			},
-			// Old message without metadata must pass through untouched.
 			{BaseModel: models.BaseModel{ID: uuid.New()}, SessionID: sessionID, Role: "assistant", Content: "Ada lagi yang bisa dibantu?"},
 		},
 	}
@@ -224,15 +195,11 @@ func TestGetGuestHistoryReconstructsWithoutLLM(t *testing.T) {
 	if messages[2].Recommendation != nil {
 		t.Fatal("old message without metadata must stay metadata-free (no invented data)")
 	}
-	// Stable ids survive reload verbatim.
 	if messages[1].ID != repo.messages[1].ID {
 		t.Fatal("history must return the stable server-owned message id")
 	}
 }
 
-// TestChatRecommendationJSONShape locks the wire contract the frontend maps:
-// snake_case keys identical to the ChatResult recommendation fields, so the
-// history payload and the SSE `done` payload are interchangeable.
 func TestChatRecommendationJSONShape(t *testing.T) {
 	rec := models.ChatRecommendation{
 		ShowRecommendations:  true,
