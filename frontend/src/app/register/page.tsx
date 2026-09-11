@@ -5,6 +5,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { apiFetch, setCustomerAccessToken } from "@/lib/api";
 import { AuthForm } from "@/components/auth/AuthForm";
 import { GoogleButton } from "@/components/auth/GoogleButton";
+import { GuestButton } from "@/components/auth/GuestButton";
 import { OAuthReceiver } from "@/components/auth/OAuthReceiver";
 
 type AuthResponse = { access_token: string; expires_in?: number };
@@ -41,6 +42,7 @@ export default function RegisterPage() {
             <GoogleButton />
           </Suspense>
         }
+        guest={<GuestButton />}
         footer={<Link href="/login">Already have an account? Login</Link>}
       />
     </>

@@ -13,9 +13,12 @@ type AuthFormProps = {
   // credential inputs, with an "or" divider beneath it (optional so existing
   // callers are unaffected).
   google?: React.ReactNode;
+  // guest renders an explicit account-free path below the credential submit.
+  // It remains optional so other auth forms keep their existing layout.
+  guest?: React.ReactNode;
 };
 
-export function AuthForm({ title, submitLabel, onSubmit, error, footer, includeName = false, google }: AuthFormProps) {
+export function AuthForm({ title, submitLabel, onSubmit, error, footer, includeName = false, google, guest }: AuthFormProps) {
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-16">
       <form onSubmit={onSubmit} className="mx-auto max-w-md space-y-4 rounded-3xl bg-white p-8 shadow-sm">
@@ -35,6 +38,16 @@ export function AuthForm({ title, submitLabel, onSubmit, error, footer, includeN
         <input name="password" type="password" required minLength={8} placeholder="Password" className="w-full rounded-xl border p-3" />
         {error ? <p className="text-sm text-rose-700">{error}</p> : null}
         <button className="w-full rounded-xl bg-[#df3333] p-3 font-bold text-white">{submitLabel}</button>
+        {guest ? (
+          <>
+            <div className="flex items-center gap-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <span className="h-px flex-1 bg-slate-200" />
+              or continue without an account
+              <span className="h-px flex-1 bg-slate-200" />
+            </div>
+            {guest}
+          </>
+        ) : null}
         <div className="text-center text-sm text-[#df3333]">{footer}</div>
       </form>
     </main>
