@@ -23,37 +23,19 @@ var ErrIdempotencyKeyRequired = errors.New("idempotency key is required")
 var ErrBookingContactRequired = errors.New("contact email or phone is required")
 var ErrBookingTravelDateInvalid = errors.New("travel date is invalid")
 
-// CodeGuestOrderLimitReached is the STABLE machine-readable code every transport
-// exposes when ErrGuestOrderLimitReached escapes the booking domain: HTTP
-// (`error.code` on 403, booking_handlers.go), MCP tool results (`data.code`,
-// mcp_service.go) and the chat order gate (ChatResult.OrderGate, ai_service.go).
-//
-// It is declared here, next to the error it maps from, because it is the ONLY
-// thing clients and the LLM are allowed to branch on. The human-readable
-// message is for display and may be reworded/translated at any time; the code
-// may not. Never derive the guest rule from a message string — the rule lives in
-// BookingService.create and is enforced by the database.
+// CodeGuestOrderLimitReached is shared by HTTP, MCP, and chat clients.
 const CodeGuestOrderLimitReached = "GUEST_ORDER_LIMIT_REACHED"
 
-// SEC-27: BookingService depends on a narrow repository interface instead of
-// the concrete *repositories.Repository. It needs bookings + trip lookup
-// (Create resolves the trip for server-side pricing, SEC-3).
 type BookingService struct {
 	repo BookingRepository
 	bus  *events.Bus
 }
 
-// BookingRepository is the narrow repository contract BookingService uses
-// (SEC-27): booking persistence + the trip catalog read needed to price the
-// booking server-side. Composed from domain interfaces in
-// repositories/interfaces.go.
 type BookingRepository interface {
 	repositories.BookingRepository
 	FindTrip(ctx context.Context, id uuid.UUID) (models.Trip, error)
 	WithBookingTransaction(ctx context.Context, fn func(repositories.BookingTransactionRepository) error) error
 	FindBookingForGuest(ctx context.Context, id, guestID uuid.UUID) (models.Booking, error)
-	// FindBookingByIdempotency is also used OUTSIDE the transaction, to replay
-	// the winner's booking after a lost insert race on the same key (GO-P2-3).
 	FindBookingByIdempotency(ctx context.Context, ownerID uuid.UUID, guest bool, hash string) (models.Booking, error)
 }
 
@@ -66,39 +48,15 @@ func hashIdempotency(ownerID uuid.UUID, guest bool, key string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// maxClaimedGuestIdempotencyScopes bounds how many previously claimed guest
-// identities the authenticated path re-checks for a replayed Idempotency-Key
-// (GO-P2-4). A guest identity can hold at most ONE order, so this is also the
-// number of guest orders an account may have absorbed; 5 covers a customer who
-// ordered as a guest from several browsers before signing in, while keeping the
-// work per booking request constant.
+// Bound claimed guest identities checked per authenticated request.
 const maxClaimedGuestIdempotencyScopes = 5
 
-// claimedGuestIdempotencyLookup is the read side needed to recognise an
-// Idempotency-Key that was first used before the caller signed in. Satisfied by
-// both the transaction handle and the plain repository.
 type claimedGuestIdempotencyLookup interface {
 	FindBookingByIdempotency(ctx context.Context, ownerID uuid.UUID, guest bool, hash string) (models.Booking, error)
 	ListClaimedGuestSessionIDs(ctx context.Context, userID uuid.UUID, limit int) ([]uuid.UUID, error)
 }
 
-// findClaimedGuestIdempotencyReplay resolves the booking an Idempotency-Key
-// already produced while the caller was still a guest (GO-P2-4).
-//
-// bookings.idempotency_key_hash binds the key to its OWNER
-// (sha256("guest:"+guestSessionID+":"+key) vs sha256("user:"+userID+":"+key)),
-// which is what keeps two different owners using the same key apart. The claim
-// changes the owner without being able to rehash anything (the raw key is never
-// stored), so the account replaying the very request it made as a guest used to
-// miss its own order and create a SECOND one — precisely at the moment a client
-// retries the request that was refused with GUEST_ORDER_LIMIT_REACHED.
-//
-// The lookup re-derives the guest-scoped hash from the claim marker and keeps the
-// owner filter on the caller: `user_id = caller AND guest_session_id IS NULL AND
-// idempotency_key_hash = <guest hash>`. Both halves are needed to hit a row, and
-// both are the caller's own — the guest session ids come from claims made BY this
-// account, so another owner's order can never be returned, and nothing is
-// weakened for callers that never were a guest (no marker ⇒ no lookup).
+// Resolve keys created before caller signed in, scoped to claimed guest IDs.
 func findClaimedGuestIdempotencyReplay(ctx context.Context, repo claimedGuestIdempotencyLookup, userID uuid.UUID, key string) (models.Booking, bool) {
 	if userID == uuid.Nil {
 		return models.Booking{}, false
@@ -134,9 +92,6 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 		ownerID = *guestID
 	}
 	keyHash := hashIdempotency(ownerID, isGuest, idempotencyKey)
-	// GO-P0-1: contact anchors are the cookie-independent half of the guest
-	// entitlement. Derived once here, then checked AND consumed inside the same
-	// transaction below so the database stays the sole authority.
 	anchors := guestContactAnchors(req)
 	limitReason := guestLimitReasonSessionSpent
 	matchedGuestSessionID := ""
@@ -147,10 +102,6 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 			return nil
 		}
 		if !isGuest {
-			// GO-P2-4: the same logical request may already have been placed by
-			// this very customer while they were still a guest, with the key
-			// hashed under the guest scope. Replay that order instead of
-			// creating a second one for the same key.
 			if existing, ok := findClaimedGuestIdempotencyReplay(ctx, tx, userID, idempotencyKey); ok {
 				booking = existing
 				return nil
@@ -168,17 +119,9 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 				}
 				return ErrGuestOrderLimitReached
 			}
-			// A guest order must carry at least one anchorable contact, otherwise
-			// the entitlement would fall back to depending solely on the
-			// discardable cookie. An unusable contact ("abc" as a phone, a string
-			// without "@" as an email) is a validation failure — it consumes
-			// nothing, exactly like the other checks below.
 			if len(anchors) == 0 {
 				return ErrBookingContactRequired
 			}
-			// Same contact, different guest identity: the visitor cleared the
-			// cookie / opened a private window / called the API without a cookie
-			// jar after already spending the single guest order.
 			if used, err := tx.FindGuestOrderEntitlement(ctx, guestContactKeys(anchors)); err == nil {
 				limitReason = guestLimitReasonContactSpent
 				if used.GuestSessionID != nil {
@@ -188,16 +131,10 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 			}
 		}
 
-		// SEC-3: never trust a client-supplied price. Resolve the trip and compute
-		// the total from the catalog price and the requested pax server-side.
 		trip, err := tx.FindTrip(ctx, req.TripID)
 		if err != nil {
 			return errors.New("trip not found")
 		}
-		// SEC-11: enforce sane pax bounds server-side too, not only via DTO binding,
-		// because non-HTTP callers (MCP create_booking) bypass request binding.
-		// Negative pax would yield negative/zero totals; huge pax risks float
-		// overflow and absurd bills.
 		adultPax := req.AdultPax
 		childPax := req.ChildPax
 		if adultPax < 0 || childPax < 0 || adultPax > dto.MaxBookingPax || childPax > dto.MaxBookingPax {
@@ -225,18 +162,13 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 		if trip.AdultPax > 0 && adultPax > trip.AdultPax || trip.ChildPax > 0 && childPax > trip.ChildPax {
 			return errors.New("trip capacity exceeded")
 		}
-		// Reuse the shared priceBreakdown helper so the booking total is computed by
-		// the exact same code path that backs the calculate_trip_price tool. This
-		// keeps a quoted total identical to the charged total (source of truth).
 		total := priceBreakdown(trip, adultPax, childPax).Total
 		booking = models.Booking{
 			UserID:         userID,
 			GuestSessionID: guestID,
 			TripID:         req.TripID,
 			BookingStatus:  models.BookingStatusPending,
-			// Payments are temporarily disabled. New orders stay pending for manual
-			// backoffice/admin processing. Re-enable DOKU by restoring the old
-			// waiting_payment status alongside PAYMENTS_ENABLED=true.
+			// Payments disabled; backoffice processes pending orders manually.
 			PaymentStatus: models.PaymentStatusPendingAdminProcessing,
 
 			AdultPax:           adultPax,
@@ -256,10 +188,6 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 			if err := tx.ConsumeGuestOrder(ctx, *guestID, booking.ID); err != nil {
 				return ErrGuestOrderLimitReached
 			}
-			// GO-P0-1: consume the contact anchors in the same transaction. The
-			// unique index on guest_order_entitlements.contact_key decides the
-			// winner when two requests race past the read above, so concurrent
-			// guests sharing a contact cannot both persist an order.
 			if err := tx.ConsumeGuestOrderEntitlements(ctx, guestOrderEntitlements(anchors, *guestID, booking.ID)); err != nil {
 				limitReason = guestLimitReasonContactSpent
 				return ErrGuestOrderLimitReached
@@ -268,20 +196,7 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 		return nil
 	})
 	if err != nil {
-		// Lost insert race on the SAME Idempotency-Key (GO-P2-3). Two requests
-		// with identical owner + key can both pass the pre-insert lookup above;
-		// bookings.idempotency_key_hash (UNIQUE) then rejects the loser and
-		// aborts its transaction, so the loser used to surface a raw constraint
-		// error (HTTP 500) even though the winner had already persisted the very
-		// booking this key stands for. Re-read with the SAME owner-scoped lookup
-		// and replay it.
-		//
-		// No check is weakened: the lookup is keyed by the caller's own owner id
-		// (guest session id for guests, user id otherwise) plus the key hash, so
-		// it can only ever return a booking this caller created with this key —
-		// never another owner's order, and never a second order for a guest. The
-		// loser's transaction (booking insert + entitlement consumption) was
-		// rolled back, so no allowance was spent twice.
+		// Replay winner after concurrent insert with same owner and key.
 		if replay, replayErr := s.repo.FindBookingByIdempotency(ctx, ownerID, isGuest, keyHash); replayErr == nil {
 			return replay, nil
 		}
@@ -397,34 +312,23 @@ func tripChildPrice(trip models.Trip) float64 {
 	return trip.ChildPrice
 }
 
-// TripPriceBreakdown is the authoritative, AI-facing price breakdown for a
-// trip. It reuses tripAdultPrice/tripChildPrice — the SAME logic BookingService
-// .Create uses to compute TotalPrice — so a quote from calculate_trip_price is
-// guaranteed identical to the total charged when the booking is created. The
-// LLM must never compute totals itself; it reads Total from this struct.
+// TripPriceBreakdown is shared by booking and AI quote paths.
 type TripPriceBreakdown struct {
-	// Normal (pre-discount) catalog unit prices.
-	AdultNormalPrice float64 `json:"adult_normal_price"`
-	ChildNormalPrice float64 `json:"child_normal_price"`
-	// Effective (post-discount, when enabled) unit prices actually charged.
-	AdultUnitPrice float64 `json:"adult_unit_price"`
-	ChildUnitPrice float64 `json:"child_unit_price"`
-	// Discount flags + amounts (0/absent when the discount is off).
+	AdultNormalPrice     float64 `json:"adult_normal_price"`
+	ChildNormalPrice     float64 `json:"child_normal_price"`
+	AdultUnitPrice       float64 `json:"adult_unit_price"`
+	ChildUnitPrice       float64 `json:"child_unit_price"`
 	AdultDiscountEnabled bool    `json:"adult_discount_enabled"`
 	AdultDiscountPrice   float64 `json:"adult_discount_price,omitempty"`
 	ChildDiscountEnabled bool    `json:"child_discount_enabled"`
 	ChildDiscountPrice   float64 `json:"child_discount_price,omitempty"`
-	// Quantities used for the quote.
-	AdultPax int `json:"adult_pax"`
-	ChildPax int `json:"child_pax"`
-	// Line subtotals + final total (source of truth == booking total).
-	AdultSubtotal float64 `json:"adult_subtotal"`
-	ChildSubtotal float64 `json:"child_subtotal"`
-	Total         float64 `json:"total"`
+	AdultPax             int     `json:"adult_pax"`
+	ChildPax             int     `json:"child_pax"`
+	AdultSubtotal        float64 `json:"adult_subtotal"`
+	ChildSubtotal        float64 `json:"child_subtotal"`
+	Total                float64 `json:"total"`
 }
 
-// priceBreakdown builds the authoritative quote for a trip + pax counts. Shared
-// by the MCP calculate_trip_price tool and kept in lockstep with Create above.
 func priceBreakdown(trip models.Trip, adultPax, childPax int) TripPriceBreakdown {
 	adultUnit := tripAdultPrice(trip)
 	childUnit := tripChildPrice(trip)

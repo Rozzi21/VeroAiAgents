@@ -19,15 +19,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
-// SEC-27: MCPService depends on narrow interfaces — a repository contract plus
-// inter-service contracts (BookingCreator, GuestUserProvider) — instead of the
-// concrete *repositories.Repository / *BookingService / *AuthService. Tests can
-// now mock every dependency without a DB or real sibling services.
-//
-// PERF-3 #2: audit (tool call + AI log) persistence is detached from the
-// synchronous response path via a bounded worker pool (AuditPool). When audit
-// is nil (e.g. unit tests), Execute falls back to synchronous persist so the
-// audit trail is still recorded.
 type MCPService struct {
 	repo     MCPRepository
 	bus      *events.Bus
@@ -36,9 +27,6 @@ type MCPService struct {
 	audit    *AuditPool
 }
 
-// MCPRepository is the repository contract MCPService uses (SEC-27): chat
-// session reads, trip catalog search, selected-trip update, and tool/AI audit
-// logging. Composed from domain interfaces in repositories/interfaces.go.
 type MCPRepository interface {
 	repositories.ChatRepository
 	repositories.LogRepository
@@ -47,19 +35,11 @@ type MCPRepository interface {
 	FindGuestSession(ctx context.Context, id uuid.UUID) (models.GuestSession, error)
 }
 
-// BookingCreator is the inter-service contract MCPService uses to create a
-// booking via the booking domain (SEC-27). *BookingService satisfies it.
-// CreateGuest enforces the one-order guest policy; Create is the authenticated
-// path (no guest limit) used when the chat request carried a valid Bearer
-// token. Booking authorization stays in the booking domain — MCP only picks
-// WHICH identity the order belongs to.
 type BookingCreator interface {
 	Create(ctx context.Context, userID uuid.UUID, idempotencyKey string, req dto.BookingRequest) (models.Booking, error)
 	CreateGuest(ctx context.Context, userID, guestID uuid.UUID, idempotencyKey string, req dto.BookingRequest) (models.Booking, error)
 }
 
-// GuestUserProvider is the inter-service contract MCPService uses to resolve a
-// guest user for order attribution (SEC-27). *AuthService satisfies it.
 type GuestUserProvider interface {
 	GuestUser(ctx context.Context) (models.User, error)
 }
@@ -70,20 +50,9 @@ type ToolResult struct {
 	Data   map[string]interface{} `json:"data"`
 }
 
-// Structured outcome codes carried in Data["code"] of a create_booking tool
-// result. They exist so the LLM and the frontend can branch on a stable token
-// instead of reading the human-readable `error`/`message` text (which is
-// display-only and may be reworded or translated).
-//
-// CodeGuestOrderLimitReached (booking_service.go) is the third possible outcome
-// and is deliberately declared next to the sentinel error it translates, so the
-// HTTP handler and this tool cannot drift apart.
+// Stable create_booking outcome codes used by LLM and frontend.
 const (
-	// CodeOrderCreated: the order was persisted; Data["order_id"] is set.
-	CodeOrderCreated = "ORDER_CREATED"
-	// CodeOrderAlreadyExists: THIS chat session already owns an order (AIW-8
-	// duplicate guard). Data["order_id"] is that session's own order, so
-	// surfacing it to the caller reveals nothing the session did not create.
+	CodeOrderCreated       = "ORDER_CREATED"
 	CodeOrderAlreadyExists = "ORDER_ALREADY_EXISTS"
 )
 
@@ -135,16 +104,6 @@ func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *u
 
 	log.Printf("[mcp] tool executed tool=%s status=%s duration_ms=%d", toolName, result.Status, time.Since(start).Milliseconds())
 
-	// PERF-3 #2: Persist tool call + AI log audit trail asynchronously via a
-	// bounded worker pool, detached from the synchronous LLM response path.
-	// json.Marshal + DB writes happen off the request goroutine. The pool is
-	// bounded (workers + buffer) so high tool-call volume cannot flood goroutines
-	// or starve the DB connection pool (SEC-21 note). When no pool is wired
-	// (unit tests), fall back to synchronous persist so the audit trail is still
-	// recorded.
-	//
-	// Copy the mutable payload map defensively: the job is processed off the
-	// request goroutine, and callers may mutate their payload map afterwards.
 	payloadCopy := clonePayload(payload)
 	job := auditJob{
 		sessionID:     sessionID,
@@ -165,8 +124,6 @@ func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *u
 	return result, nil
 }
 
-// persistAuditSync is the fallback path when no AuditPool is wired (unit tests).
-// Mirrors AuditPool.persist so the synchronous audit trail stays identical.
 func (s *MCPService) persistAuditSync(ctx context.Context, job auditJob) {
 	payloadJSON, _ := json.Marshal(job.payload)
 	resultJSON, _ := json.Marshal(job.result)
@@ -203,10 +160,6 @@ func (s *MCPService) persistAuditSync(ctx context.Context, job auditJob) {
 	}
 }
 
-// clonePayload returns a shallow copy of the tool payload map so the async
-// audit worker is not racing with a caller that mutates its own map after
-// Execute returns. Values are not deep-copied: the audit path only marshals
-// them, never mutates.
 func clonePayload(p map[string]interface{}) map[string]interface{} {
 	if p == nil {
 		return nil

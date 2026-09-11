@@ -21,10 +21,6 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-// SEC-27: AIService depends on narrow interfaces — a repository contract plus
-// the MCPToolExecutor inter-service contract — instead of the concrete
-// *repositories.Repository / *MCPService. Tests can mock the MCP executor and
-// the repository without a DB or a real tool pipeline.
 type AIService struct {
 	repo       AIRepository
 	mcp        MCPToolExecutor
@@ -34,52 +30,27 @@ type AIService struct {
 	background *AuditPool
 }
 
-// AIRepository is the repository contract AIService uses (SEC-27): chat
-// session/message persistence + AI log writes. Composed from domain interfaces
-// in repositories/interfaces.go.
 type AIRepository interface {
 	repositories.ChatRepository
 	CreateAILog(ctx context.Context, log *models.AILog) error
 }
 
-// MCPToolExecutor is the inter-service contract AIService uses to run a tool
-// through the MCP pipeline (SEC-27). *MCPService satisfies it.
-// userID is the authenticated caller when the chat request carried a valid
-// Bearer token (nil for pure guests). create_booking uses it to attribute the
-// order to the account (no guest-order limit) instead of the guest session.
 type MCPToolExecutor interface {
 	Execute(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, toolName string, payload map[string]interface{}) (ToolResult, error)
 }
 
 type ChatResult struct {
-	SessionID uuid.UUID `json:"-"`
-	Message   string    `json:"message"`
-	// MessageID is the stable server-owned id of the persisted assistant
-	// ChatMessage (BaseModel uuid, generated once at insert). The client uses
-	// it as the React key and as the anchor for the persisted recommendation
-	// metadata, so both survive reload identical. Empty only if the message
-	// insert failed (in which case Chat/ChatStream return an error instead).
-	MessageID            uuid.UUID     `json:"message_id,omitempty"`
-	Workflow             []ToolResult  `json:"workflow"`
-	ShowRecommendations  bool          `json:"show_recommendations"`
-	RecommendationReason string        `json:"recommendation_reason"`
-	RecommendedPackages  []models.Trip `json:"recommended_packages"`
-	// OrderGate is the machine-readable outcome of the ordering step of this
-	// turn, or nil when the turn did not touch create_booking. It exists so the
-	// chat client can render the right next action WITHOUT parsing the
-	// assistant's prose (which is LLM-generated, localized, and unreliable).
-	// Derived from tool results only — see chatOrderGateFromToolResults.
-	OrderGate *ChatOrderGate `json:"order_gate,omitempty"`
-	// SelectedTripID echoes the backend-authoritative selected package of this
-	// session (chat_sessions.selected_trip_id) on every finalized turn, so the
-	// client renders the selected/active card state without inferring it from
-	// assistant text. Nil when no package is selected.
-	SelectedTripID *uuid.UUID `json:"selected_trip_id,omitempty"`
+	SessionID            uuid.UUID      `json:"-"`
+	Message              string         `json:"message"`
+	MessageID            uuid.UUID      `json:"message_id,omitempty"`
+	Workflow             []ToolResult   `json:"workflow"`
+	ShowRecommendations  bool           `json:"show_recommendations"`
+	RecommendationReason string         `json:"recommendation_reason"`
+	RecommendedPackages  []models.Trip  `json:"recommended_packages"`
+	OrderGate            *ChatOrderGate `json:"order_gate,omitempty"`
+	SelectedTripID       *uuid.UUID     `json:"selected_trip_id,omitempty"`
 }
 
-// ChatStreamEvent is transport-neutral output produced during orchestration.
-// Recommendation events contain only structured GenUI data already returned
-// in ChatResult; delta events contain real provider text only.
 type ChatStreamEvent struct {
 	Type                 string
 	Content              string
@@ -89,47 +60,15 @@ type ChatStreamEvent struct {
 	RecommendedPackages  []models.Trip
 }
 
-// ChatOrderGate mirrors, for the chat transport, what `error.code` already does
-// for the REST transport: a stable code plus the single bit of intent the client
-// needs. The backend stays the authority — this only reports a decision the
-// booking domain already made.
-//
-//   - Code: CodeOrderCreated | CodeOrderAlreadyExists | CodeGuestOrderLimitReached.
-//   - AuthRequired: true only for CodeGuestOrderLimitReached, i.e. the guest
-//     allowance is spent and signing in (password or Google) is what unblocks a
-//     further order. It is NOT a hint the client may invent or override.
-//   - OrderID: set only when THIS chat session owns an order (just created, or
-//     found by the AIW-8 duplicate guard) so the client can keep offering order
-//     tracking. It is deliberately EMPTY for CodeGuestOrderLimitReached: that
-//     limit can be triggered by a contact anchor belonging to a different guest
-//     identity (GO-P0-1), and echoing that order's id would leak someone else's
-//     order.
 type ChatOrderGate struct {
 	Code         string `json:"code"`
 	AuthRequired bool   `json:"auth_required"`
 	OrderID      string `json:"order_id,omitempty"`
 }
 
-// chatSessionCleanupGraceExtra is the safety buffer added on top of AITimeout
-// for the cleanup grace window. It covers the non-LLM work that still runs
-// after the tool loop (persist assistant message and handler cookie write)
-// before the request fully finishes.
 const chatSessionCleanupGraceExtra = 30 * time.Second
 
-// CleanupExpiredChatSessions is intentionally a small service operation so an
-// in-process ticker can be replaced by cron/systemd/Kubernetes later without
-// duplicating cleanup SQL outside the repository.
-//
-// BUG-6 (fixed 28 Jul 2026): the effective cutoff is `now - (AITimeout +
-// graceExtra)` instead of `now`. Chat() already slides expires_at forward
-// before the tool loop, but a request could in theory still be in-flight when
-// a stale expires_at slips through (e.g. an old process that crashed before
-// the slide, or a config where GuestSessionTTL is set close to AITimeout).
-// Deleting only sessions expired longer than one full request budget makes it
-// impossible for the hourly ticker to delete a session that an in-flight
-// request is still writing to (fail-safe / defense-in-depth on top of the
-// sliding fix). Sessions become eligible for deletion one grace window later;
-// expiry semantics for users are unchanged.
+// Delay cleanup by one request budget to protect in-flight chats.
 func (s *AIService) CleanupExpiredChatSessions(ctx context.Context, now time.Time) (int64, error) {
 	grace := s.cfg.AITimeout + chatSessionCleanupGraceExtra
 	cutoff := now.Add(-grace)
@@ -153,47 +92,19 @@ func (s *AIService) Chat(ctx context.Context, chatCtx ChatContext, req dto.ChatR
 	if session.ExpiresAt != nil && !session.ExpiresAt.After(now) {
 		return ChatResult{}, ErrChatSessionExpired
 	}
-	// BUG-6 (fixed 28 Jul 2026): always slide expires_at forward before the
-	// (up to AITimeout-long) tool loop, not just when it was nil. Previously a
-	// near-expiry session kept its old expires_at, so the hourly
-	// CleanupExpiredChatSessions ticker could delete the session mid-loop
-	// (atomic AddChatMessage / UpdateChatSessionSelectedTrip then failed or
-	// data vanished -> intermittent chat/booking failures). Recomputing
-	// expires_at = now + TTL here makes the cleanup cutoff (grace-guarded,
-	// see CleanupExpiredChatSessions) always land after this request finishes,
-	// since TTL >> AITimeout. This matches the sliding behaviour already used
-	// by GuestHistory. The single UPDATE below is atomic, so no extra locking
-	// is needed.
 	expiresAt := now.Add(s.cfg.GuestSessionTTL)
 	session.ExpiresAt = &expiresAt
 	session.LastActivityAt = &now
 
-	// PERF-5: run the two independent pre-LLM DB writes concurrently via
-	// errgroup instead of sequentially. UpdateChatSessionActivity (slide
-	// expiry) and AddChatMessage (persist user prompt) touch different
-	// rows/tables and have no data dependency on each other, so running
-	// them in parallel saves ~20-40ms on the pre-LLM critical path.
 	if err := s.prepareChatPreLLM(ctx, session, req.Prompt); err != nil {
 		return ChatResult{}, err
 	}
 
-	// Use tool-driven workflow. The LLM decides whether to call search_trips,
-	// select_package, collect_order_detail, or create_booking.
-	//
-	// PERF-4: pass the already-fetched `session` struct down to the tool loop
-	// and buildMessages instead of re-fetching it. Chat() already validated
-	// and loaded the session above; a second FindChatSession in buildMessages
-	// was a redundant DB round-trip (~10-30ms) per request.
 	aiResponse, toolResults, err := s.generateWithToolLoop(ctx, session, req.Prompt, chatCtx.UserID)
 	return s.finalizeChat(ctx, sessionID, aiResponse, toolResults, err)
 }
 
-// prepareChatPreLLM runs the two independent pre-LLM DB writes concurrently
-// (PERF-5, 11 Agu 2026): sliding the session expiry and persisting the user
-// prompt. Both are writes to different rows/tables with no data dependency,
-// so running them in parallel shaves ~20-40ms off the pre-LLM critical path.
-// errgroup cancels the group on first error so a failure in one write
-// cancels the other; the first error is returned.
+// Slide session expiry and persist prompt concurrently.
 func (s *AIService) prepareChatPreLLM(ctx context.Context, session models.ChatSession, prompt string) error {
 	finishStage := telemetry.StartStage(ctx, "pre_llm_db_writes")
 	status := "failure"
@@ -225,19 +136,10 @@ func sessionOwnedByContext(session models.ChatSession, chatCtx ChatContext) bool
 	return chatCtx.GuestCookieBound && session.UserID == nil
 }
 
-// finalizeChat completes the post-LLM work that is identical whether the final
-// assistant message was produced by the non-streaming or the streaming path
-// (PERF-1): defense-in-depth order-claim guard, fail-closed recommendation
-// state (BUG-5), persist assistant message, broadcast
-// workflow_completed. Extracting it keeps Chat and ChatStream in lockstep so a
-// change to the finalization rules never drifts between the two paths.
+// Finalize shared streaming and non-streaming chat state.
 func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiResponse ai.CompletionResponse, toolResults []ToolResult, genErr error) (ChatResult, error) {
 	response := "Maaf, saya belum bisa memproses permintaan Anda saat ini. Silakan coba lagi."
 	if genErr != nil {
-		// AI provider error (genErr): persist an AILog with a unique ID, then
-		// surface only a friendly message + the AILog tracking code to the user.
-		// The raw error stays server-side (in the AILog response payload + log
-		// line) so support can correlate; the user never sees sensitive detail.
 		errorPayload, _ := json.Marshal(map[string]interface{}{
 			"error": genErr.Error(),
 			"mode":  "local_fallback",
@@ -334,7 +236,6 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		selectedTripID = chatSession.SelectedTripID
 	}
 
-	// Compute recommendation control based solely on tool results.
 	showRecommendations := false
 	recommendationReason := ""
 	recommendedPackages := extractRecommendedPackages(toolResults, selectedTripID)
@@ -381,11 +282,6 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		recommendedPackages = nil
 	}
 
-	// Persist the assistant message TOGETHER with its recommendation metadata
-	// (GenUI persistence, 6 Sep 2026). The recommendation is only attached
-	// when this turn actually shows packages, so old/plain messages keep a
-	// NULL column and reload renders them as text-only (backward compatible).
-	// BeforeCreate assigns the stable MessageID on insert.
 	assistantMsg := &models.ChatMessage{SessionID: sessionID, Role: "assistant", Content: response}
 	if showRecommendations && len(recommendedPackages) > 0 {
 		assistantMsg.Recommendation = &models.ChatRecommendation{
@@ -418,12 +314,8 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		ShowRecommendations:  showRecommendations,
 		RecommendationReason: recommendationReason,
 		RecommendedPackages:  recommendedPackages,
-		// Structured ordering outcome for the client (auth gate / order
-		// tracking). Nil when this turn did not run create_booking.
-		OrderGate: chatOrderGateFromToolResults(toolResults),
-		// Echo the backend-authoritative selection so the client can mark the
-		// selected card after ANY turn (including an LLM-driven select_package).
-		SelectedTripID: selectedTripID,
+		OrderGate:            chatOrderGateFromToolResults(toolResults),
+		SelectedTripID:       selectedTripID,
 	}, nil
 }
 
