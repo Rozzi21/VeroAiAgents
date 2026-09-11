@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { use, useEffect, useState } from "react";
 import { apiFetch, BookingOrder, ensureCustomerSession } from "@/lib/api";
 
-export default function GuestOrderPage({ params }: { params: { id: string } }) {
+export default function GuestOrderPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [order, setOrder] = useState<BookingOrder | null>(null);
   const [error, setError] = useState("");
 
@@ -16,7 +17,7 @@ export default function GuestOrderPage({ params }: { params: { id: string } }) {
       // becomes NULL, so the guest endpoint can no longer see it — the
       // authenticated endpoint is required.
       const authenticated = (await ensureCustomerSession()) === "active";
-      const path = authenticated ? `/api/v1/bookings/${params.id}` : `/api/v1/orders/${params.id}`;
+      const path = authenticated ? `/api/v1/bookings/${id}` : `/api/v1/orders/${id}`;
       try {
         const result = await apiFetch<BookingOrder>(path);
         if (!cancelled) setOrder(result);
@@ -48,7 +49,7 @@ export default function GuestOrderPage({ params }: { params: { id: string } }) {
     return () => {
       cancelled = true;
     };
-  }, [params.id]);
+  }, [id]);
 
   return (
     <main className="min-h-screen bg-slate-50 px-6 py-16">
