@@ -2,6 +2,7 @@
 node_modules/
 vendor/
 graphify-out/
+.codegraph/
 
 # Build outputs
 dist/
