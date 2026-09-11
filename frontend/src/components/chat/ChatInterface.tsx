@@ -18,6 +18,7 @@ import {
   Send,
   Ticket,
   Utensils,
+  Sparkles,
   X,
 } from "lucide-react";
 import RecommendationCard from "../cards/RecommendationCard";
@@ -444,31 +445,31 @@ export default function ChatInterface() {
   );
 
   return (
-    <div className="flex h-screen bg-[#fafafc]">
+    <div className="relative h-screen overflow-hidden bg-[#fafafc]">
       {/* Consumes the Google callback fragment (#access_token=...) so a customer
           who signed in from the chat auth gate lands back here ALREADY
           authenticated — otherwise the token is dropped and the next order
           attempt would still run as a guest. */}
       <OAuthReceiver onError={setOauthError} />
       <div
-        className={`relative flex h-screen flex-col transition-all duration-300 ${
-          selectedPackage ? "w-[65%]" : "w-full"
-        }`}
+        className="relative flex h-screen w-full flex-col"
       >
       {oauthError ? (
         <div className="mx-auto mt-4 w-full max-w-4xl rounded-xl bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700" role="alert">
           {oauthError}
         </div>
       ) : null}
-      <div className="flex-1 overflow-y-auto px-8 py-10 pb-32">
-        <div className={`${selectedPackage ? "max-w-3xl" : "max-w-4xl"} mx-auto space-y-8`}>
-          {messages.map((message) =>
+      <div className="flex-1 overflow-y-auto px-5 py-10 pb-32 sm:px-8">
+        <div className="mx-auto max-w-4xl space-y-8">
+          {messages.map((message, index) =>
             message.role === "user" ? (
               <div key={message.id} className="flex justify-end">
                 <div className="bg-[#f0e8e8] text-slate-800 px-6 py-4 rounded-2xl rounded-tr-sm max-w-[80%] shadow-sm">
                   <p className="text-[15px] leading-relaxed">{message.content}</p>
                 </div>
               </div>
+            ) : index === 0 && messages.length === 1 && !loading ? (
+              <WelcomeMessage key={message.id} />
             ) : (
               // PERF-1: while a streaming message is still empty (model is
               // thinking, no content delta arrived yet) hide the bubble — the
@@ -511,7 +512,7 @@ export default function ChatInterface() {
       </div>
 
       {/* Sticky Input Area */}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#fafafc] via-[#fafafc] to-transparent pt-10 pb-8 px-8">
+      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-[#fafafc] via-[#fafafc] to-transparent px-5 pb-6 pt-10 sm:px-8 sm:pb-8">
         <div className="max-w-4xl mx-auto">
           {selection.error && (
             <div
@@ -530,7 +531,7 @@ export default function ChatInterface() {
             </div>
           )}
           <form onSubmit={handleSubmit} className="bg-white border border-slate-200 rounded-full shadow-[0_4px_20px_-10px_rgba(0,0,0,0.1)] flex items-center p-2 pl-4">
-            <button type="button" className="p-2 text-slate-400 hover:text-slate-600 transition-colors">
+            <button type="button" aria-label="Tambah lampiran" className="p-2 text-slate-400 hover:text-slate-600 transition-colors">
               <Plus size={20} />
             </button>
             <input
@@ -541,7 +542,7 @@ export default function ChatInterface() {
               placeholder="Ask Vero about Japan..."
               className="flex-1 bg-transparent border-none outline-none px-3 text-[15px] text-slate-700 placeholder:text-slate-400 disabled:opacity-60"
             />
-            <button type="submit" disabled={loading || !prompt.trim()} className="bg-[#df3333] hover:bg-[#c92a2a] disabled:opacity-60 text-white p-3 rounded-full transition-colors shadow-md flex items-center justify-center">
+            <button type="submit" aria-label="Kirim pesan" disabled={loading || !prompt.trim()} className="bg-[#df3333] hover:bg-[#c92a2a] disabled:opacity-60 text-white p-3 rounded-full transition-colors shadow-md flex items-center justify-center">
               <Send size={18} className="ml-0.5" />
             </button>
           </form>
@@ -559,6 +560,30 @@ export default function ChatInterface() {
         />
       )}
     </div>
+  );
+}
+
+function WelcomeMessage() {
+  return (
+    <section className="mx-auto flex min-h-[calc(100vh-250px)] max-w-3xl flex-col items-center justify-center text-center">
+      <div className="mb-6 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#df3333] to-[#a91f37] text-white shadow-[0_18px_45px_-18px_rgba(201,42,42,0.75)]">
+        <Sparkles size={24} />
+      </div>
+      <p className="mb-3 text-xs font-bold uppercase tracking-[0.24em] text-[#b42b3c]">
+        Vero Travel AI
+      </p>
+      <h1 className="max-w-2xl text-balance text-3xl font-semibold tracking-[-0.035em] text-slate-900 sm:text-5xl">
+        Perjalanan impian dimulai dari percakapan sederhana.
+      </h1>
+      <p className="mt-5 max-w-xl text-pretty text-sm leading-7 text-slate-500 sm:text-base">
+        Ceritakan destinasi, budget, durasi, atau gaya liburan Anda. Vero akan membantu menyusun pilihan perjalanan yang paling sesuai.
+      </p>
+      <div className="mt-8 flex flex-wrap justify-center gap-2 text-xs font-semibold text-slate-600">
+        <span className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 shadow-sm">Cari inspirasi destinasi</span>
+        <span className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 shadow-sm">Susun itinerary</span>
+        <span className="rounded-full border border-slate-200 bg-white/80 px-4 py-2 shadow-sm">Sesuaikan budget</span>
+      </div>
+    </section>
   );
 }
 
@@ -760,7 +785,7 @@ function PackageDetailPanel({
   }
 
   return (
-    <aside className="h-screen w-[35%] overflow-y-auto border-l border-slate-200 bg-white shadow-[-20px_0_60px_-45px_rgba(15,23,42,0.55)]">
+    <aside className="fixed inset-y-0 right-0 z-50 w-full overflow-y-auto border-l border-slate-200 bg-white shadow-[-20px_0_60px_-35px_rgba(15,23,42,0.4)] sm:w-[min(460px,42vw)]">
       <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-100 bg-white/90 px-6 py-4 backdrop-blur">
         <div>
           <p className="text-xs font-bold uppercase tracking-wider text-[#df3333]">
