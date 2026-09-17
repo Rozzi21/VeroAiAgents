@@ -100,8 +100,6 @@ export function usePackageReferences(
     return () => {
       cancelled = true;
     };
-    // Re-run only when switching between create/edit form instances.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formKey]);
 
   const runSearch = useCallback((value: string) => {
