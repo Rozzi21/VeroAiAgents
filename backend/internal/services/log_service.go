@@ -8,8 +8,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
-// SEC-27: LogService depends on the LogRepository interface instead of the
-// concrete *repositories.Repository.
+// LogService depends on the LogRepository interface.
 type LogService struct{ repo repositories.LogRepository }
 
 func (s *LogService) Logs(ctx context.Context, query dto.ListQuery) ([]models.AILog, error) {

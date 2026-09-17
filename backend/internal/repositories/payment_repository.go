@@ -17,8 +17,8 @@ func (r *Repository) FindPayment(ctx context.Context, id uuid.UUID) (models.Paym
 	return payment, err
 }
 
-// FindPaymentForUser scopes the lookup to the owner of the related booking
-// (SEC-2 anti-IDOR). Staff callers should use FindPayment instead.
+// FindPaymentForUser scopes the lookup to the owner of the related booking.
+// Staff callers should use FindPayment instead.
 func (r *Repository) FindPaymentForUser(ctx context.Context, id, userID uuid.UUID) (models.Payment, error) {
 	var payment models.Payment
 	err := r.DB.WithContext(ctx).Preload("Booking").
@@ -41,11 +41,8 @@ func (r *Repository) FindPaymentByExternalID(ctx context.Context, externalID str
 // and association clobber. .Select("*").Updates() writes only model columns,
 // leaving associations untouched.
 //
-// NOTE: status transitions must NOT use this method — they go through
-// UpdatePaymentStatusAtomic (SEC-29) for race-safe conditional updates in the
-// webhook path. This method has no current callers but is retained on the
-// interface for future non-status full edits; keep the association-safe form
-// so a latent caller cannot reintroduce DB-2.
+// NOTE: status transitions must go through UpdatePaymentStatusAtomic for
+// race-safe conditional updates in the webhook path.
 func (r *Repository) UpdatePayment(ctx context.Context, payment *models.Payment) error {
 	return r.DB.WithContext(ctx).Model(&models.Payment{}).
 		Where("id = ?", payment.ID).
@@ -54,10 +51,9 @@ func (r *Repository) UpdatePayment(ctx context.Context, payment *models.Payment)
 }
 
 // UpdatePaymentStatusAtomic applies a conditional status transition in a
-// single UPDATE guarded by the expected current status (SEC-29). Returns
+// single UPDATE guarded by the expected current status. Returns
 // updated=true when the row was transitioned; false when another writer
-// already moved it (caller should re-read and decide). Mirrors
-// UpdateBookingStatusAtomic (SEC-23).
+// already moved it.
 func (r *Repository) UpdatePaymentStatusAtomic(ctx context.Context, id uuid.UUID, fromStatus, toStatus string) (bool, error) {
 	res := r.DB.WithContext(ctx).Model(&models.Payment{}).
 		Where("id = ? AND status = ?", id, fromStatus).

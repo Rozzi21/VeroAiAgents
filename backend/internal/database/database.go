@@ -183,11 +183,7 @@ func (d *Database) migrateTripSearchIndexes() error {
 	return nil
 }
 
-// Health checks DB connectivity. PingContext already honors ctx (returns on
-// timeout/cancel), so it is called directly — no goroutine wrapper needed.
-// SEC-32: the previous goroutine + select wrapper leaked the goroutine whenever
-// ctx timed out, since the blocking PingContext kept running after Health
-// returned. Callers (DatabaseHealth, Readiness) pass a ctx with a 3s deadline.
+// Health checks DB connectivity using PingContext with provided ctx.
 func (d *Database) Health(ctx context.Context) error {
 	sqlDB, err := d.DB.DB()
 	if err != nil {

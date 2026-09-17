@@ -209,8 +209,8 @@ func (s *BookingService) create(ctx context.Context, userID uuid.UUID, guestID *
 		}
 		return models.Booking{}, err
 	}
-	// SEC-18: minimal signal only; the booking struct carries contact PII
-	// (name/email/phone) that must not be broadcast to every SSE subscriber.
+	// Minimal signal only; the booking struct carries contact PII
+	// that must not be broadcast to every SSE subscriber
 	s.bus.Publish("booking_created", map[string]interface{}{"booking_id": booking.ID, "trip_id": booking.TripID, "status": booking.BookingStatus})
 	if isGuest {
 		auth.LogSecurity("guest_order_created", map[string]any{"guest_session_id": ownerID.String(), "booking_id": booking.ID.String()})
@@ -225,7 +225,7 @@ func (s *BookingService) List(ctx context.Context, query dto.ListQuery) ([]model
 	return s.repo.ListBookings(ctx, repoQuery)
 }
 
-// Find enforces ownership for non-staff callers (SEC-2 anti-IDOR).
+// Find enforces ownership for non-staff callers.
 func (s *BookingService) Find(ctx context.Context, id, userID uuid.UUID, isStaff bool) (models.Booking, error) {
 	var booking models.Booking
 	var err error
@@ -252,9 +252,8 @@ func (s *BookingService) FindGuest(ctx context.Context, id, guestID uuid.UUID) (
 // internal workflow. It enforces allowed transitions server-side and returns
 // the updated booking.
 //
-// SEC-23 fix: uses an atomic conditional UPDATE (WHERE booking_status = current)
-// instead of read-validate-write, eliminating the TOCTOU race where two concurrent
-// requests could both pass validation and write conflicting transitions.
+// Uses an atomic conditional UPDATE (WHERE booking_status = current)
+// eliminating the race where two concurrent requests could write conflicting transitions.
 func (s *BookingService) UpdateStatus(ctx context.Context, id, userID uuid.UUID, isStaff bool, req dto.UpdateBookingStatusRequest) (models.Booking, error) {
 	booking, err := s.Find(ctx, id, userID, isStaff)
 	if err != nil {

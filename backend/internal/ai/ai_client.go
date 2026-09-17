@@ -80,8 +80,7 @@ type CompletionRequest struct {
 	Tools    []ToolDef `json:"tools,omitempty"`
 
 	// ResponseFormat requests structured output (e.g. JSON schema) on the final
-	// assistant message instead of free-form text. Used by SEC-29 for the
-	// order-claim check so we do not parse natural language.
+	// assistant message instead of free-form text.
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
@@ -188,8 +187,8 @@ func (c *Client) Generate(ctx context.Context, req CompletionRequest) (Completio
 	defer res.Body.Close()
 	ttfb := time.Since(requestStarted)
 
-	// SEC-9: cap how much of the provider response we will read/decode so a
-	// runaway or malicious response cannot exhaust memory.
+	// Cap how much of the provider response to read so a
+	// runaway response cannot exhaust memory.
 	limited := io.LimitReader(res.Body, maxAIResponseBytes)
 	var raw map[string]interface{}
 	if err := json.NewDecoder(limited).Decode(&raw); err != nil {

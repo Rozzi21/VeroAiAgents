@@ -303,7 +303,7 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 	if assistantMsg.Recommendation != nil {
 		telemetry.RecordDuration(ctx, "recommendation_persistence", "success", persistDuration)
 	}
-	// SEC-18: broadcast only session_id as completion signal.
+	// Broadcast only session_id as completion signal
 	s.bus.Publish("workflow_completed", map[string]interface{}{"session_id": sessionID})
 
 	return ChatResult{
@@ -355,7 +355,7 @@ func (s *AIService) ScheduleMemorySummary(ctx context.Context, sessionID uuid.UU
 // If onEvent is nil call still
 // returns a ChatResult, which keeps the streaming handler resilient.
 //
-// Context propagation (SEC-26) is unchanged: the same request ctx flows into
+// Context propagation is unchanged: the same request ctx flows into
 // the streaming HTTP request, so a client disconnect cancels the stream
 // mid-flight and ChatStream returns ctx.Err().
 func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto.ChatRequest, onEvent func(ChatStreamEvent)) (ChatResult, error) {
@@ -742,15 +742,9 @@ func responseMentionsSelectionOptions(response string) bool {
 // PERF-4: accepts the already-fetched session struct instead of re-querying
 // it in buildMessages. The caller (Chat) has validated + loaded the session.
 func (s *AIService) generateWithToolLoop(ctx context.Context, session models.ChatSession, prompt string, userID *uuid.UUID) (ai.CompletionResponse, []ToolResult, error) {
-	// SEC-26: use the incoming request context directly so a client disconnect
-	// cancels the LLM call and the tool loop's DB/tool work. Each individual
-	// API call is guarded by the HTTP client's timeout (cfg.AITimeout, 35s),
-	// so no single round can hang forever. The overall loop is bounded by
-	// MaxToolCallRounds (5). Previously a single context.WithTimeout wrapped
-	// the entire loop, so multi-round workflows (e.g. search_trips →
-	// select_package → collect_order_detail → create_booking) would exhaust
-	// the 35s budget before the final round, causing "context deadline
-	// exceeded" on create_booking.
+	// Use incoming request context directly so client disconnect cancels work
+	// Each API call is guarded by HTTP client timeout (cfg.AITimeout, 35s)
+	// Overall loop bounded by MaxToolCallRounds (5)
 	sessionID := session.ID
 	contextStarted := time.Now()
 	tools := mcp.OpenAITools()
@@ -914,12 +908,9 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	return resp, allToolResults, err
 }
 
-// SEC-30 (fixed 1 Agu 2026): the single-tool-call block (arg parsing, AIW-3
-// dedup, MCP execution, result marshalling) was extracted out of
-// generateWithToolLoop into this helper so the loop only orchestrates rounds
-// and this function can be read/debugged in isolation. Behaviour is
-// unchanged: dedup and error mapping rules are identical to the old inline
-// block; calledTools is shared across rounds via the caller's map.
+// Single-tool-call block extracted into helper for better orchestration
+// Behaviour unchanged: dedup and error mapping rules identical to inline block
+// calledTools shared across rounds via caller's map
 //
 // `prior` is the tool results already produced in THIS request. It carries the
 // no-retry-after-guest-limit guard (blockedRetryAfterGuestOrderLimit) and lives
@@ -976,7 +967,7 @@ func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, us
 }
 
 // toolResultMessage serialises a ToolResult into the OpenAI "tool" role
-// message that is appended back into the conversation (SEC-30 helper).
+// message that is appended back into the conversation
 func toolResultMessage(tc ai.ToolCall, result ToolResult) ai.Message {
 	resultJSON, _ := json.Marshal(result)
 	return ai.Message{
@@ -1236,7 +1227,7 @@ func (s *AIService) refreshMemorySummary(ctx context.Context, sessionID uuid.UUI
 	}
 	summary := strings.Join(parts, "\n")
 
-	// SEC-21: convert to rune slice before slicing to avoid breaking multi-byte UTF-8 chars
+	// Convert to rune slice before slicing to avoid breaking multi-byte UTF-8 chars
 	runes := []rune(summary)
 	if len(runes) > s.cfg.AIMemoryMaxChars {
 		runes = runes[len(runes)-s.cfg.AIMemoryMaxChars:]

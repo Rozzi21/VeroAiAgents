@@ -78,7 +78,7 @@ func (h *Handler) GuestChat(c *gin.Context) {
 		// guest identity (copied cookie, shared browser, or two identities
 		// racing in one browser). Never re-point it — orders created from a chat
 		// are owned by the identity bound to it — and never serve it either.
-		// Mint a fresh session for THIS identity, the same policy SEC-17 applies
+		// Mint a fresh session for THIS identity, same security policy applies
 		// to foreign authenticated session ids.
 		fresh, err := h.rebindGuestChatSession(c, identity.Session.ID)
 		if err != nil {

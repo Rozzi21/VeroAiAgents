@@ -31,7 +31,7 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	// Initialize structured logging with slog and inject context handler (PRR-P2-1)
+	// Initialize structured logging with slog and inject context handler
 	var logHandler slog.Handler
 	if cfg.AppEnv == "production" {
 		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -62,10 +62,9 @@ func main() {
 	handler := handlers.New(serviceContainer, db)
 
 	router := gin.New()
-	// Limit multipart memory buffering for uploads (SEC-5).
+	// Limit multipart memory buffering for uploads
 	router.MaxMultipartMemory = 8 << 20 // 8 MiB
-	// SEC-14: in dev, trust no proxy so X-Forwarded-For cannot be spoofed. In
-	// production, trust only the configured reverse proxy CIDR(s).
+	// Trust no proxy in dev, trust only configured proxies in production
 	if cfg.AppEnv == "production" {
 		if err := router.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 			log.Fatalf("invalid TRUSTED_PROXIES: %v", err)
@@ -79,8 +78,8 @@ func main() {
 		middlewares.SecureHeaders(),
 		middlewares.CORS(cfg.CORSAllowedOrigins),
 		middlewares.RateLimit(),
-		middlewares.Metrics(),          // Record Prometheus metrics (PRR-P1-1)
-		middlewares.StructuredLogger(), // Structured request logs with slog (PRR-P2-1)
+		middlewares.Metrics(),
+		middlewares.StructuredLogger(),
 		middlewares.Recovery(),
 	)
 	router.Static("/uploads", "./uploads")
@@ -91,7 +90,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second, // Protect against slow-write attacks globally. Extended/disabled dynamically in handlers (e.g. SSE).
+		WriteTimeout: 15 * time.Second, // Protect against slow-write attacks globally
 		IdleTimeout:  60 * time.Second,
 	}
 
@@ -111,8 +110,7 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
-	// Stop accepting requests before draining detached work. This prevents a
-	// completed chat from submitting a summary after the pool has closed.
+	// Stop accepting requests before draining detached work
 	serviceContainer.StopAudit()
 	log.Println("server stopped gracefully")
 }
@@ -126,9 +124,7 @@ func startChatSessionCleanup(s *services.Services) {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			// SEC-26: cleanup runs on a background ticker (no HTTP request), so
-			// it uses context.Background(); a per-run timeout avoids hanging on
-			// a wedged DB connection indefinitely.
+			// Cleanup runs on background ticker with timeout to avoid hanging connections
 			runCtx, cancelRun := context.WithTimeout(context.Background(), 30*time.Second)
 			deleted, err := s.AI.CleanupExpiredChatSessions(runCtx, time.Now())
 			cancelRun()

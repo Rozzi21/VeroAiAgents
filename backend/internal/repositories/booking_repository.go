@@ -43,7 +43,7 @@ func (r *Repository) FindBooking(ctx context.Context, id uuid.UUID) (models.Book
 	return booking, err
 }
 
-// FindBookingForUser scopes the lookup to a single owner (SEC-2 anti-IDOR).
+// FindBookingForUser scopes the lookup to a single owner.
 // Staff callers should use FindBooking instead.
 func (r *Repository) FindBookingForUser(ctx context.Context, id, userID uuid.UUID) (models.Booking, error) {
 	var booking models.Booking
@@ -52,19 +52,8 @@ func (r *Repository) FindBookingForUser(ctx context.Context, id, userID uuid.UUI
 	return booking, err
 }
 
-// UpdateBooking persists the booking's editable columns without touching its
-// associations (DB-2). The previous .Save() full-overwrote every column from
-// the in-memory struct AND upserted preloaded associations (User/Trip/Payments
-// — FindBooking preloads all three) when invoked on a fetched record, risking
-// lost updates and association clobber (e.g. clobbering Payment rows).
-// .Select("*").Updates() writes only model columns, leaving associations and
-// preloaded slices untouched.
-//
-// NOTE: status transitions must NOT use this method — they go through
-// UpdateBookingStatusAtomic (SEC-23) for TOCTOU-safe conditional updates.
-// This method has no current callers but is retained on the interface for
-// future non-status full edits (e.g. contact info correction); keep the
-// association-safe form so a latent caller cannot reintroduce DB-2.
+// UpdateBooking persists editable columns without modifying preloaded associations.
+// NOTE: status transitions should use UpdateBookingStatusAtomic for conditional updates.
 func (r *Repository) UpdateBooking(ctx context.Context, booking *models.Booking) error {
 	return r.DB.WithContext(ctx).Model(&models.Booking{}).
 		Where("id = ?", booking.ID).
@@ -74,7 +63,7 @@ func (r *Repository) UpdateBooking(ctx context.Context, booking *models.Booking)
 
 // UpdateBookingStatusAtomic performs an atomic conditional update of the booking
 // status. It only succeeds if the current DB status matches fromStatus, preventing
-// TOCTOU race conditions (SEC-23). Returns true if the row was updated (race won),
+// race conditions. Returns true if the row was updated (race won),
 // false if the status had already changed (race lost).
 func (r *Repository) UpdateBookingStatusAtomic(ctx context.Context, id uuid.UUID, fromStatus, toStatus string) (bool, error) {
 	result := r.DB.WithContext(ctx).Model(&models.Booking{}).

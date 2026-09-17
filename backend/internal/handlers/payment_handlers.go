@@ -49,8 +49,8 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 
 	payment, err := h.Services.Payments.Webhook(c.Request.Context(), req)
 	if err != nil {
-		// SEC-15: do not echo internal/payment errors to an unauthenticated
-		// caller; log server-side.
+		// Do not echo internal/payment errors to an unauthenticated
+		// caller; log server-side
 		log.Printf("[payment-webhook] rejected: %v", err)
 		utils.BadRequest(c, "Webhook failed", gin.H{})
 		return

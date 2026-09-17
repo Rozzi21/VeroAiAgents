@@ -86,7 +86,7 @@ func (h *Handler) GoogleCallback(c *gin.Context) {
 
 	result, err := h.Services.Google.Callback(c.Request.Context(), code, state, authRequestMeta(c))
 	if err != nil {
-		// SEC-15: raw error stays server-side; the client gets a generic code.
+		// Raw error stays server-side; client gets a generic code
 		log.Printf("[google-callback] failed: %v", err)
 		code := "authentication_failed"
 		if errors.Is(err, services.ErrGoogleAccountExists) {
@@ -134,7 +134,7 @@ func (h *Handler) GoogleCallback(c *gin.Context) {
 }
 
 // redirectOAuthError sends the user back to the frontend login screen with a
-// generic, log-safe error code (never the raw internal error — SEC-15).
+// generic, log-safe error code.
 func (h *Handler) redirectOAuthError(c *gin.Context, returnTo, code string) {
 	base := strings.TrimRight(h.Services.Config.GoogleOAuthFrontendURL, "/")
 	path := returnTo

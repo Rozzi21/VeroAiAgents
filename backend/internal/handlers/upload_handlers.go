@@ -15,7 +15,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
 
-// maxUploadBytes caps a single media upload (SEC-5).
+// maxUploadBytes caps a single media upload
 const maxUploadBytes = 5 << 20 // 5 MiB
 
 func (h *Handler) UploadTripMedia(c *gin.Context) {
@@ -25,7 +25,7 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 		return
 	}
 
-	// SEC-5: enforce a size limit before touching disk.
+	// Enforce a size limit before touching disk
 	if file.Size <= 0 || file.Size > maxUploadBytes {
 		utils.BadRequest(c, "File too large", gin.H{"max_bytes": maxUploadBytes, "size": file.Size})
 		return
@@ -38,8 +38,8 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 		return
 	}
 
-	// SEC-5: verify the real content type from the file's magic bytes instead of
-	// trusting the filename extension alone.
+	// Verify the real content type from the file's magic bytes instead of
+	// trusting the filename extension alone
 	if detected, err := detectImageContentType(file); err != nil {
 		log.Printf("[upload] unable to read file: %v", err)
 		utils.BadRequest(c, "Unable to read file", gin.H{})
@@ -68,8 +68,8 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 	})
 }
 
-// detectImageContentType sniffs the first 512 bytes to determine the true MIME
-// type of an uploaded file (SEC-5).
+// detectImageContentType sniffs the first 512 bytes to determine the MIME
+// type of an uploaded file.
 func detectImageContentType(file *multipart.FileHeader) (string, error) {
 	f, err := file.Open()
 	if err != nil {

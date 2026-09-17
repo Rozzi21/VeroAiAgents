@@ -20,8 +20,7 @@ func (h *Handler) Register(c *gin.Context) {
 	}
 	result, err := h.Services.Auth.Register(c.Request.Context(), req, authRequestMeta(c))
 	if err != nil {
-		// SEC-15: hide raw service/DB errors (e.g. duplicate-email constraint)
-		// from the client; log server-side.
+		// Hide raw service/DB errors from client; log server-side
 		log.Printf("[register] failed: %v", err)
 		utils.BadRequest(c, "Registration failed", gin.H{})
 		return
