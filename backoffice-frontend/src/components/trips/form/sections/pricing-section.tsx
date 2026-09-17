@@ -112,7 +112,6 @@ export function PricingSection({
     setChildDiscountEnabled(child_discount_enabled);
     setDiscountDirty("none");
     setChildDiscountDirty("none");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialBase, initialChild, initialDiscount, initialChildDiscount,
     initialDiscountPct, initialChildDiscountPct,
     discount_enabled, child_discount_enabled]);
@@ -122,7 +121,6 @@ export function PricingSection({
     if (discountDirty !== "percent") return;
     const newDiscount = computePriceFromPercent(basePrice, discountPct);
     setDiscountPrice(newDiscount);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discountPct, discountDirty]);
 
   // Sync: price changed → compute percent
@@ -130,7 +128,6 @@ export function PricingSection({
     if (discountDirty !== "price") return;
     const newPct = computePercentFromPrice(basePrice, discountPrice);
     setDiscountPct(newPct);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discountPrice, discountDirty]);
 
   // Sync: child percent changed → compute child price
@@ -138,7 +135,6 @@ export function PricingSection({
     if (childDiscountDirty !== "percent") return;
     const newPrice = computePriceFromPercent(childPrice, childDiscountPct);
     setChildDiscountPrice(newPrice);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [childDiscountPct, childDiscountDirty]);
 
   // Sync: child price changed → compute child percent
@@ -146,7 +142,6 @@ export function PricingSection({
     if (childDiscountDirty !== "price") return;
     const newPct = computePercentFromPrice(childPrice, childDiscountPrice);
     setChildDiscountPct(newPct);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [childDiscountPrice, childDiscountDirty]);
 
   const handleDiscountPctChange = useCallback(

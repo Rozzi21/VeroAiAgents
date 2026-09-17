@@ -15,13 +15,8 @@ const LEGACY_REFRESH_TOKEN_KEY = "backoffice_refresh_token";
 
 const REFRESH_BUFFER_MS = 5 * 60 * 1000;
 const FALLBACK_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
-// Default access token lifetime fallback (seconds). Kept in sync with the
-// backend default JWT_ACCESS_TTL_MINUTES (15 minutes) so the proactive refresh
-// schedule stays accurate even if the server omits expires_in.
 const DEFAULT_ACCESS_TTL_SECONDS = 900;
-// Abort refresh requests that hang so queued callers do not block forever.
 const REFRESH_TIMEOUT_MS = 10_000;
-// Name of the cross-tab coordination channel for auth refresh.
 const AUTH_CHANNEL_NAME = "vero_auth";
 
 export type BackofficeRole = "admin" | "operator" | "user" | string;
@@ -123,8 +118,6 @@ type AuthBroadcast = {
 };
 
 // adoptBroadcastToken applies a token that another tab just refreshed, without
-// calling the refresh endpoint again. This avoids a race where multiple tabs
-// each rotate the refresh token and invalidate each other.
 function adoptBroadcastToken(accessToken: string, expiresAt: number) {
   if (typeof window === "undefined") {
     return;
@@ -147,8 +140,7 @@ function getAuthChannel(): BroadcastChannel | null {
     authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
     authChannel.onmessage = (event: MessageEvent<AuthBroadcast>) => {
       // Strict validation of cross-tab token messages. BroadcastChannel is
-      // same-origin, but a compromised tab could otherwise inject a crafted
-      // token into this tab's localStorage.
+      // Validate cross-tab token messages
       const data = event.data;
       if (!data || typeof data !== "object") {
         return;
@@ -170,8 +162,6 @@ function getAuthChannel(): BroadcastChannel | null {
 }
 
 // broadcastTokenRefreshed notifies other tabs that this tab just rotated the
-// refresh token, so they can adopt the new access token instead of calling the
-// refresh endpoint themselves (which would invalidate this tab's session).
 function broadcastTokenRefreshed(accessToken: string) {
   const channel = getAuthChannel();
   if (!channel) {
@@ -240,10 +230,6 @@ export function setAuthSession(
   if (role) {
     localStorage.setItem(USER_ROLE_KEY, role);
   }
-}
-
-export function setAuthTokens(accessToken: string, role?: BackofficeRole) {
-  setAuthSession(accessToken, role);
 }
 
 export function clearAuthTokens() {
@@ -355,8 +341,7 @@ export function startAuthRefreshScheduler() {
   }
   refreshSchedulerStarted = true;
   scheduleProactiveRefresh();
-  // Initialize the cross-tab channel eagerly so this tab starts receiving
-  // token_refreshed broadcasts from other tabs immediately.
+  // Initialize cross-tab channel for token broadcasts
   getAuthChannel();
 
   visibilityHandler = () => {

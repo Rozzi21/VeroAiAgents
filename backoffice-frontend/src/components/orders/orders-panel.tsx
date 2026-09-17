@@ -486,7 +486,7 @@ function CopyableField({ label, value, placeholder }: { label: string; value: st
       await navigator.clipboard.writeText(value);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch { /* noop */ }
+    } catch {}
   };
 
   return (
