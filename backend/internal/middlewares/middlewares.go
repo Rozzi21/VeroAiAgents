@@ -25,9 +25,7 @@ const (
 	ContextEmail  = "email"
 )
 
-// CORS builds the CORS middleware from the configured allow-list (SEC-8). Origins
-// come from CORS_ALLOWED_ORIGINS so production domains can be added without code
-// changes.
+// CORS builds the CORS middleware from the configured allow-list
 func CORS(allowedOrigins []string) gin.HandlerFunc {
 	origins := allowedOrigins
 	if len(origins) == 0 {
@@ -83,8 +81,7 @@ func SecureHeaders() gin.HandlerFunc {
 	}
 }
 
-// Recovery logs panic detail (including request id) to the server log but never
-// leaks it to the client (SEC-6 information disclosure).
+// Recovery logs panic detail to the server log but never leaks it to the client
 func Recovery() gin.HandlerFunc {
 	return gin.CustomRecovery(func(c *gin.Context, recovered interface{}) {
 		requestID, _ := c.Get("request_id")
@@ -93,13 +90,10 @@ func Recovery() gin.HandlerFunc {
 	})
 }
 
-// maxRateLimiterEntries caps the in-memory map so a botnet rotating IPs cannot
-// exhaust server memory (SEC-14). 10k entries ≈ a few MB of limiters, and is
-// far more than legitimate concurrent-IP demand for a single instance.
+// maxRateLimiterEntries caps the in-memory map to prevent IP rotation exhaustion
 const maxRateLimiterEntries = 10_000
 
-// ipRateLimiter keeps one token-bucket limiter per client IP so a single client
-// cannot exhaust the quota for everyone (SEC-7).
+// ipRateLimiter keeps one token-bucket limiter per client IP
 type ipRateLimiter struct {
 	limiters   sync.Map // map[string]*rate.Limiter
 	every      rate.Limit
@@ -115,7 +109,7 @@ type rateLimiterEntry struct {
 
 func newIPRateLimiter(every rate.Limit, burst int) *ipRateLimiter {
 	l := &ipRateLimiter{every: every, burst: burst, maxEntries: maxRateLimiterEntries}
-	// Janitor: evict idle limiters and enforce a hard cap on map size (SEC-14).
+	// Janitor: evict idle limiters and enforce a hard cap on map size
 	go l.janitor()
 	return l
 }
@@ -126,9 +120,7 @@ func (l *ipRateLimiter) get(ip string) *rate.Limiter {
 		entry.lastUsed.Store(time.Now().UnixNano())
 		return entry.limiter
 	}
-	// Reserve capacity atomically. The old count() implementation scanned the
-	// entire map for every new IP, allowing rotating-IP traffic to amplify CPU
-	// work to O(n²) as the map approached its cap.
+	// Reserve capacity atomically to prevent O(n²) performance degradation
 	if !l.reserveEntry() {
 		return rate.NewLimiter(l.every, l.burst)
 	}
@@ -156,9 +148,7 @@ func (l *ipRateLimiter) reserveEntry() bool {
 	}
 }
 
-// janitor periodically removes limiters that have been idle long enough that
-// their tokens have refilled to burst (SEC-14). This keeps memory bounded even
-// under a high-rotation IP attack.
+// janitor periodically removes idle limiters to keep memory bounded.
 func (l *ipRateLimiter) janitor() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -206,16 +196,13 @@ func AuthRateLimit() gin.HandlerFunc {
 }
 
 // PublicWriteRateLimit throttles expensive unauthenticated write endpoints
-// (POST /chat, POST /orders) to 5 req/min per-IP (SEC-13). The global 20 req/s
-// limit was enough to spam thousands of fake bookings / LLM-cost-heavy chats;
-// a per-minute budget keeps normal usage working while making bulk abuse
-// impractical.
+// (POST /chat, POST /orders) to 5 req/min per-IP to prevent spam.
 func PublicWriteRateLimit() gin.HandlerFunc {
 	return newIPRateLimiter(rate.Every(12*time.Second), 5).middleware()
 }
 
-// RequestBodyLimit caps request bodies on JSON endpoints exposed to guests
-// (SEC-16). Upload routes keep their separate multipart limit in main.go.
+// RequestBodyLimit caps request bodies on JSON endpoints exposed to guests.
+// Upload routes keep their separate multipart limit in main.go.
 func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)

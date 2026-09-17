@@ -140,18 +140,15 @@ type UploadResponse struct {
 	Size     int64  `json:"size"`
 }
 
-// MaxBookingPax bounds adult/child pax per booking (SEC-11). Keep in sync with
-// the binding tag on BookingRequest below.
+// MaxBookingPax bounds adult/child pax per booking.
 const MaxBookingPax = 20
 
-// BookingRequest no longer accepts a client-supplied price (SEC-3). The total
+// BookingRequest no longer accepts a client-supplied price. The total
 // is computed server-side from the trip catalog price and the requested pax.
 type BookingRequest struct {
 	TripID uuid.UUID `json:"trip_id" binding:"required"`
-	// SEC-11: pax must stay within a sane range. Negative values would produce
-	// negative/zero totals, and unbounded values risk float overflow/absurd
-	// bills. The service layer re-enforces the same bounds for non-HTTP callers
-	// (e.g. MCP create_booking) that bypass request binding.
+	// Pax must stay within a sane range. The service layer re-enforces
+	// the same bounds for non-HTTP callers (e.g. MCP create_booking).
 	AdultPax     int    `json:"adult_pax" binding:"gte=0,lte=20"`
 	ChildPax     int    `json:"child_pax" binding:"gte=0,lte=20"`
 	ContactName  string `json:"contact_name"`
@@ -160,7 +157,7 @@ type BookingRequest struct {
 	TravelDate   string `json:"travel_date"`
 }
 
-// PaymentCreateRequest no longer accepts a client-supplied amount (SEC-3). The
+// PaymentCreateRequest no longer accepts a client-supplied amount. The
 // amount is derived from the related booking's server-computed total.
 type PaymentCreateRequest struct {
 	BookingID     uuid.UUID `json:"booking_id" binding:"required"`
@@ -168,16 +165,15 @@ type PaymentCreateRequest struct {
 }
 
 // UpdateBookingStatusRequest is used by backoffice staff to advance a booking
-// through the internal order workflow. Allowed transitions are enforced by the
-// service layer, not by the client. Values are restricted to the canonical
-// booking lifecycle constants (mirrors models.BookingStatus* — SEC-29).
+// through the internal order workflow. Values are restricted to canonical
+// booking lifecycle constants (mirrors models.BookingStatus*).
 type UpdateBookingStatusRequest struct {
 	BookingStatus string `json:"booking_status" binding:"required,oneof=pending processing confirmed completed cancelled"`
 }
 
 // PaymentWebhookRequest is the DOKU payment callback payload. Status accepts
-// any provider string; the service normalizes aliases into the canonical
-// models.PaymentStatus* constants (SEC-29).
+// any provider string; the service normalizes aliases into canonical
+// models.PaymentStatus* constants.
 type PaymentWebhookRequest struct {
 	ExternalID string   `json:"external_id" binding:"required"`
 	Status     string   `json:"status" binding:"required"`

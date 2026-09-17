@@ -15,7 +15,7 @@ const (
 	RoleAdmin    Role = "admin"
 )
 
-// Booking lifecycle statuses (SEC-29). BookingStatus only advances through the
+// Booking lifecycle statuses. BookingStatus only advances through the
 // transitions enforced by Booking.CanTransitionTo below.
 const (
 	BookingStatusPending    = "pending"
@@ -25,7 +25,7 @@ const (
 	BookingStatusCancelled  = "cancelled"
 )
 
-// Payment status constants (SEC-29). Values persisted in payments.status.
+// Payment status constants. Values persisted in payments.status.
 const (
 	PaymentStatusPending    = "pending"
 	PaymentStatusPaid       = "paid"
@@ -36,10 +36,7 @@ const (
 	PaymentStatusCancelled  = "cancelled"
 )
 
-// paymentSuccessSet is the canonical set of statuses that mean "money
-// received". DOKU sends "settlement" or "paid"; analytics historically also
-// counted "verified". Centralized here so services do not re-declare raw
-// string slices (SEC-29).
+// paymentSuccessSet is the canonical set of statuses that mean "money received".
 var paymentSuccessSet = map[string]bool{
 	PaymentStatusPaid:       true,
 	PaymentStatusSettlement: true,
@@ -95,8 +92,7 @@ func NormalizePaymentStatus(status string) string {
 	}
 }
 
-// Tool result status constants shared by MCP execution results (SEC-29).
-// Previously raw literals "success"/"failed" were scattered across mcp_service.go.
+// Tool result status constants shared by MCP execution results.
 const (
 	ToolResultStatusSuccess = "success"
 	ToolResultStatusFailed  = "failed"
@@ -374,9 +370,8 @@ type Booking struct {
 	IdempotencyKeyHash string     `json:"-" gorm:"size:64;uniqueIndex"`
 }
 
-// CanTransitionTo reports whether the booking may move to target under the
-// SEC-29 status machine. Terminal states (completed / cancelled) accept no
-// further transitions; identical source and target are a no-op.
+// CanTransitionTo reports whether the booking may move to target status.
+// Terminal states (completed / cancelled) accept no further transitions.
 func (b *Booking) CanTransitionTo(target string) bool {
 	if b.BookingStatus == target {
 		return true
@@ -388,8 +383,7 @@ func (b *Booking) CanTransitionTo(target string) bool {
 	return allowed[target]
 }
 
-// bookingStatusTransitions centralizes the booking lifecycle graph so both
-// validation and any future reporting read the same truth (SEC-29).
+// bookingStatusTransitions centralizes the booking lifecycle state machine.
 var bookingStatusTransitions = map[string]map[string]bool{
 	BookingStatusPending: {
 		BookingStatusProcessing: true,

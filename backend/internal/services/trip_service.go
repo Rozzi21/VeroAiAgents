@@ -12,8 +12,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
-// SEC-27: TripService depends on the TripRepository interface instead of the
-// concrete *repositories.Repository. *Repository satisfies it implicitly.
+// TripService depends on the TripRepository interface instead of concrete Repository.
 type TripService struct {
 	repo repositories.TripRepository
 	bus  *events.Bus

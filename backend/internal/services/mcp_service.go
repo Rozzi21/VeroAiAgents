@@ -119,7 +119,7 @@ func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *u
 		s.persistAuditSync(ctx, job)
 	}
 
-	// SEC-18: broadcast only tool name + status.
+	// Broadcast only tool name + status
 	s.bus.Publish("mcp_tool_executed", map[string]interface{}{"tool": result.Tool, "status": result.Status})
 	return result, nil
 }
@@ -448,8 +448,8 @@ func (s *MCPService) executeCalculateTripPrice(ctx context.Context, payload map[
 
 	adultPax := parsePax(payload, "adult_pax", 1)
 	childPax := parsePax(payload, "child_pax", 0)
-	// Enforce the same server-side pax bounds as booking (SEC-11) so a quote can
-	// never be produced for an impossible/absurd pax count.
+	// Enforce the same server-side pax bounds as booking so a quote can
+	// never be produced for an impossible pax count.
 	if adultPax < 0 || childPax < 0 || adultPax > dto.MaxBookingPax || childPax > dto.MaxBookingPax {
 		return ToolResult{Tool: mcp.ToolCalculateTripPrice, Status: models.ToolResultStatusFailed, Data: map[string]interface{}{"error": "pax must be between 0 and " + strconv.Itoa(dto.MaxBookingPax)}}
 	}

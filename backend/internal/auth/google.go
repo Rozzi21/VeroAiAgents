@@ -26,8 +26,7 @@ const googleIssuer = "https://accounts.google.com"
 // googleScope is the minimal OIDC scope set: identity + email + display name.
 var googleScopes = []string{oidc.ScopeOpenID, "email", "profile"}
 
-// Sentinel errors surfaced by the Google flow. Callers match with errors.Is
-// (SEC-28) — never string-compare.
+// Sentinel errors surfaced by the Google flow. Callers match with errors.Is.
 var (
 	ErrGoogleExchangeFailed   = errors.New("google code exchange failed")
 	ErrGoogleInvalidIDToken   = errors.New("google id_token invalid")
@@ -85,7 +84,6 @@ func newGoogleClientWithProvider(provider *oidc.Provider, clientID, clientSecret
 func (g *GoogleClient) AuthCodeURL(state, nonce, codeVerifier string) string {
 	return g.AuthCodeURLForRedirect(g.oauthConfig.RedirectURL, state, nonce, codeVerifier)
 }
-
 
 func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeVerifier string) string {
 	cfg := g.oauthConfig

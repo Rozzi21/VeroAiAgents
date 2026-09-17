@@ -22,12 +22,8 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 	{
 		api.GET("/packages", h.PublicPackages)
 		api.GET("/packages/:id", h.GetPackage)
-		// SEC-13: expensive unauthenticated writes get a strict per-IP budget
-		// (5 req/min) so bulk fake-order spam / LLM-cost abuse is impractical.
-		// OptionalAuth: a valid Bearer access token upgrades the chat to an
-		// authenticated caller — create_booking then attributes the order to
-		// the account (no one-order guest limit). No token => pure guest,
-		// unchanged. The endpoint stays public; invalid tokens are ignored.
+		// Rate limit unauthenticated writes (5 req/min) to prevent spam.
+		// OptionalAuth: a valid Bearer access token upgrades chat to an authenticated caller.
 		api.POST("/chat", middlewares.PublicWriteRateLimit(), middlewares.RequestBodyLimit(64<<10), middlewares.OptionalAuth(s.JWT), h.GuestChat)
 		api.GET("/chat/history", h.GuestHistory)
 		// B-GENUI-3: explicit "Select Package" action of a recommendation card.
@@ -61,10 +57,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			authGroup.GET("/google/link/callback", h.GoogleCallback)
 		}
 
-		// SEC-18: SSE broadcasts internal workflow/payment events to every
-		// subscriber. Restrict to staff so raw prompts, session IDs, and payment
-		// data are not exposed to regular users. Payloads are also sanitized at
-		// the publish site as defense-in-depth.
+		// SSE broadcasts internal workflow/payment events to staff subscribers.
 		api.GET("/events/stream", middlewares.Auth(s.JWT), middlewares.Role(models.RoleOperator, models.RoleAdmin), h.EventStream)
 
 		protected := api.Group("")
@@ -87,7 +80,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 				admin.DELETE("/packages/:id", h.DeleteTrip)
 				admin.POST("/uploads", h.UploadTripMedia)
 				admin.GET("/dashboard", h.Analytics)
-				// Staff provisioning is admin-only (SEC-1).
+				// Staff provisioning is admin-only.
 				admin.POST("/users", middlewares.Role(models.RoleAdmin), h.AdminCreateUser)
 			}
 

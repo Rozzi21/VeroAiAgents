@@ -57,9 +57,8 @@ func New(cfg config.Config, repo *repositories.Repository, jwt *auth.JWTService,
 	s.Google = NewGoogleOAuthService(cfg, repo, s.Auth)
 	s.Guests = &GuestService{repo: repo, cfg: cfg, users: s.Auth}
 	s.Bookings = &BookingService{repo: repo, bus: bus}
-	// PERF-3 #2: bounded audit worker pool detaches tool-call + AI-log
-	// persistence from the synchronous LLM response path. *Repository satisfies
-	// AuditWriter implicitly (SEC-27 structural typing).
+	// Bounded audit worker pool detaches tool-call + AI-log
+	// persistence from the synchronous LLM response path.
 	s.audit = NewAuditPool(repo)
 	s.audit.Start()
 	s.MCP = &MCPService{repo: repo, bus: bus, bookings: s.Bookings, auth: s.Auth, audit: s.audit}

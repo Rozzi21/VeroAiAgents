@@ -14,13 +14,13 @@ const (
 	EventRefreshTokenUsedAsAccess  = "refresh_token_used_as_access"
 	EventAccessTokenUsedOnRefresh  = "access_token_used_on_refresh"
 	EventRefreshTokenReuseDetected = "refresh_token_reuse_detected"
-	EventGoogleLoginStarted      = "google_login_started"
-	EventGoogleLoginSuccess      = "google_login_success"
-	EventGoogleLoginFailed       = "google_login_failed"
-	EventGoogleOAuthStateInvalid = "google_oauth_state_invalid"
-	EventGoogleAccountLinked     = "google_account_linked"
-	EventGoogleAccountCreated    = "google_account_created"
-	EventGoogleLinkRequired = "google_link_required"
+	EventGoogleLoginStarted        = "google_login_started"
+	EventGoogleLoginSuccess        = "google_login_success"
+	EventGoogleLoginFailed         = "google_login_failed"
+	EventGoogleOAuthStateInvalid   = "google_oauth_state_invalid"
+	EventGoogleAccountLinked       = "google_account_linked"
+	EventGoogleAccountCreated      = "google_account_created"
+	EventGoogleLinkRequired        = "google_link_required"
 )
 
 func LogSecurity(event string, fields map[string]any) {

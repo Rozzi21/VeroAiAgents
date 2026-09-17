@@ -21,8 +21,7 @@ func (h *Handler) Health(c *gin.Context) {
 func (h *Handler) DatabaseHealth(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 	defer cancel()
-	// SEC-15: do not leak raw DB errors (DSN fragments, connection details) on a
-	// public endpoint; log server-side instead.
+	// Do not leak raw DB errors on a public endpoint; log server-side instead
 	if err := h.Database.Health(ctx); err != nil {
 		log.Printf("[health] database check failed: %v", err)
 		utils.Error(c, http.StatusServiceUnavailable, "Database disconnected", gin.H{})

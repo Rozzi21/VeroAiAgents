@@ -6,11 +6,9 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 )
 
-// SEC-27: Aggregate query methods for the analytics dashboard. These replace
-// the AnalyticsService `s.repo.DB` escape hatch (coding-rules §1.1a exception
-// is now closed) so the service depends only on the AnalyticsRepository
-// interface and can be unit-tested with a mock. Aggregate SQL stays inside the
-// repository layer where it belongs.
+// Aggregate query methods for the analytics dashboard.
+// Service depends only on the AnalyticsRepository interface for unit testing.
+// Aggregate SQL stays inside the repository layer where it belongs.
 
 func (r *Repository) CountBookings(ctx context.Context) (int64, error) {
 	var count int64
@@ -44,7 +42,7 @@ func (r *Repository) CountPayments(ctx context.Context) (int64, error) {
 }
 
 // CountSuccessfulPayments counts payments whose status is in the canonical
-// success set (SEC-29: success statuses live in models.PaymentSuccessStatuses).
+// success set (models.PaymentSuccessStatuses).
 func (r *Repository) CountSuccessfulPayments(ctx context.Context) (int64, error) {
 	var count int64
 	err := r.DB.WithContext(ctx).Model(&models.Payment{}).

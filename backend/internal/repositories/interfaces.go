@@ -8,16 +8,9 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 )
 
-// SEC-27: Per-domain repository interfaces for Dependency Inversion.
-// Services now depend on these narrow interfaces instead of the concrete
-// *repositories.Repository, enabling unit-test mocking without a real database.
-//
-// The concrete *Repository type already satisfies every interface below
-// implicitly (Go structural typing). No existing repository method signatures
-// changed; only new aggregate methods were added for the analytics domain to
-// fully retire the AnalyticsService `s.repo.DB` escape hatch (coding-rules
-// §1.1a exception is now closed).
-//
+// Per-domain repository interfaces for Dependency Inversion.
+// Services depend on these narrow interfaces instead of the concrete Repository,
+// enabling unit testing without a database.
 // Interface segregation: each service only sees the methods it actually calls.
 
 // UserRepository — user CRUD.
@@ -141,10 +134,8 @@ type LogRepository interface {
 	ListToolCalls(ctx context.Context, query RepositoryFilter) ([]models.ToolCall, error)
 }
 
-// AnalyticsRepository — aggregate queries for the dashboard. These dedicated
-// methods retire the AnalyticsService `s.repo.DB` escape hatch (SEC-27 /
-// coding-rules §1.1a): aggregate SQL now lives behind the repository layer
-// where it belongs, and AnalyticsService depends only on this interface.
+// AnalyticsRepository provides aggregate queries for the dashboard.
+// Aggregate SQL is encapsulated within the repository layer.
 type AnalyticsRepository interface {
 	RecentBookings(ctx context.Context, limit int) ([]models.Booking, error)
 	CountBookings(ctx context.Context) (int64, error)

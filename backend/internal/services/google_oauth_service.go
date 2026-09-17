@@ -36,8 +36,8 @@ type GoogleOAuthService struct {
 	enabled bool
 }
 
-// GoogleOAuthRepository is the narrow persistence contract (SEC-27): OAuth
-// state lifecycle + user lookup/link by Google sub.
+// GoogleOAuthRepository is the persistence contract for OAuth
+// state lifecycle + user lookup/link by Google sub
 type GoogleOAuthRepository interface {
 	repositories.OAuthRepository
 	repositories.UserRepository
@@ -72,7 +72,7 @@ func (r GoogleCallbackResult) LinkedUserID() string {
 // this only needs to outlast a realistic consent-screen visit.
 const oauthStateTTL = 10 * time.Minute
 
-// Sentinel errors for the Google flow (SEC-28 — match with errors.Is).
+// Sentinel errors for the Google flow (match with errors.Is).
 var (
 	ErrGoogleOAuthStateInvalid = errors.New("google oauth state invalid")
 	ErrGoogleOAuthStateExpired = errors.New("google oauth state expired")
@@ -94,7 +94,6 @@ func NewGoogleOAuthService(cfg config.Config, repo GoogleOAuthRepository, issuer
 		return s
 	}
 	// Discovery hits Google's OIDC document once; use a bounded detached ctx
-	// (startup wiring, not a request path — SEC-26).
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, err := auth.NewGoogleClient(ctx, cfg.GoogleClientID, cfg.GoogleClientSecret, cfg.GoogleRedirectURI)
@@ -353,7 +352,7 @@ func (s *GoogleOAuthService) resolveUser(ctx context.Context, identity auth.Goog
 		Name:      name,
 		Email:     identity.Email,
 		Password:  string(hash),
-		Role:      models.RoleUser, // SEC-1: role never comes from outside.
+		Role:      models.RoleUser, // Role never comes from outside
 		GoogleSub: &identity.Subject,
 	}
 	// Create user + canonical ExternalIdentity (sub→user) atomically. The
@@ -406,7 +405,7 @@ func (s *GoogleOAuthService) resolveUser(ctx context.Context, identity auth.Goog
 //   - the Google sub must not already be linked to THIS account (idempotent
 //     no-op, returns the user unchanged);
 //   - the link only writes the identity mapping; it never touches role or
-//     password (SEC-1 — role stays server-side).
+//     password (role stays server-side)
 func (s *GoogleOAuthService) LinkAccount(ctx context.Context, userID string, identity auth.GoogleIdentity, meta AuthRequestMeta) (models.User, error) {
 	uid, err := uuid.Parse(userID)
 	if err != nil {

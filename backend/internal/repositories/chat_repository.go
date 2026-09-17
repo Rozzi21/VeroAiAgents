@@ -44,8 +44,8 @@ func (r *Repository) ListChatSessions(ctx context.Context, userID uuid.UUID) ([]
 }
 
 func (r *Repository) DeleteExpiredChatSessions(ctx context.Context, before time.Time) (int64, error) {
-	// SEC-19: Must delete child records (chat_messages, tool_calls, ai_logs)
-	// before deleting the session, otherwise they become orphans in DB.
+	// Delete child records (chat_messages, tool_calls, ai_logs)
+	// before deleting the session to prevent orphan records.
 	tx := r.DB.WithContext(ctx).Begin()
 	if tx.Error != nil {
 		return 0, tx.Error

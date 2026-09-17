@@ -9,11 +9,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// SEC-27: AnalyticsService now depends on the AnalyticsRepository interface
-// instead of the concrete *repositories.Repository. This retires the old
-// `s.repo.DB` escape hatch (coding-rules §1.1a exception is now closed):
-// aggregate SQL lives behind dedicated repository methods and the service can
-// be unit-tested with a mock.
+// AnalyticsService depends on the AnalyticsRepository interface
+// instead of the concrete Repository for modularity and testability.
 type AnalyticsService struct {
 	repo repositories.AnalyticsRepository
 }
@@ -39,8 +36,7 @@ func (s *AnalyticsService) Dashboard(ctx context.Context) (map[string]interface{
 	if err != nil {
 		return nil, err
 	}
-	// SEC-29: success statuses live in models.PaymentSuccessStatuses() and are
-	// applied inside the repository method (no raw string slice in the service).
+	// Success statuses live in models.PaymentSuccessStatuses()
 	paidPayments, err := s.repo.CountSuccessfulPayments(ctx)
 	if err != nil {
 		return nil, err

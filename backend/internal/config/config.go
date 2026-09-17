@@ -209,7 +209,7 @@ func validateCookieSameSite(envName, value string) error {
 // must be explicitly set to a non-default, non-empty value; otherwise tokens
 // could be forged using the well-known development secret. When payments are
 // explicitly re-enabled, the DOKU webhook secret is also required so payment
-// webhooks cannot be forged (SEC-4).
+// webhooks cannot be forged.
 func (c Config) Validate() error {
 	// Cookie SameSite policies are validated in EVERY environment, not only in
 	// production: the failure mode of a typo is silence (see

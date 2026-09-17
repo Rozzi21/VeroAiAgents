@@ -15,9 +15,8 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/telemetry"
 )
 
-// AuditWriter is the narrow persistence contract the audit worker pool uses to
-// write tool-call + AI-log audit records (PERF-3 #2). *repositories.Repository
-// satisfies it implicitly (SEC-27 structural typing).
+// AuditWriter is the persistence contract the audit worker pool uses to
+// write tool-call + AI-log audit records.
 type AuditWriter interface {
 	CreateToolCall(ctx context.Context, call *models.ToolCall) error
 	CreateAILog(ctx context.Context, log *models.AILog) error
@@ -52,15 +51,15 @@ type memorySummaryState struct {
 }
 
 const (
-	// auditPoolWorkers bounds concurrent DB writers. Low count on purpose: audit
+	// AuditPoolWorkers bounds concurrent DB writers. Low count on purpose: audit
 	// is best-effort and must not starve the connection pool used by the main
-	// request path (SEC-21 flood note).
+	// request path
 	auditPoolWorkers = 2
 	// auditPoolBuffer caps in-flight audit jobs. When full, Submit drops (audit
 	// never blocks the AI response).
 	auditPoolBuffer = 64
 	// auditWriteTimeout bounds each DB write so a wedged DB cannot stall a
-	// worker forever (SEC-26 detached context).
+	// worker forever using detached context
 	auditWriteTimeout = 10 * time.Second
 	// auditDrainTimeout bounds graceful shutdown so a wedged DB cannot hang
 	// process exit. Leftover jobs are dropped (audit is best-effort).
@@ -73,8 +72,7 @@ const (
 //
 // Submit is non-blocking: if the buffer is full the job is dropped and logged,
 // so audit pressure never stalls the AI response. Workers use a detached
-// context (context.Background + timeout) because audit writes outlive the HTTP
-// request that produced them (SEC-26).
+// context because audit writes outlive the HTTP request that produced them.
 type AuditPool struct {
 	writer       AuditWriter
 	jobs         chan backgroundJob

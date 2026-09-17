@@ -14,10 +14,7 @@ func StructuredLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
-		// SEC-hardening (23 Agu 2026): never log raw OAuth/query secrets. The
-		// Google callback arrives as ?code=<authorization_code>&state=<state>;
-		// logging RawQuery verbatim would persist a single-use auth code and
-		// anti-CSRF state into logs. Redact sensitive keys before logging.
+		// Never log raw OAuth/query secrets. Redact sensitive keys before logging.
 		query := redactSensitiveQuery(c.Request.URL.RawQuery)
 
 		c.Next()

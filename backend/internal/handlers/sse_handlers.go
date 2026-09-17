@@ -18,8 +18,7 @@ import (
 // sesi monitoring backoffice tanpa menumpuk zombie.
 const sseMaxLifetime = 30 * time.Minute
 
-// sseHeartbeatInterval adalah interval heartbeat. Memakai time.NewTicker (bukan
-// time.After) agar tidak ada timer leak (SEC-31).
+// sseHeartbeatInterval adalah interval heartbeat SSE.
 const sseHeartbeatInterval = 25 * time.Second
 
 func (h *Handler) EventStream(c *gin.Context) {
