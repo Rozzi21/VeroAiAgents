@@ -10,11 +10,9 @@ type AuthFormProps = {
   footer: React.ReactNode;
   includeName?: boolean;
   // google renders the "Continue with Google" OAuth button ABOVE the
-  // credential inputs, with an "or" divider beneath it (optional so existing
-  // callers are unaffected).
+  // credential inputs, with an "or" divider beneath it.
   google?: React.ReactNode;
   // guest renders an explicit account-free path below the credential submit.
-  // It remains optional so other auth forms keep their existing layout.
   guest?: React.ReactNode;
 };
 

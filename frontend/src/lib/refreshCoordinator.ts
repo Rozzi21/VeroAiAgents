@@ -1,4 +1,4 @@
-// Cross-tab coordination for the single-use refresh-token rotation (F-02).
+// Cross-tab coordination for the single-use refresh-token rotation.
 //
 // Why: the backend refresh rotation is SINGLE-USE with reuse detection that
 // revokes ALL of the user's sessions. Two tabs refreshing concurrently with

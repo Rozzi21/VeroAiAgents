@@ -4,7 +4,6 @@
 // customer chatting through it was seen as a guest by the backend and hit
 // GUEST_ORDER_LIMIT_REACHED on their SECOND order even though their account is
 // entitled to more. The header must survive the hop.
-// Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

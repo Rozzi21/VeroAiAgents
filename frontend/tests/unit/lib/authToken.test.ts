@@ -1,5 +1,4 @@
 // Unit tests for customer access-token storage + OAuth fragment handling.
-// Run: npm test (Node built-in runner, no extra dependencies).
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 

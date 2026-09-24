@@ -1,6 +1,6 @@
 // Tests for cross-tab refresh coordination (F-02): serialization, result
 // reuse, failure propagation, logout races, and the stale-lock fallback.
-// Run: npm test (Node built-in runner, storage/locks stubbed).
+// Storage and locks are stubbed.
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 

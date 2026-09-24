@@ -1,10 +1,9 @@
-// B-GENUI-3 / B-GENUI-4 (9 Sep 2026): card "Select Package" synchronizes with
-// the backend. These tests lock the UI-state contract:
+// Card "Select Package" synchronizes with the backend. These tests lock the
+// UI-state contract:
 //   - selection changes ONLY on a structured backend success,
 //   - failures never mark a package selected,
 //   - the backend echo (`done` / history) is the source of truth on reload,
 //   - the client never keyword-matches "paket lain" or parses assistant text.
-// Run: npm test (Node built-in runner).
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -123,7 +122,7 @@ test("selectPackage failure rejects with the backend message (no silent success)
 });
 
 
-// --- structural guards (frontend tests 12 + 13) -----------------------------
+// --- structural guards --------------------------------------------------------
 // The alternative-request intent ("paket lain") is classified by the AI/tool
 // flow on the backend. The client must not keyword-match user/assistant text
 // and must not parse assistant prose to decide selection or recommendations.

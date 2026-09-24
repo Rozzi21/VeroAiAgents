@@ -1,7 +1,6 @@
 // Behaviour tests for the customer session helpers in api.ts: refresh on
 // expiry, safe logout on refresh failure, logout cleanup, multi-tab dedup,
 // and the guarantee that tokens are never logged or placed in URLs.
-// Run: npm test (Node built-in runner, fetch/storage stubbed).
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -276,14 +275,6 @@ test("customerLogout still clears the local token when the network fails", async
   await customerLogout();
   assert.equal(getCustomerAccessToken(), null);
 });
-test("customerLogout still clears the local token when the network fails", async () => {
-  setCustomerAccessToken(futureToken(), 900);
-  fetchHandler = async () => {
-    throw new Error("network down");
-  };
-  await customerLogout();
-  assert.equal(getCustomerAccessToken(), null);
-});
 
 // --- token exposure: headers vs URL vs logs ---------------------------------
 
@@ -360,7 +351,6 @@ test("token is never written to console on non-JSON error responses", async () =
   assert.equal(logged.length > 0, true);
   assert.equal(JSON.stringify(logged).includes(token), false);
 });
-
 
 // --- authenticated profile (F-01: UI knows WHO is signed in) ------------------
 

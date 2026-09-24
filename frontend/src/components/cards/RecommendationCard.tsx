@@ -9,12 +9,12 @@ interface RecommendationCardProps {
   category: string;
   icon: React.ReactNode;
   href?: string;
-  // View Details opens the existing PackageDetailPanel ONLY. It never selects
-  // the package and never touches selected_trip_id (B-GENUI-3).
+  // View Details opens the PackageDetailPanel ONLY. It never selects the
+  // package and never touches selected_trip_id.
   onViewDetails?: () => void;
   // Select Package invokes the backend select_package flow. The card shows
   // the selected state ONLY after the backend persisted the selection —
-  // never on click alone, never because the detail panel opened (B-GENUI-3).
+  // never on click alone, never because the detail panel opened.
   onSelectPackage?: () => void;
   selected?: boolean;
   selecting?: boolean;
@@ -55,9 +55,9 @@ export default function RecommendationCard({
     </div>
   );
 
-  // Chat mode (B-GENUI-3): two explicit, separate actions. The card body is
-  // NOT one big button anymore, so "View Details" and "Select Package" can
-  // never be conflated.
+  // Chat mode: two explicit, separate actions. The card body is NOT one big
+  // button anymore, so "View Details" and "Select Package" can never be
+  // conflated.
   if (onViewDetails || onSelectPackage) {
     return (
       <div
