@@ -1,6 +1,6 @@
 import type { GuestChatHistoryResponse, TripPackage } from "./api.ts";
 
-// History reconstruction (GenUI persistence, 6 Sep 2026).
+// History reconstruction for GenUI persistence.
 //
 // mapHistoryMessages converts the persisted chat history into the shape
 // ChatInterface renders. It is a PURE function: no fetch, no LLM, no

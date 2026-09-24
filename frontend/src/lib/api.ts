@@ -11,8 +11,6 @@ import { coordinatedRefresh, markSessionAnonymous } from "./refreshCoordinator.t
 const SERVER_API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081";
 
-export const API_BASE_URL = SERVER_API_BASE_URL;
-
 function resolveApiBase() {
   if (typeof window !== "undefined") {
     return "";
@@ -71,8 +69,8 @@ export type ChatResponse = {
   session_id: string;
   message: string;
   // Stable server-owned id of the persisted assistant message
-  // (ChatMessage.ID). Present on `done` since 6 Sep 2026; older backends may
-  // omit it, so callers fall back to their local placeholder id.
+  // (ChatMessage.ID). Present on `done`; older backends may omit it, so
+  // callers fall back to their local placeholder id.
   message_id?: string;
   workflow?: Record<string, unknown>[];
   show_recommendations: boolean;
@@ -84,9 +82,9 @@ export type ChatResponse = {
   // assistant's prose is display text, never a signal.
   order_gate?: ChatOrderGate;
   // Backend-authoritative selected package of the chat session
-  // (chat_sessions.selected_trip_id), echoed on every finalized turn since
-  // 9 Sep 2026 (B-GENUI-3/4). This is the ONLY source the UI may use for the
-  // selected/active card state. Absent when nothing is selected.
+  // (chat_sessions.selected_trip_id), echoed on every finalized turn. This is
+  // the ONLY source the UI may use for the selected/active card state. Absent
+  // when nothing is selected.
   selected_trip_id?: string;
 };
 
@@ -113,16 +111,15 @@ export type ChatRecommendation = {
 
 export type GuestChatHistoryResponse = {
   messages: Array<{
-    // Stable server-owned message id (ChatMessage.ID), since 6 Sep 2026.
+    // Stable server-owned message id (ChatMessage.ID).
     id?: string;
     role: "user" | "assistant";
     content: string;
     recommendation?: ChatRecommendation;
   }>;
-  // Persisted package selection of the session (chat_sessions.selected_trip_id),
-  // returned since 9 Sep 2026 (B-GENUI-3) so a reload restores the
-  // selected/active card state WITHOUT any search_trips or LLM call.
-  // Absent when nothing is selected.
+  // Persisted package selection of the session (chat_sessions.selected_trip_id)
+  // so a reload restores the selected/active card state WITHOUT any
+  // search_trips or LLM call. Absent when nothing is selected.
   selected_trip_id?: string;
 };
 
@@ -158,8 +155,9 @@ type RefreshResponse = { access_token: string; expires_in?: number };
 export type CustomerSessionState = "active" | "anonymous";
 
 type EnsureCustomerSessionOptions = {
-  // F-07 callers need refresh transport/parse error itself. Default callers
-  // retain existing active/anonymous contract and graceful guest fallback.
+  // Callers that need the refresh transport/parse error itself opt in here;
+  // default callers retain the active/anonymous contract and graceful guest
+  // fallback.
   throwOnRefreshFailure?: boolean;
 };
 
@@ -207,9 +205,9 @@ export async function ensureCustomerSession(
             }
             return { kind: "failed" };
           } catch (err) {
-            // 401 clears stale token and marks every tab anonymous. Other
+            // 401 clears the stale token and marks every tab anonymous. Other
             // failures leave coordinator markers untouched and are retained
-            // for F-07's original request.
+            // for the caller's original request.
             if (err instanceof APIError && err.status === 401) {
               return { kind: "unauthorized" };
             }
@@ -237,7 +235,7 @@ export async function ensureCustomerSession(
 // Works identically for Google-authenticated sessions (same AuthSession). Safe
 // to call when already anonymous. Returns after the local token is cleared.
 // The anonymous marker tells every OTHER tab (and any in-flight refresh) that
-// the session is gone, so all tabs converge to logged-out (F-02).
+// the session is gone, so all tabs converge to logged-out.
 export async function customerLogout(): Promise<void> {
   if (typeof window === "undefined") return;
   try {
@@ -274,13 +272,12 @@ export type SelectPackageResponse = {
 };
 
 // selectPackage is the deterministic "Select Package" action of a Travel
-// Package recommendation card (B-GENUI-3, 9 Sep 2026). The backend endpoint
-// runs the SAME select_package tool logic the LLM uses: it validates the
-// trip, persists chat_sessions.selected_trip_id, and returns it. An APIError
-// (validation, unknown trip, expired session) means the selection did NOT
-// happen — the caller must leave the UI selection state unchanged. Opening
-// the detail panel never calls this. Selection is not booking: no order is
-// created here.
+// Package recommendation card. The backend endpoint runs the SAME
+// select_package tool logic the LLM uses: it validates the trip, persists
+// chat_sessions.selected_trip_id, and returns it. An APIError (validation,
+// unknown trip, expired session) means the selection did NOT happen — the
+// caller must leave the UI selection state unchanged. Opening the detail
+// panel never calls this. Selection is not booking: no order is created here.
 export function selectPackage(tripId: string): Promise<SelectPackageResponse> {
   return apiFetch<SelectPackageResponse>("/api/v1/chat/select-package", {
     method: "POST",
@@ -427,17 +424,17 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}) {
 }
 
 // ChatStreamHandlers describes the callbacks used while consuming the SSE
-// streaming chat endpoint (PERF-1). onDelta fires for each text fragment as it
+// streaming chat endpoint. onDelta fires for each text fragment as it
 // arrives (append to the in-flight assistant message), onDone fires once with
 // the final ChatResult (packages/recommendation flags), onError fires if the
 // stream fails mid-flight.
 export type ChatStreamHandlers = {
-	requestID?: string;
-	onRequestStart?: () => void;
-	onResponseHeaders?: (requestID: string) => void;
-	onFirstEvent?: () => void;
+  requestID?: string;
+  onRequestStart?: () => void;
+  onResponseHeaders?: (requestID: string) => void;
+  onFirstEvent?: () => void;
   onDelta: (text: string) => void;
-	onRecommendation?: (result: Pick<ChatResponse, "show_recommendations" | "recommendation_reason" | "recommended_packages">) => void;
+  onRecommendation?: (result: Pick<ChatResponse, "show_recommendations" | "recommendation_reason" | "recommended_packages">) => void;
   onDone: (result: ChatResponse) => void;
   onError: (message: string) => void;
 };
@@ -446,31 +443,31 @@ export type ChatStreamHandlers = {
 // separators) into its `event` and `data` fields per the SSE wire format.
 function parseSSEBlock(raw: string): { event: string; data: string } {
   let event = "message";
-	const dataLines: string[] = [];
+  const dataLines: string[] = [];
   for (const line of raw.replace(/\r\n/g, "\n").split("\n")) {
     if (line.startsWith("event:")) {
       event = line.slice("event:".length).trim();
     } else if (line.startsWith("data:")) {
-		dataLines.push(line.slice("data:".length).replace(/^ /, ""));
+      dataLines.push(line.slice("data:".length).replace(/^ /, ""));
     }
   }
   return { event, data: dataLines.join("\n") };
 }
 
 function nextSSESeparator(buffer: string): { index: number; length: number } | null {
-	const lf = buffer.indexOf("\n\n");
-	const crlf = buffer.indexOf("\r\n\r\n");
-	if (lf < 0 && crlf < 0) return null;
-	if (crlf >= 0 && (lf < 0 || crlf < lf)) return { index: crlf, length: 4 };
-	return { index: lf, length: 2 };
+  const lf = buffer.indexOf("\n\n");
+  const crlf = buffer.indexOf("\r\n\r\n");
+  if (lf < 0 && crlf < 0) return null;
+  if (crlf >= 0 && (lf < 0 || crlf < lf)) return { index: crlf, length: 4 };
+  return { index: lf, length: 2 };
 }
 
 // streamChat POSTs a chat request with `stream: true` and consumes the SSE
 // response incrementally. Unlike apiFetch, this does NOT apply the 35s abort
 // timeout: a streaming response is expected to stay open while tokens flow,
 // and the backend caps the whole workflow via AI_TIMEOUT_SECONDS + the request
-// context (SEC-26). A client disconnect (AbortController) still propagates and
-// cancels the upstream stream.
+// context. A client disconnect (AbortController) still propagates and cancels
+// the upstream stream.
 export async function streamChat(
   path: string,
   payload: Record<string, unknown>,
@@ -479,7 +476,7 @@ export async function streamChat(
 ): Promise<void> {
   const headers = new Headers(options.headers);
   headers.set("Content-Type", "application/json");
-	if (handlers.requestID) headers.set("X-Request-ID", handlers.requestID);
+  if (handlers.requestID) headers.set("X-Request-ID", handlers.requestID);
   // Attach the customer access token when present (same rule as apiFetch):
   // POST /chat accepts an optional Bearer token (OptionalAuth) so a signed-in
   // customer — password or Google — creates chat orders on their ACCOUNT,
@@ -491,7 +488,7 @@ export async function streamChat(
 
   let response: Response;
   try {
-		handlers.onRequestStart?.();
+    handlers.onRequestStart?.();
     response = await fetch(`${resolveApiBase()}${path}`, {
       ...options,
       method: "POST",
@@ -510,7 +507,7 @@ export async function streamChat(
     );
     return;
   }
-	handlers.onResponseHeaders?.(response.headers.get("X-Request-ID") ?? handlers.requestID ?? "");
+  handlers.onResponseHeaders?.(response.headers.get("X-Request-ID") ?? handlers.requestID ?? "");
 
   if (!response.ok || !response.body) {
     // Non-2xx streaming responses are not expected (errors surface as an SSE
@@ -536,7 +533,7 @@ export async function streamChat(
   let buffer = "";
   let receivedDone = false;
   let reportedError = false;
-	let receivedFirstEvent = false;
+  let receivedFirstEvent = false;
   const reportError = (message: string) => {
     if (reportedError || receivedDone) {
       return;
@@ -544,31 +541,31 @@ export async function streamChat(
     reportedError = true;
     handlers.onError(message);
   };
-	const processBlock = (rawBlock: string) => {
-		if (rawBlock.trim() === "") return;
-		const { event, data } = parseSSEBlock(rawBlock);
-		if (!data) return;
-		try {
-			if (!receivedFirstEvent) {
-				receivedFirstEvent = true;
-				handlers.onFirstEvent?.();
-			}
-			if (event === "delta") {
-				const parsed = JSON.parse(data) as { content?: string };
-				if (parsed.content) handlers.onDelta(parsed.content);
-			} else if (event === "recommendation") {
-				handlers.onRecommendation?.(JSON.parse(data));
-			} else if (event === "done") {
-				receivedDone = true;
-				handlers.onDone(JSON.parse(data) as ChatResponse);
-			} else if (event === "error") {
-				const parsed = JSON.parse(data) as { message?: string };
-				reportError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
-			}
-		} catch {
-			// Skip malformed event payloads without aborting stream.
-		}
-	};
+  const processBlock = (rawBlock: string) => {
+    if (rawBlock.trim() === "") return;
+    const { event, data } = parseSSEBlock(rawBlock);
+    if (!data) return;
+    try {
+      if (!receivedFirstEvent) {
+        receivedFirstEvent = true;
+        handlers.onFirstEvent?.();
+      }
+      if (event === "delta") {
+        const parsed = JSON.parse(data) as { content?: string };
+        if (parsed.content) handlers.onDelta(parsed.content);
+      } else if (event === "recommendation") {
+        handlers.onRecommendation?.(JSON.parse(data));
+      } else if (event === "done") {
+        receivedDone = true;
+        handlers.onDone(JSON.parse(data) as ChatResponse);
+      } else if (event === "error") {
+        const parsed = JSON.parse(data) as { message?: string };
+        reportError(parsed.message ?? "Maaf, Vero belum bisa memproses permintaan ini.");
+      }
+    } catch {
+      // Skip malformed event payloads without aborting the stream.
+    }
+  };
 
   try {
     for (;;) {
@@ -580,21 +577,21 @@ export async function streamChat(
 
       // SSE events are separated by a blank line. Process every complete block
       // in the buffer; keep the trailing partial block for the next iteration.
-		let separator: ReturnType<typeof nextSSESeparator>;
-		while ((separator = nextSSESeparator(buffer)) !== null) {
-			const rawBlock = buffer.slice(0, separator.index);
-			buffer = buffer.slice(separator.index + separator.length);
-			processBlock(rawBlock);
+      let separator: ReturnType<typeof nextSSESeparator>;
+      while ((separator = nextSSESeparator(buffer)) !== null) {
+        const rawBlock = buffer.slice(0, separator.index);
+        buffer = buffer.slice(separator.index + separator.length);
+        processBlock(rawBlock);
       }
     }
   } catch {
-		reportError(options.signal?.aborted
-			? "Permintaan dibatalkan."
-			: "Koneksi terputus saat memuat respons. Coba lagi.");
+    reportError(options.signal?.aborted
+      ? "Permintaan dibatalkan."
+      : "Koneksi terputus saat memuat respons. Coba lagi.");
     return;
   }
-	buffer += decoder.decode();
-	if (buffer.trim() !== "") processBlock(buffer);
+  buffer += decoder.decode();
+  if (buffer.trim() !== "") processBlock(buffer);
 
   // A successful HTTP response can still end before the backend's terminal
   // `done` event reaches this client. Tell the UI exactly once so it can

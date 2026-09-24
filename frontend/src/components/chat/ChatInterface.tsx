@@ -87,19 +87,19 @@ export default function ChatInterface() {
     },
   ]);
   const [selectedPackage, setSelectedPackage] = useState<TripPackage | null>(null);
-  // B-GENUI-3: backend-authoritative package selection state (drives the
-  // "Terpilih" card state). Updated ONLY from structured backend signals —
-  // select_package success, the `done` selected_trip_id echo, or the history
-  // restore. Opening the detail panel NEVER touches it; assistant text is
-  // never parsed for it.
+  // Backend-authoritative package selection state (drives the "Terpilih"
+  // card state). Updated ONLY from structured backend signals — select_package
+  // success, the `done` selected_trip_id echo, or the history restore.
+  // Opening the detail panel NEVER touches it; assistant text is never parsed
+  // for it.
   const [selection, setSelection] = useState<PackageSelectionState>(initialPackageSelection);
   const [loading, setLoading] = useState(false);
   // Surfaces Google sign-in failures (auth_error query, invalid fragment,
   // storage rejection) delivered by OAuthReceiver below.
   const [oauthError, setOauthError] = useState("");
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-  // PERF-1: AbortController for the in-flight streaming chat request so the
-  // user can cancel a slow/long generation (and navigations abort cleanly).
+  // Lets the user cancel an in-flight streaming chat request and aborts
+  // cleanly on navigation.
   const streamAbortRef = useRef<AbortController | null>(null);
   const turnTelemetryByMessageRef = useRef(
     new Map<string, ReturnType<typeof createChatTelemetry>>()
@@ -192,9 +192,9 @@ export default function ChatInterface() {
         if (cancelled) {
           return;
         }
-        // B-GENUI-3: restore the persisted selection together with the
-        // messages — pure data from the history payload; a reload never calls
-        // search_trips or the LLM.
+        // Restore the persisted selection together with the messages — pure
+        // data from the history payload; a reload never calls search_trips or
+        // the LLM.
         setSelection((s) => selectionSynced(s, data.selected_trip_id ?? null));
         if (data.messages.length === 0) {
           return;
@@ -242,8 +242,8 @@ export default function ChatInterface() {
       }
       setPrompt("");
       setLoading(true);
-		  const chatTelemetry = createChatTelemetry();
-		  chatTelemetry.mark("submit");
+      const chatTelemetry = createChatTelemetry();
+      chatTelemetry.mark("submit");
 
       const userId = nextMessageId();
       setMessages((items) => [
@@ -251,14 +251,14 @@ export default function ChatInterface() {
         { id: userId, role: "user" as const, content: text },
       ]);
 
-      // PERF-1: stream the assistant response. The assistant message is added
-      // incrementally as deltas arrive so we don't show an empty chat bubble
-      // while the model is still thinking.
+      // Stream the assistant response: the message is added incrementally as
+      // deltas arrive so the UI never shows an empty bubble while the model is
+      // still thinking.
       const abort = new AbortController();
       streamAbortRef.current = abort;
 
       const assistantId = nextMessageId();
-	  turnTelemetryByMessageRef.current.set(assistantId, chatTelemetry);
+      turnTelemetryByMessageRef.current.set(assistantId, chatTelemetry);
       // A stream can report one terminal failure (including EOF without done).
       // Keep finalization per-turn so a late callback cannot replace or append
       // the recovered message a second time.
@@ -283,18 +283,18 @@ export default function ChatInterface() {
         // endpoint and orders are created on their account, not limited by
         // the one-order guest policy. Anonymous users: resolves "anonymous"
         // and the request proceeds as a pure guest (unchanged).
-		await ensureCustomerSession();
-		chatTelemetry.mark("auth-ready");
+        await ensureCustomerSession();
+        chatTelemetry.mark("auth-ready");
         await streamChat(
           "/api/v1/chat",
           { prompt: text, stream: true },
           {
-			requestID: chatTelemetry.requestID,
-			onRequestStart: () => chatTelemetry.mark("request-start"),
-			onResponseHeaders: () => chatTelemetry.mark("response-headers"),
-			onFirstEvent: () => chatTelemetry.mark("first-sse-event"),
+            requestID: chatTelemetry.requestID,
+            onRequestStart: () => chatTelemetry.mark("request-start"),
+            onResponseHeaders: () => chatTelemetry.mark("response-headers"),
+            onFirstEvent: () => chatTelemetry.mark("first-sse-event"),
             onDelta: (fragment) => {
-			  chatTelemetry.mark("first-delta");
+              chatTelemetry.mark("first-delta");
               const state = streamStateRef.current;
               if (!state.active || state.assistantId !== assistantId) {
                 return;
@@ -302,20 +302,20 @@ export default function ChatInterface() {
               state.buffer += fragment;
               scheduleStreamFlush();
             },
-			onRecommendation: (recommendation) => {
-				setMessages((items) => items.map((message) =>
-					message.id === assistantId
-						? {
-							...message,
-							packages: recommendation.recommended_packages ?? [],
-							showRecommendations: recommendation.show_recommendations,
-							recommendationReason: recommendation.recommendation_reason,
-						}
-						: message
-				));
-			},
+            onRecommendation: (recommendation) => {
+              setMessages((items) => items.map((message) =>
+                message.id === assistantId
+                  ? {
+                      ...message,
+                      packages: recommendation.recommended_packages ?? [],
+                      showRecommendations: recommendation.show_recommendations,
+                      recommendationReason: recommendation.recommendation_reason,
+                    }
+                  : message
+              ));
+            },
             onDone: (result) => {
-			  chatTelemetry.mark("done", "success");
+              chatTelemetry.mark("done", "success");
               if (!completion.completeNormally()) {
                 return;
               }
@@ -324,10 +324,9 @@ export default function ChatInterface() {
               // into this final setMessages so no trailing text is lost.
               const pending = streamStateRef.current.buffer;
               stopStreamScheduler();
-              // B-GENUI-3/4: the backend echoes selected_trip_id on every
-              // finalized turn (including an LLM-driven select_package);
-              // sync the selected card state from it — never from the
-              // assistant text.
+              // The backend echoes selected_trip_id on every finalized turn
+              // (including an LLM-driven select_package); sync the selected
+              // card state from it — never from the assistant text.
               setSelection((s) => selectionSynced(s, result.selected_trip_id ?? null));
               // Stable server-owned id (persisted ChatMessage.ID) replaces
               // the local placeholder so the assistant message AND its
@@ -335,7 +334,7 @@ export default function ChatInterface() {
               // that survives reload. Fall back to the placeholder if an
               // older backend omits message_id.
               const finalId = result.message_id ?? assistantId;
-			  turnTelemetryByMessageRef.current.set(finalId, chatTelemetry);
+              turnTelemetryByMessageRef.current.set(finalId, chatTelemetry);
               setMessages((items) => {
                 const targetIndex = items.findIndex((m) => m.id === assistantId);
                 const target = targetIndex !== -1 ? items[targetIndex] : null;
@@ -366,7 +365,7 @@ export default function ChatInterface() {
               });
             },
             onError: (message) => {
-			  chatTelemetry.mark("done", "failure");
+              chatTelemetry.mark("done", "failure");
               if (!completion.beginRecovery()) {
                 return;
               }
@@ -420,11 +419,11 @@ export default function ChatInterface() {
     [loading, prompt, scheduleStreamFlush, stopStreamScheduler]
   );
 
-  // B-GENUI-3: explicit "Select Package" card action. The backend validates
-  // and persists selected_trip_id via the existing select_package tool; the
-  // UI marks the card selected ONLY after that confirmation. A failure shows
-  // the error state and leaves the current selection untouched — never assume
-  // success, never mutate selected_trip_id locally.
+  // Explicit "Select Package" card action. The backend validates and persists
+  // selected_trip_id via the existing select_package tool; the UI marks the
+  // card selected ONLY after that confirmation. A failure shows the error
+  // state and leaves the current selection untouched — never assume success,
+  // never mutate selected_trip_id locally.
   const handleSelectPackage = useCallback(
     async (trip: TripPackage) => {
       if (selection.pendingTripId !== null || isPackageSelected(selection, trip.id)) {
@@ -471,10 +470,10 @@ export default function ChatInterface() {
             ) : index === 0 && messages.length === 1 && !loading ? (
               <WelcomeMessage key={message.id} />
             ) : (
-              // PERF-1: while a streaming message is still empty (model is
-              // thinking, no content delta arrived yet) hide the bubble — the
-              // "Thinking" dots below already indicate work in progress.
-              // Rendering an empty bubble with a caret looked broken.
+              // While a streaming message is still empty (model is thinking,
+              // no content delta yet) hide the bubble — the "Thinking" dots
+              // below already indicate work in progress, and an empty bubble
+              // with a caret looked broken.
               (message.content || !message.streaming) && (
                 <AssistantMessage
                   key={message.id}
@@ -484,12 +483,12 @@ export default function ChatInterface() {
                   onSelectPackage={handleSelectPackage}
                   selectedTripId={selection.selectedTripId}
                   pendingTripId={selection.pendingTripId}
-				  onPaint={(id, renderedRecommendation) => {
-					const telemetry = turnTelemetryByMessageRef.current.get(id);
-					if (!telemetry) return;
-					telemetry.mark("first-react-paint");
-					if (renderedRecommendation) telemetry.mark("recommendation-card-rendered");
-				  }}
+                  onPaint={(id, renderedRecommendation) => {
+                    const telemetry = turnTelemetryByMessageRef.current.get(id);
+                    if (!telemetry) return;
+                    telemetry.mark("first-react-paint");
+                    if (renderedRecommendation) telemetry.mark("recommendation-card-rendered");
+                  }}
                 />
               )
             )
@@ -590,9 +589,9 @@ function WelcomeMessage() {
 type AssistantMessageProps = {
   id: string;
   message: ChatMessage;
-  // View Details: opens the PackageDetailPanel only — never selects (B-GENUI-3).
+  // View Details: opens the PackageDetailPanel only — never selects.
   onViewDetails: (trip: TripPackage) => void;
-  // Select Package: the backend-authoritative selection flow (B-GENUI-3).
+  // Select Package: the backend-authoritative selection flow.
   onSelectPackage: (trip: TripPackage) => void;
   // Backend-echoed selection state used to mark the active card.
   selectedTripId: string | null;
@@ -612,9 +611,7 @@ const AssistantMessage = memo(function AssistantMessage({
   useEffect(() => {
     onPaint(
       id,
-      Boolean(
-			message.showRecommendations && message.packages?.length
-      )
+      Boolean(message.showRecommendations && message.packages?.length)
     );
   }, [id, message.packages, message.showRecommendations, onPaint]);
 
@@ -629,8 +626,8 @@ const AssistantMessage = memo(function AssistantMessage({
         <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Vero Travel</span>
         <div className="bg-white border border-slate-100 shadow-sm rounded-2xl rounded-tl-sm p-6 text-slate-700 leading-relaxed text-[15px]">
           {message.streaming ? (
-            // PERF-1: text arrives incrementally via SSE; show a caret
-            // while streaming instead of the post-stream typing anim.
+            // Text arrives incrementally via SSE; show a caret while
+            // streaming instead of a post-stream typing animation.
             <p className="whitespace-pre-wrap">
               {message.content}
               <span className="ml-0.5 inline-block h-4 w-1 animate-pulse rounded bg-[#df3333] align-[-2px]" />
@@ -641,7 +638,7 @@ const AssistantMessage = memo(function AssistantMessage({
         </div>
         {message.showRecommendations &&
           message.packages &&
-		  message.packages.length > 0 && (
+          message.packages.length > 0 && (
             <PackageRecommendations
               packages={message.packages}
               reason={message.recommendationReason}

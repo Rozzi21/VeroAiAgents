@@ -57,32 +57,34 @@ export default function TripDetailPage({ params }: { params: Promise<{ id: strin
         setOrderError("Enter your email address or phone number so we can confirm this order.");
         return;
       }
-	  idempotencyKeyRef.current ??= crypto.randomUUID();
-	  // ensureCustomerSession renews the 15-minute access token from the
-	  // refresh cookie; without it a signed-in user whose token expired would
-	  // fall back to the guest endpoint and hit GUEST_ORDER_LIMIT_REACHED.
-	  const authenticated = (await ensureCustomerSession()) === "active";
+      // One key per logical order attempt, reused across retries so a user
+      // double-click or an automatic 401-replay never creates a duplicate.
+      idempotencyKeyRef.current ??= crypto.randomUUID();
+      // ensureCustomerSession renews the 15-minute access token from the
+      // refresh cookie; without it a signed-in user whose token expired would
+      // fall back to the guest endpoint and hit GUEST_ORDER_LIMIT_REACHED.
+      const authenticated = (await ensureCustomerSession()) === "active";
       const created = await apiFetch<BookingOrder>(authenticated ? "/api/v1/bookings" : "/api/v1/orders", {
         method: "POST",
-		headers: { "Idempotency-Key": idempotencyKeyRef.current },
-		body: JSON.stringify({
-		  trip_id: trip.id,
-		  adult_pax: 1,
-		  child_pax: 0,
-		  contact_name: "Guest",
-		  contact_email: isEmail ? contactValue : "",
-		  contact_phone: isEmail ? "" : contactValue,
-		  travel_date: trip.package_start_date ?? new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-		}),
+        headers: { "Idempotency-Key": idempotencyKeyRef.current },
+        body: JSON.stringify({
+          trip_id: trip.id,
+          adult_pax: 1,
+          child_pax: 0,
+          contact_name: "Guest",
+          contact_email: isEmail ? contactValue : "",
+          contact_phone: isEmail ? "" : contactValue,
+          travel_date: trip.package_start_date ?? new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+        }),
       });
       setOrder(created);
-	  idempotencyKeyRef.current = null;
+      idempotencyKeyRef.current = null;
     } catch (error) {
-	  if (error instanceof APIError && error.code === "GUEST_ORDER_LIMIT_REACHED") {
-		setAuthRequired(true);
-		setOrderError("Your guest order has already been used. Sign in to create another order.");
-		return;
-	  }
+      if (error instanceof APIError && error.code === "GUEST_ORDER_LIMIT_REACHED") {
+        setAuthRequired(true);
+        setOrderError("Your guest order has already been used. Sign in to create another order.");
+        return;
+      }
       setOrderError(
         error instanceof Error
           ? error.message
@@ -238,33 +240,33 @@ export default function TripDetailPage({ params }: { params: Promise<{ id: strin
                 {order ? "Order Saved" : creatingOrder ? "Saving Order..." : "Confirm & Create Order"}
               </button>
               {order ? (
-				<div className="space-y-3 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
-				  <p>Your order has been created successfully.</p>
-				  <p>You can continue tracking this order as a guest. To create another order, please sign in.</p>
-				  <div className="flex flex-wrap gap-2">
-					<Link href={`/order/${order.id}`} className="rounded-lg bg-emerald-700 px-3 py-2 text-white">Continue Tracking</Link>
-					<Link href="/login" className="rounded-lg border border-emerald-700 px-3 py-2">Login</Link>
-					<Link href="/register" className="rounded-lg border border-emerald-700 px-3 py-2">Register</Link>
-				  </div>
-				</div>
+                <div className="space-y-3 rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+                  <p>Your order has been created successfully.</p>
+                  <p>You can continue tracking this order as a guest. To create another order, please sign in.</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Link href={`/order/${order.id}`} className="rounded-lg bg-emerald-700 px-3 py-2 text-white">Continue Tracking</Link>
+                    <Link href="/login" className="rounded-lg border border-emerald-700 px-3 py-2">Login</Link>
+                    <Link href="/register" className="rounded-lg border border-emerald-700 px-3 py-2">Register</Link>
+                  </div>
+                </div>
               ) : null}
               {orderError ? (
                 <div className="rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-700">
                   {orderError}
                 </div>
               ) : null}
-			  {authRequired ? (
-				<div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-				  <p className="font-bold">Sign in to create another order.</p>
-				  <div className="grid gap-2">
-					<Suspense fallback={null}>
-					  <GoogleButton />
-					</Suspense>
-					<Link href="/login" className="rounded-lg bg-[#df3333] px-3 py-2 text-center font-bold text-white">Login</Link>
-					<Link href="/register" className="rounded-lg border border-amber-700 px-3 py-2 text-center font-bold">Create Account</Link>
-				  </div>
-				</div>
-			  ) : null}
+              {authRequired ? (
+                <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-bold">Sign in to create another order.</p>
+                  <div className="grid gap-2">
+                    <Suspense fallback={null}>
+                      <GoogleButton />
+                    </Suspense>
+                    <Link href="/login" className="rounded-lg bg-[#df3333] px-3 py-2 text-center font-bold text-white">Login</Link>
+                    <Link href="/register" className="rounded-lg border border-amber-700 px-3 py-2 text-center font-bold">Create Account</Link>
+                  </div>
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-6 flex items-center justify-center gap-2 text-xs text-slate-400 font-medium">

@@ -3,15 +3,14 @@ import { forwardedChatHeaders, forwardedChatResponseHeaders } from "@/lib/chatPr
 
 // SSE streaming proxy for POST /api/v1/chat.
 //
-// PERF-1 follow-up (5 Agu 2026): Next.js `rewrites()` proxy buffers the
-// entire SSE response before forwarding it to the browser, so token-by-token
-// deltas arrive all at once and React batches the state updates — the user
-// sees the full text appear instantaneously instead of streaming like
-// ChatGPT. This route handler bypasses the rewrite proxy by forwarding the
-// request server-side (no CORS, no cookie SameSite issues) and piping the
-// backend's ReadableStream directly back as the response body. Next.js App
-// Router route handlers support streaming responses natively, so each SSE
-// chunk is flushed to the client as soon as it arrives from the backend.
+// The Next.js `rewrites()` proxy buffers the entire SSE response before
+// forwarding it to the browser, so token-by-token deltas arrive all at once
+// and React batches the state updates — the text appears instantaneously
+// instead of streaming. This route handler bypasses the rewrite proxy by
+// forwarding the request server-side (no CORS, no cookie SameSite issues) and
+// piping the backend's ReadableStream directly back as the response body.
+// Next.js App Router route handlers stream natively, so each SSE chunk is
+// flushed to the client as soon as it arrives from the backend.
 //
 // Only POST is exported; GET /api/v1/chat/history and other /api/* paths
 // still use the Next.js rewrite proxy (which works fine for non-streaming
@@ -30,7 +29,7 @@ export async function POST(request: NextRequest) {
   // fetch is not subject to CORS, so Cookie can be forwarded directly; the
   // Authorization header must be forwarded too, otherwise a signed-in customer
   // is treated as a guest by the backend and runs into the one-order guest
-  // limit from the chat (GO-P1-1).
+  // limit from the chat.
   const headers = forwardedChatHeaders(request.headers);
 
   let backendResponse: Response;
@@ -39,7 +38,7 @@ export async function POST(request: NextRequest) {
       method: "POST",
       headers,
       body,
-	  signal: request.signal,
+      signal: request.signal,
     });
   } catch {
     return new Response(
@@ -58,9 +57,9 @@ export async function POST(request: NextRequest) {
   // Build response headers. We must preserve the SSE content type and
   // disable buffering at every layer.
   const responseHeaders = new Headers();
-	for (const [name, value] of Object.entries(forwardedChatResponseHeaders(backendResponse.headers))) {
-		responseHeaders.set(name, value);
-	}
+  for (const [name, value] of Object.entries(forwardedChatResponseHeaders(backendResponse.headers))) {
+    responseHeaders.set(name, value);
+  }
   const contentType = backendResponse.headers.get("Content-Type");
   responseHeaders.set(
     "Content-Type",

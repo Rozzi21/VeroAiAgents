@@ -116,8 +116,6 @@ export default function Sidebar() {
           </nav>
         </div>
 
-        {/* Signed-in identity + logout, or Login/Register links for guests.
-            Client component: resolves the session from the refresh cookie. */}
         <AuthStatus />
       </aside>
     </>

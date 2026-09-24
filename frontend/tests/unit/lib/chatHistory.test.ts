@@ -1,9 +1,8 @@
 // mapHistoryMessages reconstructs Travel Package cards from the persisted
-// history payload alone (GenUI persistence, 6 Sep 2026). The mapper is pure —
-// no fetch, no search_trips, no LLM — so these tests need no stubs at all:
-// a reload can never CREATE a recommendation, it can only re-attach the one
-// the server already persisted on the message.
-// Run: npm test
+// history payload alone. The mapper is pure — no fetch, no search_trips, no
+// LLM — so these tests need no stubs at all: a reload can never CREATE a
+// recommendation, it can only re-attach the one the server already persisted
+// on the message.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -153,8 +152,8 @@ test("legacy payloads without server ids fall back to the local counter", () => 
 });
 
 test("two recommendation sets (initial + alternative) both survive reload", () => {
-  // B-GENUI-4: after selecting from set A the user can ask for another
-  // package; set B is a NEW assistant message and set A stays visible.
+  // After selecting from set A the user can ask for another package; set B is
+  // a NEW assistant message and set A stays visible.
   const payload: HistoryPayload = [
     { id: "u-1", role: "user", content: "cari paket bali" },
     {

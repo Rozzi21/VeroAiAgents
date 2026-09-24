@@ -1,7 +1,6 @@
 // streamChat is the only path the chat UI gets order state from, so the
 // structured gate must survive the SSE hop intact and the Bearer token must be
 // attached on the way out (the proxy then forwards it — see chatProxy.test.ts).
-// Run: npm test
 import { beforeEach, test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -118,9 +117,9 @@ test("a turn without an ordering step carries no gate", async () => {
 });
 
 test("the stable server-owned message_id survives the SSE done event", async () => {
-  // GenUI persistence (6 Sep 2026): the done payload carries the persisted
-  // ChatMessage.ID so the assistant message AND its recommendation cards share
-  // one stable id that survives reload.
+  // The done payload carries the persisted ChatMessage.ID so the assistant
+  // message AND its recommendation cards share one stable id that survives
+  // reload.
   stubFetch(
     sseResponse([
       { event: "delta", data: { content: "Ini " } },

@@ -2,7 +2,6 @@
 // from the assistant's wording. These tests lock that: only known codes produce
 // a gate, only the guest-limit code asks for sign-in, and an order id is shown
 // exactly when the backend sent one.
-// Run: npm test
 import { test } from "node:test";
 import assert from "node:assert/strict";
 

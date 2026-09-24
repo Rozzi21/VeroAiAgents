@@ -220,7 +220,7 @@ export function consumeOAuthFragment(hash: string): OAuthFragmentResult {
 
 // oauthErrorMessage maps the backend's log-safe auth_error codes (see
 // google_auth_handlers.go) to user-friendly messages. Raw internal errors
-// never reach the client (SEC-15), so each code covers a class of failure:
+// never reach the client, so each code covers a class of failure:
 // - access_denied: user cancelled or Google denied consent.
 // - start_failed: backend could not build the consent redirect (backend error).
 // - missing_params / authentication_failed: invalid/expired OAuth state,
