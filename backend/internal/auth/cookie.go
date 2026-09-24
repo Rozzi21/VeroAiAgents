@@ -117,19 +117,12 @@ func GetGuestIdentityCookie(c *gin.Context) string {
 	return token
 }
 
-func ClearGuestIdentityCookie(c *gin.Context, cfg config.Config) {
-	sameSite := parseSameSite(cfg.GuestCookieSameSite)
-	c.SetSameSite(sameSite)
-	secure := cfg.GuestCookieSecure || sameSite == http.SameSiteNoneMode
-	c.SetCookie(guestIdentityCookieName, "", -1, guestIdentityCookiePath, "", secure, true)
-}
-
 // parseSameSite maps the configured policy onto net/http. Unknown values fall
 // back to the strictest mode as defense in depth, but they can no longer reach
 // this function unnoticed: Config.Validate rejects anything outside
-// Strict/Lax/None at startup (GO-P2-6). Note that Strict is a VALID choice which
-// still disables the guest-order claim on the Google callback — that callback is
-// a cross-site top-level navigation, so a Strict cookie is not sent with it.
+// Strict/Lax/None at startup. Note that Strict is a VALID choice which still
+// disables the guest-order claim on the Google callback — that callback is a
+// cross-site top-level navigation, so a Strict cookie is not sent with it.
 func parseSameSite(value string) http.SameSite {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "lax":

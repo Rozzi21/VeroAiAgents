@@ -46,8 +46,8 @@ type Services struct {
 	Payments  *PaymentService
 	Logs      *LogService
 	Analytics *AnalyticsService
-	// audit persists MCP tool-call + AI-log records asynchronously (PERF-3 #2).
-	// Call Stop during graceful shutdown so in-flight audit records are flushed.
+	// audit persists MCP tool-call + AI-log records asynchronously. Call
+	// StopAudit during graceful shutdown so in-flight audit records are flushed.
 	audit *AuditPool
 }
 

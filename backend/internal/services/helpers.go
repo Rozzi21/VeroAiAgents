@@ -9,9 +9,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// PERF-3 #1: regex compiled once at package init, not re-compiled per slugify
-// call. MustCompile panics on init if the pattern is invalid (it is a static
-// literal), which is the desired fail-fast behavior.
+// Compiled once at package init; MustCompile panics on init if the static
+// literal pattern is invalid, which is the desired fail-fast behavior.
 var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
 
 func slugify(value string) string {
@@ -58,19 +57,17 @@ func firstNonZero(values ...float64) float64 {
 }
 
 func sanitizePromptInjection(s string) string {
-	// Strip characters/words often used in prompt injection.
-	// Also clean potential HTML/JS tags, and common command override words.
+	// Neutralize known injection phrases and strip delimiter/HTML characters.
 	lower := strings.ToLower(s)
 	if strings.Contains(lower, "ignore previous instructions") ||
 		strings.Contains(lower, "abaikan instruksi") ||
 		strings.Contains(lower, "system prompt") {
-		// Neutralize known injection phrases
 		s = strings.ReplaceAll(s, "ignore previous instructions", "[removed phrase]")
 		s = strings.ReplaceAll(s, "Ignore previous instructions", "[removed phrase]")
 		s = strings.ReplaceAll(s, "abaikan instruksi", "[removed phrase]")
 		s = strings.ReplaceAll(s, "Abaikan instruksi", "[removed phrase]")
 	}
-	// Limit special control characters that might confuse delimiters
+	// Replace delimiter-confusing control characters.
 	s = strings.ReplaceAll(s, "`", "'")
 	s = strings.ReplaceAll(s, "<", "[")
 	s = strings.ReplaceAll(s, ">", "]")
@@ -115,27 +112,15 @@ func parseDate(value string) *time.Time {
 	val = strings.ReplaceAll(val, "januari", "january")
 	val = strings.ReplaceAll(val, "februari", "february")
 	val = strings.ReplaceAll(val, "maret", "march")
-	val = strings.ReplaceAll(val, "april", "april")
 	val = strings.ReplaceAll(val, "mei", "may")
 	val = strings.ReplaceAll(val, "juni", "june")
 	val = strings.ReplaceAll(val, "juli", "july")
 	val = strings.ReplaceAll(val, "agustus", "august")
-	val = strings.ReplaceAll(val, "september", "september")
 	val = strings.ReplaceAll(val, "oktober", "october")
-	val = strings.ReplaceAll(val, "november", "november")
 	val = strings.ReplaceAll(val, "desember", "december")
 
-	val = strings.ReplaceAll(val, "jan", "jan")
-	val = strings.ReplaceAll(val, "feb", "feb")
-	val = strings.ReplaceAll(val, "mar", "mar")
-	val = strings.ReplaceAll(val, "apr", "apr")
-	val = strings.ReplaceAll(val, "mei", "may")
-	val = strings.ReplaceAll(val, "jun", "jun")
-	val = strings.ReplaceAll(val, "jul", "jul")
 	val = strings.ReplaceAll(val, "agu", "aug")
-	val = strings.ReplaceAll(val, "sep", "sep")
 	val = strings.ReplaceAll(val, "okt", "oct")
-	val = strings.ReplaceAll(val, "nov", "nov")
 	val = strings.ReplaceAll(val, "des", "dec")
 
 	for _, layout := range layouts {
@@ -143,7 +128,7 @@ func parseDate(value string) *time.Time {
 		if err == nil {
 			return &parsed
 		}
-		// Try case-insensitive matching by parsing with capitalized names
+		// Also try title-cased names for capitalized month names.
 		parsedTitle, errTitle := time.Parse(layout, strings.Title(val))
 		if errTitle == nil {
 			return &parsedTitle

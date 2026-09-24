@@ -28,7 +28,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// Full mocked end-to-end tests for the Google OAuth flow (29 Agu 2026). The
+// Full mocked end-to-end tests for the Google OAuth flow. The
 // Google token endpoint is impersonated by an httptest server and id_tokens
 // are signed with a throwaway RSA key — NO real Google credentials, NO
 // network. Distinctive LEAK-MARKER values let the audit tests prove secrets
@@ -177,7 +177,7 @@ func (env *googleMockEnv) runFlow(t *testing.T, linkUserID *uuid.UUID) (GoogleCa
 	if !ok {
 		t.Fatal("redirect state matches no persisted state hash — CSRF binding broken")
 	}
-	// PKCE binding (regression: double-hash bug, 9 Sep 2026): the consent URL
+	// PKCE binding (regression for the double-hash bug): the consent URL
 	// must carry code_challenge = S256(persisted raw code_verifier), method S256.
 	// A double-hashed challenge (S256(S256(verifier))) makes Google reject the
 	// exchange with invalid_grant "Invalid code verifier.".

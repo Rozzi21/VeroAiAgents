@@ -89,9 +89,6 @@ func (m *mockMCPRepo) DeleteExpiredChatSessions(_ context.Context, _ time.Time) 
 func (m *mockMCPRepo) CountExpiredChatSessions(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
-func (m *mockMCPRepo) FindBookingBySession(_ context.Context, _ uuid.UUID) (models.Booking, error) {
-	return models.Booking{}, errors.New("none")
-}
 func (m *mockMCPRepo) CreateToolCall(_ context.Context, _ *models.ToolCall) error { return nil }
 func (m *mockMCPRepo) CreateAILog(_ context.Context, _ *models.AILog) error       { return nil }
 func (m *mockMCPRepo) ListAILogs(_ context.Context, _ repositories.RepositoryFilter) ([]models.AILog, error) {

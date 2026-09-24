@@ -15,42 +15,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
 
-func (h *Handler) Chat(c *gin.Context) {
-	finishPreparation := telemetry.StartStage(c.Request.Context(), "session_preparation")
-	preparationStatus := "failure"
-	defer func() { finishPreparation(preparationStatus) }()
-	var req dto.ChatRequest
-	if !bind(c, &req) {
-		return
-	}
-	if req.SessionID == nil {
-		utils.BadRequest(c, "session_id is required", gin.H{})
-		return
-	}
-	userID := currentUserID(c)
-	chatCtx := services.ChatContext{SessionID: *req.SessionID, UserID: &userID}
-	preparationStatus = "success"
-	finishPreparation(preparationStatus)
-
-	// PERF-1: streaming path. The authenticated endpoint does not manage
-	// cookies, so setCookie is nil.
-	if req.Stream {
-		h.streamChat(c, chatCtx, req, nil)
-		return
-	}
-
-	res, err := h.Services.AI.Chat(c.Request.Context(), chatCtx, req)
-	if err != nil {
-		utils.ServerError(c, err)
-		return
-	}
-	utils.Success(c, http.StatusOK, "AI workflow completed", res)
-	if trace := telemetry.FromContext(c.Request.Context()); trace != nil {
-		trace.Complete(true)
-	}
-	h.Services.AI.ScheduleMemorySummary(c.Request.Context(), res.SessionID)
-}
-
 func (h *Handler) GuestChat(c *gin.Context) {
 	finishPreparation := telemetry.StartStage(c.Request.Context(), "session_preparation")
 	preparationStatus := "failure"
@@ -78,8 +42,7 @@ func (h *Handler) GuestChat(c *gin.Context) {
 		// guest identity (copied cookie, shared browser, or two identities
 		// racing in one browser). Never re-point it — orders created from a chat
 		// are owned by the identity bound to it — and never serve it either.
-		// Mint a fresh session for THIS identity, same security policy applies
-		// to foreign authenticated session ids.
+		// Mint a fresh session for THIS identity.
 		fresh, err := h.rebindGuestChatSession(c, identity.Session.ID)
 		if err != nil {
 			utils.ServerError(c, err)
@@ -100,14 +63,11 @@ func (h *Handler) GuestChat(c *gin.Context) {
 	preparationStatus = "success"
 	finishPreparation(preparationStatus)
 
-	// PERF-1: streaming path. The guest session cookie must be set BEFORE the
-	// first byte of the SSE body is written (headers cannot change after the
-	// body starts), so we pass a setCookie callback that streamChat invokes
-	// after setting SSE headers. We always refresh (sliding TTL) so a long
-	// streaming session keeps the cookie alive; if ChatStream later reports
-	// the session expired/not-found the client receives an `error` event and
-	// the next request resolves a fresh session (resolveGuestSession ignores
-	// an expired cookie value).
+	// The guest session cookie must be set BEFORE the first byte of the SSE
+	// body is written (headers cannot change after the body starts), so we
+	// pass a setCookie callback that streamChat invokes after setting SSE
+	// headers. We always refresh (sliding TTL) so a long streaming session
+	// keeps the cookie alive.
 	if req.Stream {
 		h.streamChat(c, chatCtx, req, func() {
 			auth.SetGuestSessionCookie(c, h.Services.Config, sessionID.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
@@ -192,16 +152,16 @@ func (h *Handler) GuestHistory(c *gin.Context) {
 	}
 	auth.SetGuestSessionCookie(c, h.Services.Config, id.String(), int(h.Services.Config.GuestSessionTTL.Seconds()))
 	payload := gin.H{"messages": guestMessages}
-	// B-GENUI-3/4: echo the backend-authoritative selection so a reload
-	// restores the selected/active card state without any search_trips call.
+	// Echo the backend-authoritative selection so a reload restores the
+	// selected/active card state without any search_trips call.
 	if selectedTripID != nil {
 		payload["selected_trip_id"] = selectedTripID.String()
 	}
 	utils.Success(c, http.StatusOK, "Chat history", payload)
 }
 
-// GuestSelectPackage is the deterministic backend entry point for the "Select
-// Package" action on a Travel Package recommendation card (B-GENUI-3).
+// GuestSelectPackage is the deterministic backend entry point for the
+// "Select Package" action on a Travel Package recommendation card.
 // Clicking a card to open the detail panel NEVER reaches this endpoint; only
 // the explicit Select Package button does. The handler runs the SAME
 // select_package tool the LLM uses (MCPService.Execute -> executeSelectPackage),

@@ -66,12 +66,12 @@ func (h *Handler) GuestCreateOrder(c *gin.Context) {
 	utils.Success(c, http.StatusCreated, "Order created for manual admin processing", booking)
 }
 
-// ClaimOrderToAccount is the explicit retry path for the guest-order claim
-// (GO-P1-3). The claim hooks inside Register/Login/GoogleCallback are
-// best-effort — they never fail the login — so a claim can be skipped without
-// anyone noticing: the classic case is the guest cookie not being sent on the
-// cross-site Google callback (SameSite), which leaves the order stranded on a
-// guest identity that can never log in.
+// ClaimOrderToAccount is the explicit retry path for the guest-order claim.
+// The claim hooks inside Register/Login/GoogleCallback are best-effort — they
+// never fail the login — so a claim can be skipped without anyone noticing: the
+// classic case is the guest cookie not being sent on the cross-site Google
+// callback (SameSite), which leaves the order stranded on a guest identity that
+// can never log in.
 //
 // The proof requirements are exactly the same as the automatic hooks, and no
 // weaker:

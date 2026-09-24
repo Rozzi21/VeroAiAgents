@@ -81,8 +81,8 @@ func (d *Database) AutoMigrate() error {
 	return d.migrateTripSearchIndexes()
 }
 
-// migrateGoogleOAuth installs the partial unique index on users.google_sub
-// (Google OAuth, 18 Agu 2026). A plain unique index would reject multiple NULL
+// migrateGoogleOAuth installs the partial unique index on users.google_sub.
+// A plain unique index would reject multiple NULL
 // rows on some setups and GORM struct tags cannot express a partial index, so
 // this is raw idempotent DDL — same pattern as migrateTripSearchIndexes.
 func (d *Database) migrateGoogleOAuth() error {
@@ -94,8 +94,8 @@ func (d *Database) migrateGoogleOAuth() error {
 }
 
 // migrateGuestOrderClaimMarker backfills guest_sessions.claimed_user_id /
-// claimed_at for orders that were already claimed before those columns existed
-// (GO-P3-3). AutoMigrate adds the columns but cannot fill them, and the claim
+// claimed_at for orders that were already claimed before those columns existed.
+// AutoMigrate adds the columns but cannot fill them, and the claim
 // path would otherwise have to infer the owner from the booking row on every
 // attempt for those sessions.
 //
@@ -116,32 +116,6 @@ func (d *Database) migrateGuestOrderClaimMarker() error {
 	`).Error
 }
 
-// MigrateGuestChatSessions removes the legacy shared guest-user ownership from
-// chat sessions. Anonymous ownership is now represented by NULL UserID, while
-// authenticated sessions keep their existing owner. Existing sessions also
-// receive an expiry so the cleanup path applies consistently after upgrade.
-func (d *Database) MigrateGuestChatSessions(ttl time.Duration) error {
-	if ttl <= 0 {
-		ttl = 7 * 24 * time.Hour
-	}
-	seconds := ttl.Seconds()
-	return d.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`
-			UPDATE chat_sessions
-			SET user_id = NULL
-			WHERE user_id = (SELECT id FROM users WHERE email = 'guest@vero.local' LIMIT 1)
-		`).Error; err != nil {
-			return err
-		}
-		return tx.Exec(`
-			UPDATE chat_sessions
-			SET last_activity_at = COALESCE(last_activity_at, updated_at, created_at),
-				expires_at = COALESCE(expires_at, COALESCE(last_activity_at, updated_at, created_at) + (? * INTERVAL '1 second'))
-			WHERE expires_at IS NULL
-		`, seconds).Error
-	})
-}
-
 func (d *Database) migrateLegacySlots() error {
 	if !d.DB.Migrator().HasColumn("trips", "slots") {
 		return nil
@@ -156,7 +130,7 @@ func (d *Database) migrateLegacySlots() error {
 
 // migrateTripSearchIndexes installs the GIN trigram indexes that let
 // ListTrips' LOWER(col) LIKE '%...%' predicates use an index instead of a
-// sequential scan (DB-1). pg_trgm's GIN index supports leading-wildcard LIKE
+// sequential scan. pg_trgm's GIN index supports leading-wildcard LIKE
 // ('%query%'), unlike a plain B-tree, so the repository query stays unchanged.
 // The extension + indexes are created idempotently (IF NOT EXISTS), so this is
 // safe to run on every startup and on DBs where a privileged role already
@@ -183,7 +157,7 @@ func (d *Database) migrateTripSearchIndexes() error {
 	return nil
 }
 
-// Health checks DB connectivity using PingContext with provided ctx.
+// Health checks DB connectivity.
 func (d *Database) Health(ctx context.Context) error {
 	sqlDB, err := d.DB.DB()
 	if err != nil {

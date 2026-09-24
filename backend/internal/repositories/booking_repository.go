@@ -7,12 +7,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 )
 
-func (r *Repository) FindBookingBySession(ctx context.Context, sessionID uuid.UUID) (models.Booking, error) {
-	var booking models.Booking
-	err := r.DB.WithContext(ctx).Order("created_at desc").First(&booking, "session_id = ?", sessionID).Error
-	return booking, err
-}
-
 func (r *Repository) CreateBooking(ctx context.Context, booking *models.Booking) error {
 	return r.DB.WithContext(ctx).Create(booking).Error
 }
@@ -50,15 +44,6 @@ func (r *Repository) FindBookingForUser(ctx context.Context, id, userID uuid.UUI
 	err := r.DB.WithContext(ctx).Preload("User").Preload("Trip").Preload("Payments").
 		First(&booking, "id = ? AND user_id = ?", id, userID).Error
 	return booking, err
-}
-
-// UpdateBooking persists editable columns without modifying preloaded associations.
-// NOTE: status transitions should use UpdateBookingStatusAtomic for conditional updates.
-func (r *Repository) UpdateBooking(ctx context.Context, booking *models.Booking) error {
-	return r.DB.WithContext(ctx).Model(&models.Booking{}).
-		Where("id = ?", booking.ID).
-		Select("*").
-		Updates(booking).Error
 }
 
 // UpdateBookingStatusAtomic performs an atomic conditional update of the booking

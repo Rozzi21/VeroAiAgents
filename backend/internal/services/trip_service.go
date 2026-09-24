@@ -12,7 +12,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
-// TripService depends on the TripRepository interface instead of concrete Repository.
 type TripService struct {
 	repo repositories.TripRepository
 	bus  *events.Bus
@@ -83,7 +82,7 @@ func (s *TripService) Delete(ctx context.Context, id uuid.UUID) error {
 }
 
 func buildTripFromRequest(trip models.Trip, req dto.TripRequest) models.Trip {
-	// BUG-7: Clamp invalid price values from bypassers.
+	// Clamp invalid price values so non-browser callers cannot poison catalog pricing.
 	if req.BasePrice < 0 {
 		req.BasePrice = 0
 	}

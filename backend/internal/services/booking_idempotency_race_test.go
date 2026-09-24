@@ -55,9 +55,6 @@ func (r *raceBookingRepo) FindTrip(context.Context, uuid.UUID) (models.Trip, err
 func (r *raceBookingRepo) FindBookingForGuest(context.Context, uuid.UUID, uuid.UUID) (models.Booking, error) {
 	return models.Booking{}, gorm.ErrRecordNotFound
 }
-func (r *raceBookingRepo) FindBookingBySession(context.Context, uuid.UUID) (models.Booking, error) {
-	return models.Booking{}, gorm.ErrRecordNotFound
-}
 func (r *raceBookingRepo) CreateBooking(context.Context, *models.Booking) error { return nil }
 func (r *raceBookingRepo) ListBookings(context.Context, repositories.RepositoryFilter) ([]models.Booking, error) {
 	return nil, nil
@@ -71,7 +68,6 @@ func (r *raceBookingRepo) FindBooking(context.Context, uuid.UUID) (models.Bookin
 func (r *raceBookingRepo) FindBookingForUser(context.Context, uuid.UUID, uuid.UUID) (models.Booking, error) {
 	return models.Booking{}, gorm.ErrRecordNotFound
 }
-func (r *raceBookingRepo) UpdateBooking(context.Context, *models.Booking) error { return nil }
 func (r *raceBookingRepo) UpdateBookingStatusAtomic(context.Context, uuid.UUID, string, string) (bool, error) {
 	return false, nil
 }

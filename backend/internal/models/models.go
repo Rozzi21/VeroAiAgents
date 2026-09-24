@@ -1,6 +1,7 @@
 package models
 
 import (
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,22 +56,14 @@ func IsPaymentSuccess(status string) bool {
 
 // NormalizePaymentStatus maps provider-specific aliases (DOKU, etc.) to the
 // canonical lowercase status values above. Unknown values are returned
-// trimmed+lowercased so the caller can decide how to treat them.
+// stripped+lowercased so the caller can decide how to treat them.
 func NormalizePaymentStatus(status string) string {
-	s := ""
-	for _, r := range status {
-		if r != ' ' && r != '-' && r != '_' {
-			s += string(r)
+	s := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '-' || r == '_' {
+			return -1
 		}
-	}
-	// fold case without importing strings here? simplest: manual lower
-	b := []byte(s)
-	for i, c := range b {
-		if c >= 'A' && c <= 'Z' {
-			b[i] = c + 32
-		}
-	}
-	s = string(b)
+		return r
+	}, strings.ToLower(status))
 
 	switch s {
 	case "settlement":
@@ -174,8 +167,8 @@ const ExternalIdentityProviderGoogle = "google"
 // OAuthState is a one-time, short-lived record backing the OAuth 2.0 `state`
 // parameter for Google login. The raw state is never stored — StateHash holds
 // its SHA-256 digest — and the row is consumed atomically at callback time
-// (same atomic-UPDATE pattern as AuthSession rotation, BUG-1) so a state can
-// never be replayed. Nonce binds the Google id_token to this flow.
+// (same atomic-UPDATE pattern as AuthSession rotation) so a state can never
+// be replayed. Nonce binds the Google id_token to this flow.
 type OAuthState struct {
 	BaseModel
 	StateHash string `json:"-" gorm:"size:64;uniqueIndex;not null"`
@@ -215,21 +208,21 @@ type GuestSession struct {
 	OrderCount   int        `json:"order_count" gorm:"not null;default:0"`
 	ExpiresAt    time.Time  `json:"expires_at" gorm:"index;not null"`
 	// ClaimedUserID / ClaimedAt record that FirstOrderID has already been
-	// transferred to an account (GO-P3-3). Before these columns the claim state
-	// could only be INFERRED from bookings.guest_session_id turning NULL, which
-	// made a second claim an ambiguous "record not found": impossible to tell
+	// transferred to an account. Before these columns the claim state could
+	// only be INFERRED from bookings.guest_session_id turning NULL, which made
+	// a second claim an ambiguous "record not found": impossible to tell
 	// "never claimed" from "already claimed", and impossible to tell "already
 	// yours" (an idempotent replay) from "already someone else's" (a refusal).
 	// The marker is written in the same transaction as the ownership transfer,
 	// so ownership is decided exactly once and a re-claim never re-decides it.
-	// Internal identifiers stay out of JSON (GO-P3-5).
+	// Internal identifiers stay out of JSON.
 	ClaimedUserID *uuid.UUID `json:"-" gorm:"type:uuid;index"`
 	ClaimedAt     *time.Time `json:"claimed_at,omitempty"`
 }
 
 // GuestOrderEntitlement is the durable, contact-anchored record that one
 // unauthenticated visitor already spent the single guest order the business
-// rule allows (GO-P0-1).
+// rule allows.
 //
 // guest_sessions.order_count alone is anchored on the vero_guest_session
 // cookie, which the client fully controls: clearing it (devtools, private
@@ -281,10 +274,10 @@ type ChatMessage struct {
 	Role      string      `json:"role" gorm:"size:30;not null"`
 	Content   string      `json:"content" gorm:"type:text;not null"`
 	// Recommendation is the persisted Travel Package recommendation metadata
-	// attached to THIS assistant message (GenUI persistence, 6 Sep 2026).
-	// Nil for user messages, old messages (backward compatibility), and
-	// assistant turns without recommendations. Packages reuse the existing
-	// Trip schema — no separate structure. Never persist rendered UI.
+	// attached to THIS assistant message. Nil for user messages, old messages
+	// (backward compatibility), and assistant turns without recommendations.
+	// Packages reuse the existing Trip schema — no separate structure. Never
+	// persist rendered UI.
 	Recommendation *ChatRecommendation `json:"recommendation,omitempty" gorm:"serializer:json;type:jsonb"`
 }
 

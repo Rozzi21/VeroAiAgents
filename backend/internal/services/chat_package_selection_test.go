@@ -15,7 +15,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
 )
 
-// B-GENUI-3 / B-GENUI-4 (9 Sep 2026): package selection from a Travel Package
+// Package selection from a Travel Package
 // card is backend-authoritative (select_package persists selected_trip_id), a
 // selection suppresses NORMAL recommendations (BUG-13), and an EXPLICIT
 // alternative request (search_trips alternative=true) still produces a new

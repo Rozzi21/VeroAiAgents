@@ -27,12 +27,12 @@ func (r *Repository) FindGuestSession(ctx context.Context, id uuid.UUID) (models
 }
 
 // BindChatSessionGuest binds an anonymous chat session to a guest identity with
-// a single conditional UPDATE (GO-P2-7). It replaced a blind
-// `UPDATE chat_sessions SET guest_session_id = ?` because that write is an
-// authorization input, not a hint: MCP `create_booking` derives the OWNER of a
-// guest order from chat_sessions.guest_session_id
-// (`mcp_service.go` guest branch), so whoever last wrote this column decided
-// whose entitlement was spent and whose order it became.
+// a single conditional UPDATE. A blind
+// `UPDATE chat_sessions SET guest_session_id = ?` is unacceptable because this
+// write is an authorization input, not a hint: MCP `create_booking` derives the
+// OWNER of a guest order from chat_sessions.guest_session_id, so whoever last
+// wrote this column decided whose entitlement was spent and whose order it
+// became.
 //
 // The row is (re)bound only when it is not already owned by a different LIVE
 // guest identity:
@@ -93,7 +93,7 @@ func (r *Repository) ConsumeGuestOrder(ctx context.Context, guestID, bookingID u
 }
 
 // FindGuestOrderEntitlement resolves the first guest order already anchored to
-// any of the given contact keys (GO-P0-1). A hit means some visitor — possibly
+// any of the given contact keys. A hit means some visitor — possibly
 // the same person behind a freshly minted guest identity — already spent the
 // single guest order, so the caller must refuse instead of handing out another.
 // A miss is reported as gorm.ErrRecordNotFound, matching the repository's
@@ -108,7 +108,7 @@ func (r *Repository) FindGuestOrderEntitlement(ctx context.Context, contactKeys 
 }
 
 // ConsumeGuestOrderEntitlements records the contact anchors of a successful
-// guest order (GO-P0-1). The unique index on contact_key — not this Go code —
+// guest order. The unique index on contact_key — not this Go code —
 // is the authoritative gate: the INSERT is emitted with ON CONFLICT DO NOTHING,
 // so a key that is already taken affects zero rows and surfaces as
 // gorm.ErrDuplicatedKey instead of aborting the surrounding transaction. The
@@ -129,7 +129,7 @@ func (r *Repository) ConsumeGuestOrderEntitlements(ctx context.Context, entitlem
 }
 
 // ListClaimedGuestSessionIDs returns the guest identities whose single order was
-// already claimed by this account, most recently claimed first (GO-P2-4).
+// already claimed by this account, most recently claimed first.
 //
 // It exists so the authenticated booking path can recognise an Idempotency-Key
 // that was first used while the caller was still a guest: the stored

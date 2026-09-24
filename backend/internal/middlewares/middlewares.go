@@ -109,7 +109,7 @@ type rateLimiterEntry struct {
 
 func newIPRateLimiter(every rate.Limit, burst int) *ipRateLimiter {
 	l := &ipRateLimiter{every: every, burst: burst, maxEntries: maxRateLimiterEntries}
-	// Janitor: evict idle limiters and enforce a hard cap on map size
+	// Janitor: evict idle limiters.
 	go l.janitor()
 	return l
 }
@@ -120,7 +120,7 @@ func (l *ipRateLimiter) get(ip string) *rate.Limiter {
 		entry.lastUsed.Store(time.Now().UnixNano())
 		return entry.limiter
 	}
-	// Reserve capacity atomically to prevent O(n²) performance degradation
+	// Reserve an entry slot atomically before inserting.
 	if !l.reserveEntry() {
 		return rate.NewLimiter(l.every, l.burst)
 	}

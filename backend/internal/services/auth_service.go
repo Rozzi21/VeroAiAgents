@@ -43,7 +43,6 @@ func (s *AuthService) auditFields(meta AuthRequestMeta, extra map[string]any) ma
 }
 
 func (s *AuthService) Register(ctx context.Context, req dto.RegisterRequest, meta AuthRequestMeta) (AuthIssueResult, error) {
-
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		return AuthIssueResult{}, err
@@ -147,7 +146,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string, meta Aut
 		return AuthIssueResult{}, ErrInvalidRefreshToken
 	}
 
-	// BUG-1 fix: rotate the session atomically in a single UPDATE. Only the
+	// Rotate the session atomically in a single UPDATE. Only the
 	// request that wins the race (rowsAffected == 1) proceeds to issue a new
 	// token pair; concurrent duplicate refreshes lose the race and are rejected
 	// WITHOUT triggering reuse-detection revoke-all (they are not theft).
@@ -234,9 +233,8 @@ func (s *AuthService) Me(ctx context.Context, userID uuid.UUID) (models.User, er
 	return s.repo.FindUserByID(ctx, userID)
 }
 
-// GuestUser now generates an isolated user per guest booking
+// GuestUser generates an isolated user per guest booking.
 func (s *AuthService) GuestUser(ctx context.Context) (models.User, error) {
-
 	passwordBytes := make([]byte, 16)
 	if _, err := rand.Read(passwordBytes); err != nil {
 		return models.User{}, err

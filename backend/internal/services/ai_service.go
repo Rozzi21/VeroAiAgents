@@ -196,17 +196,12 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 	// context + options message. The selected package title is read from the
 	// enriched tool result (see executeSearchTrips) so no extra DB lookup is
 	// needed here. This is a backstop; a well-behaved LLM answer is preserved.
-	// AIW-7 (14 Agu 2026): jangan menimpa respons dengan pesan "sudah memilih"
-	// bila tool informasi (get_trip_detail/calculate_trip_price/
-	// check_trip_availability) SUKSES di round yang sama. Itu berarti user
-	// bertanya detail/harga/ketersediaan paket terpilih — bukan mencari paket
-	// baru — dan model salah panggil search_trips. Respons informatif dari tool
-	// info harus diawetkan; pesan konflik hanya muncul bila memang tidak ada
-	// jawaban substantif lain.
 	if title, found := failedSearchTripsAlreadySelected(toolResults); found {
-		// B-GENUI-4: when an explicit alternative search ALSO succeeded this
-		// turn, fresh cards are rendering — the model's own text introduces
-		// them, so the conflict backstop must not clobber it.
+		// A successful info-tool result in the same turn means the user asked
+		// about the selected package (detail/price/availability), so the
+		// model's informative answer must be preserved. Likewise, when an
+		// explicit alternative search also succeeded this turn, fresh cards are
+		// rendering and the conflict backstop must not clobber the model's text.
 		if !responseMentionsSelectionOptions(response) && !hasSuccessfulInfoTool(toolResults) && !hasSearchTripsAlternative(toolResults) {
 			name := title
 			if name == "" {
@@ -216,16 +211,11 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		}
 	}
 
-	// BUG-5 (fixed 28 Jul 2026): fail-closed re-fetch of session state.
-	// The first FindChatSession at the top of Chat() is already validated; this
-	// second fetch refreshes SelectedTripID in case select_package ran during
-	// the tool loop (the in-memory `session` struct is not mutated by the loop).
-	// Previously this used `chatSession, _ := ...`, swallowing the error: on a
-	// transient DB failure chatSession was zero-valued -> selectedTripID=nil ->
-	// the "package already selected" guard below was skipped -> new
-	// recommendations were sent even though the user had already picked a
-	// package (fail-open). Now, on fetch failure we log and suppress
-	// recommendations entirely (state unknown) instead of guessing.
+	// Fail-closed re-fetch of session state: the second fetch refreshes
+	// SelectedTripID in case select_package ran during the tool loop (the
+	// in-memory `session` struct is not mutated by the loop). On fetch
+	// failure we log and suppress recommendations entirely (state unknown)
+	// instead of guessing.
 	var selectedTripID *uuid.UUID
 	sessionStateUnknown := false
 	chatSession, ferr := s.repo.FindChatSession(ctx, sessionID)
@@ -248,19 +238,16 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		}
 	}
 
-	// BUG-13 (11 Agu 2026), refined for B-GENUI-4 (9 Sep 2026): once a package
-	// is selected, follow-up questions about it must NOT re-render
-	// recommendations — suppress them. The single exception is an EXPLICIT
-	// alternative request, which arrives structured as a successful
+	// Once a package is selected, follow-up questions about it must NOT
+	// re-render recommendations — suppress them. The single exception is an
+	// EXPLICIT alternative request, which arrives structured as a successful
 	// search_trips(alternative=true) tool result: executeSearchTrips refuses
 	// plain (alternative=false) searches while a selection exists
 	// (already_package_selected), so a successful plain search here can only
 	// come from the same turn that ran select_package — and that must stay
 	// suppressed. The alternative intent signal is the tool argument set by
 	// the model under the system prompt (only on an explicit user request);
-	// assistant text is never parsed. The alternative result renders as a NEW
-	// recommendation set on THIS message; the previous set keeps its own
-	// persisted metadata untouched.
+	// assistant text is never parsed.
 	if selectedTripID != nil && !hasSearchTripsAlternative(toolResults) {
 		showRecommendations = false
 		recommendationReason = ""
@@ -273,9 +260,6 @@ func (s *AIService) finalizeChat(ctx context.Context, sessionID uuid.UUID, aiRes
 		recommendedPackages = nil
 	}
 
-	// BUG-5: fail-closed — if session state could not be re-fetched, do not
-	// emit recommendations (we cannot safely tell whether a package is already
-	// selected). The AI text response is still returned above.
 	if sessionStateUnknown {
 		showRecommendations = false
 		recommendationReason = ""
@@ -346,18 +330,16 @@ func (s *AIService) ScheduleMemorySummary(ctx context.Context, sessionID uuid.UU
 	return accepted
 }
 
-// ChatStream is streaming counterpart of Chat. Every provider round uses
-// GenerateStreamEvents. Text-only rounds forward real provider deltas inline;
-// tool-call fragments remain private until complete MCP dispatch.
+// ChatStream is the streaming counterpart of Chat. Every provider round uses
+// GenerateStreamEvents: text-only rounds forward real provider deltas inline
+// while tool-call fragments remain private until complete MCP dispatch.
 //
-// onEvent is invoked inline with provider SSE scan, so
-// the handler must flush promptly (it already does, per BUG-4 write-detection).
-// If onEvent is nil call still
-// returns a ChatResult, which keeps the streaming handler resilient.
+// onEvent is invoked inline with the provider SSE scan, so the handler must
+// flush promptly. If onEvent is nil the call still returns a ChatResult, which
+// keeps the streaming handler resilient.
 //
-// Context propagation is unchanged: the same request ctx flows into
-// the streaming HTTP request, so a client disconnect cancels the stream
-// mid-flight and ChatStream returns ctx.Err().
+// The same request ctx flows into the streaming HTTP request, so a client
+// disconnect cancels the stream mid-flight and ChatStream returns ctx.Err().
 func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto.ChatRequest, onEvent func(ChatStreamEvent)) (ChatResult, error) {
 	sessionID := chatCtx.SessionID
 	if sessionID == uuid.Nil {
@@ -375,18 +357,14 @@ func (s *AIService) ChatStream(ctx context.Context, chatCtx ChatContext, req dto
 	if session.ExpiresAt != nil && !session.ExpiresAt.After(now) {
 		return ChatResult{}, ErrChatSessionExpired
 	}
-	// BUG-6: slide expires_at before the tool loop (same rationale as Chat).
 	expiresAt := now.Add(s.cfg.GuestSessionTTL)
 	session.ExpiresAt = &expiresAt
 	session.LastActivityAt = &now
 
-	// PERF-5: parallel pre-LLM writes (same rationale as Chat above).
 	if err := s.prepareChatPreLLM(ctx, session, req.Prompt); err != nil {
 		return ChatResult{}, err
 	}
 
-	// PERF-4: pass the already-fetched `session` struct (same rationale as
-	// Chat above) to avoid a redundant FindChatSession in buildMessages.
 	providerDeltaSent := false
 	forward := func(event ChatStreamEvent) {
 		if event.Type == "delta" && event.ProviderGenerated {
@@ -460,10 +438,10 @@ func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.U
 				if summary, ok := item["summary"].(string); ok {
 					trip.Summary = summary
 				}
-				// B-GENUI-5: preserve the authoritative pricing fields already
-				// returned by search_trips. ChatResult and persisted recommendation
-				// metadata both reuse models.Trip, so filling its existing fields here
-				// carries the same values through SSE and history without recalculation.
+				// Reuse the pricing fields already returned by search_trips:
+				// ChatResult and persisted recommendation metadata share
+				// models.Trip, so filling its existing fields carries the same
+				// values through SSE and history without recalculation.
 				trip.BasePrice = firstMapNumber(item, "adult_price", "price")
 				trip.EstimatedPrice = firstMapNumber(item, "price")
 				trip.DiscountPrice = firstMapNumber(item, "discount_price")
@@ -480,8 +458,8 @@ func extractRecommendedPackages(toolResults []ToolResult, selectedTripID *uuid.U
 				packages = append(packages, trip)
 			}
 
-			// If a package is already selected, do not send packages that are
-			// unrelated. However, if user asked for alternatives, allow them.
+			// Selection narrows the package set to the selected trip unless the
+			// user explicitly asked for alternatives.
 			if selectedTripID != nil && !hasSearchTripsAlternative(toolResults) {
 				for _, trip := range packages {
 					if trip.ID == *selectedTripID {
@@ -567,11 +545,11 @@ func guestOrderLimitReached(results []ToolResult) bool {
 //
 // The system prompt asks the model not to retry, but a prompt is advice: a model
 // may well call create_booking again with a tweaked payload (a different
-// contact, another trip_id), and the AIW-3 dedup map does not catch that because
-// the arguments differ. This guard makes the refusal mechanical — the second
-// call never reaches MCP, so it never reaches BookingService and never touches
-// the database. The model gets the SAME structured code back, so its next text
-// response stays consistent with the first refusal.
+// contact, another trip_id), and the call-key dedup map does not catch that
+// because the arguments differ. This guard makes the refusal mechanical — the
+// second call never reaches MCP, so it never reaches BookingService and never
+// touches the database. The model gets the SAME structured code back, so its
+// next text response stays consistent with the first refusal.
 //
 // It does not decide the guest rule (BookingService does) and it does not widen
 // it: authenticated turns cannot reach here, because an authenticated
@@ -612,7 +590,7 @@ func chatOrderGateFromToolResults(results []ToolResult) *ChatOrderGate {
 			}
 		case CodeGuestOrderLimitReached:
 			// No order id: the blocking order may belong to another guest
-			// identity that shares the contact anchor (GO-P0-1).
+			// identity that shares the contact anchor.
 			limited = &ChatOrderGate{Code: CodeGuestOrderLimitReached, AuthRequired: true}
 		case CodeOrderAlreadyExists:
 			orderID, _ := result.Data["order_id"].(string)
@@ -703,7 +681,7 @@ func failedSearchTripsAlreadySelected(toolResults []ToolResult) (title string, f
 
 // hasSuccessfulInfoTool reports whether any informational read tool
 // (get_trip_detail / calculate_trip_price / check_trip_availability) succeeded
-// in this tool loop (AIW-7). When true, the user asked a substantive question
+// in this tool loop. When true, the user asked a substantive question
 // about the selected package and the model produced an informative answer —
 // so finalizeChat must NOT overwrite it with the "already selected" conflict
 // backstop even if a stray search_trips call also failed in the same round.
@@ -739,12 +717,13 @@ func responseMentionsSelectionOptions(response string) bool {
 // appends the results back into the conversation, and calls the LLM again
 // so it can generate a final text response based on actual tool results.
 //
-// PERF-4: accepts the already-fetched session struct instead of re-querying
-// it in buildMessages. The caller (Chat) has validated + loaded the session.
+// It accepts the already-fetched session struct instead of re-querying it in
+// buildMessages: the caller (Chat/ChatStream) has validated + loaded it.
 func (s *AIService) generateWithToolLoop(ctx context.Context, session models.ChatSession, prompt string, userID *uuid.UUID) (ai.CompletionResponse, []ToolResult, error) {
-	// Use incoming request context directly so client disconnect cancels work
-	// Each API call is guarded by HTTP client timeout (cfg.AITimeout, 35s)
-	// Overall loop bounded by MaxToolCallRounds (5)
+	// Use the incoming request context so a client disconnect cancels work.
+	// Each API call is guarded by the HTTP client timeout (cfg.AITimeout);
+	// the loop is bounded by MaxToolCallRounds. A single context.WithTimeout
+	// around the whole loop would exhaust before multi-round workflows finish.
 	sessionID := session.ID
 	contextStarted := time.Now()
 	tools := mcp.OpenAITools()
@@ -753,7 +732,6 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 
 	var allToolResults []ToolResult
 
-	// AIW-3: Deduplicate tool calls within the same loop to avoid redundant queries and bloat.
 	calledTools := make(map[string]bool)
 
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
@@ -797,21 +775,16 @@ func (s *AIService) generateWithToolLoop(ctx context.Context, session models.Cha
 	return resp, allToolResults, err
 }
 
-// generateWithToolLoopStream is the PERF-1 streaming variant of
-// generateWithToolLoop. Each round uses GenerateStream directly with tools —
-// text deltas are forwarded to onDelta immediately (low TTFT), and tool_call
-// deltas are accumulated into a complete ToolCalls array for MCP dispatch.
-// This avoids the previous double-call (Generate + GenerateStream) that
-// wasted an API call and could cause the second call to fail when the first
-// consumed most of the AITimeout budget.
+// generateWithToolLoopStream is the streaming variant of
+// generateWithToolLoop. Each round streams with tools — text deltas are
+// forwarded to onEvent immediately (low TTFT), and tool_call deltas are
+// accumulated into a complete ToolCalls array for MCP dispatch, so the old
+// Generate+GenerateStream double-call (one wasted API call) is gone.
 //
-// If GenerateStream with tools fails before visible content (some providers
+// If streaming with tools fails before visible content (some providers
 // reject stream + tools combinations), fallback remains non-streaming Generate.
 func (s *AIService) generateWithToolLoopStream(ctx context.Context, session models.ChatSession, prompt string, userID *uuid.UUID, onEvent func(ChatStreamEvent)) (ai.CompletionResponse, []ToolResult, error) {
-	// Same rationale as generateWithToolLoop: each individual API call is guarded
-	// by the HTTP client's timeout (cfg.AITimeout, 35s). The overall loop is
-	// bounded by MaxToolCallRounds (5). A single context.WithTimeout wrapping
-	// the entire loop would exhaust before multi-round workflows complete.
+	// Timeout and round-budget rationale: see generateWithToolLoop.
 	sessionID := session.ID
 	contextStarted := time.Now()
 	tools := mcp.OpenAITools()
@@ -825,14 +798,9 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	for round := 0; round < ai.MaxToolCallRounds; round++ {
 		messages, budgetDecision := llmContext.messagesForRequest(tools, s.contextTokenBudget())
 		telemetry.RecordContextBudget(ctx, budgetDecision.Before, budgetDecision.After, budgetDecision.Removed, budgetDecision.Limit)
-		// PERF-1: stream directly with tools. GenerateStream accumulates
-		// tool_calls deltas and returns them in the response, so we can
-		// still dispatch tools after the stream completes. This halves the
-		// API call count vs the old Generate+GenerateStream double-call.
-		//
-		// Forward provider text inline. ai.Client emits tool classification before
-		// content from a mixed chunk, preserving BUG-12 without buffering plain
-		// final rounds. Tool arguments remain private and accumulated by ai.Client.
+		// Forward provider text inline. ai.Client accumulates tool_call deltas in
+		// the returned response, so tools are dispatched after the stream
+		// completes; tool fragments never reach onEvent.
 		toolRound := false
 		textCommitted := false
 		handleProviderEvent := func(event ai.StreamEvent) {
@@ -908,21 +876,18 @@ func (s *AIService) generateWithToolLoopStream(ctx context.Context, session mode
 	return resp, allToolResults, err
 }
 
-// Single-tool-call block extracted into helper for better orchestration
-// Behaviour unchanged: dedup and error mapping rules identical to inline block
-// calledTools shared across rounds via caller's map
-//
-// `prior` is the tool results already produced in THIS request. It carries the
-// no-retry-after-guest-limit guard (blockedRetryAfterGuestOrderLimit) and lives
-// here — rather than in the two loops — so the streaming and non-streaming paths
-// can never enforce it differently.
+// executeToolCall applies the dedup and error-mapped execution rules shared by
+// both tool loops. `prior` carries the no-retry-after-guest-limit guard
+// (blockedRetryAfterGuestOrderLimit) and lives here — rather than in the two
+// loops — so the streaming and non-streaming paths can never enforce it
+// differently.
 func (s *AIService) executeToolCall(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, tc ai.ToolCall, calledTools map[string]bool, prior []ToolResult) (ToolResult, ai.Message) {
 	toolStarted := time.Now()
 
 	// Guest allowance already refused a create_booking in this request: refuse
 	// the retry here, before MCP/BookingService/DB are touched. Different
-	// arguments are still the same refusal, which is why the AIW-3 dedup map
-	// below cannot cover this case.
+	// arguments are still the same refusal, which is why the dedup map below
+	// cannot cover this case.
 	if blocked, ok := blockedRetryAfterGuestOrderLimit(prior, tc.Function.Name); ok {
 		log.Printf("[ai] blocked create_booking retry after %s session=%s", CodeGuestOrderLimitReached, sessionID)
 		telemetry.RecordTool(ctx, tc.Function.Name, "failure", time.Since(toolStarted))
@@ -1151,10 +1116,6 @@ func (s *AIService) buildMessages(ctx context.Context, session models.ChatSessio
 		},
 	}
 
-	// PERF-4: use the in-memory session passed by the caller instead of a
-	// redundant FindChatSession DB round-trip. Chat()/ChatStream() already
-	// loaded + validated this session; re-querying here added ~10-30ms of
-	// latency to every chat request with no benefit.
 	var memorySummary string
 	if session.MemorySummary != "" {
 		memorySummary = session.MemorySummary
@@ -1162,14 +1123,9 @@ func (s *AIService) buildMessages(ctx context.Context, session models.ChatSessio
 
 	recent, _ := s.repo.ListRecentChatMessages(ctx, sessionID, s.cfg.AIRecentMessages)
 
-	// AIW-4: Memory Summary Overlap Protection.
-	// If we have recent messages, we filter them out from the memory summary to avoid duplicate tokens.
+	// Memory-summary overlap protection: drop summary lines already covered
+	// by the recent-message batch so tokens are not duplicated.
 	if memorySummary != "" && len(recent) > 0 {
-		// Just a simple heuristic: if the recent messages are already represented at the tail of the conversation,
-		// we skip appending memory summary if the total message history is small, or we slice the memory summary
-		// to only include content older than the current 'recent' batch.
-		// Since our memory summary is currently just a raw log slice from s.refreshMemorySummary, we can clean up
-		// the memory summary to exclude lines matching the recent message content.
 		lines := strings.Split(memorySummary, "\n")
 		var olderLines []string
 		for _, line := range lines {
@@ -1255,7 +1211,7 @@ func (s *AIService) GetSessionMessages(ctx context.Context, sessionID uuid.UUID,
 // GetGuestHistory returns the persisted messages plus the session's selected
 // package (selected_trip_id, nil when nothing is selected) so a reload can
 // restore BOTH the historical recommendation cards and the selected/active
-// card state without any LLM or search_trips call (B-GENUI-3/4).
+// card state without any LLM or search_trips call.
 func (s *AIService) GetGuestHistory(ctx context.Context, sessionID uuid.UUID) ([]models.ChatMessage, *uuid.UUID, error) {
 	session, err := s.repo.FindChatSession(ctx, sessionID)
 	if err != nil {

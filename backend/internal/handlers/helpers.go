@@ -36,10 +36,9 @@ func respondAuthIssue(c *gin.Context, cfg config.Config, status int, message str
 // this one path).
 //
 // Never fatal to the auth response, by design: no guest cookie is the normal
-// case, and a refusal must not break the login it was piggybacking on. What
-// changed with GO-P1-3 is that each outcome is now distinguishable instead of
-// collapsing into one "claim failed" log line — a real failure and a
-// wrong-account refusal are separate, greppable events.
+// case, and a refusal must not break the login it was piggybacking on. Each
+// outcome is distinguishable — a real failure and a wrong-account refusal are
+// separate, greppable events.
 func (h *Handler) claimGuestOrder(c *gin.Context, userID uuid.UUID, flow string) {
 	result, err := h.Services.Guests.ClaimOrder(c.Request.Context(), auth.GetGuestIdentityCookie(c), userID)
 	switch {

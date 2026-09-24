@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestRedactSensitiveQuery locks the SEC-hardening (23 Agu 2026): OAuth
+// TestRedactSensitiveQuery locks the SEC-hardening: OAuth
 // artifacts and credentials in the URL query must never reach logs. The Google
 // callback (?code=...&state=...) is the concrete leak being closed; the rest
 // are defense-in-depth.

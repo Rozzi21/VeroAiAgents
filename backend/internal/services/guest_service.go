@@ -25,11 +25,10 @@ var ErrGuestSessionInvalid = errors.New("guest session invalid or expired")
 // fresh session instead.
 var ErrChatSessionGuestMismatch = errors.New("chat session belongs to another guest identity")
 
-// Guest-order claim outcomes (GO-P1-3 / GO-P3-3). ClaimOrder used to return a
-// bare nil for "nothing to claim" and a raw gorm error for everything else, so
-// its three call sites (Register, Login, Google callback) could not tell a
-// normal no-op apart from a real failure or from a refusal. These sentinels make
-// each outcome explicit and auditable.
+// Guest-order claim outcomes. ClaimOrder used to return a bare nil for
+// "nothing to claim" and a raw gorm error for everything else, so its call
+// sites could not tell a normal no-op apart from a real failure or a refusal.
+// These sentinels make each outcome explicit and auditable.
 var (
 	// ErrGuestOrderNothingToClaim: no guest cookie, an unknown/expired guest
 	// session, or a session that never placed an order. Expected on most
@@ -54,8 +53,8 @@ const (
 	eventGuestOrderClaimConflict = "guest_order_claim_conflict"
 	eventGuestOrderClaimFailed   = "guest_order_claim_failed"
 	// eventGuestChatBindRefused fires when a chat session could not be bound
-	// because it already belongs to another live guest identity (GO-P2-7) —
-	// the shape of a copied chat cookie or two identities racing in one browser.
+	// because it already belongs to another live guest identity — the shape of
+	// a copied chat cookie or two identities racing in one browser.
 	eventGuestChatBindRefused = "guest_chat_bind_refused"
 )
 
@@ -148,7 +147,7 @@ func (s *GuestService) Authenticate(ctx context.Context, token string) (models.G
 // MCP `create_booking` reads chat_sessions.guest_session_id to decide which
 // guest identity owns the order it creates, so a blind overwrite let any later
 // request re-point an existing chat at a different identity — spending that
-// identity's one-order allowance and attributing the order to it (GO-P2-7).
+// identity's one-order allowance and attributing the order to it.
 //
 // The repository performs a single-winner conditional UPDATE. A refusal means
 // the chat session is owned by another LIVE guest identity; the caller must
