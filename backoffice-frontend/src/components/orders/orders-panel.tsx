@@ -710,7 +710,6 @@ export function OrdersPanel() {
           description={`Pesanan #${cancelCandidate.id.slice(0, 8)} akan ditandai sebagai dibatalkan. Aksi ini tidak dapat diurungkan.`}
           confirmLabel="Batalkan pesanan"
           cancelLabel="Kembali"
-          variant="danger"
           loading={busyId === cancelCandidate.id}
           onConfirm={() => void handleCancel()}
           onCancel={() => setCancelCandidate(null)}

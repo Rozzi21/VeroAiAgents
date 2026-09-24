@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { cn } from "@/lib/utils";
 
 type ConfirmModalProps = {
   open: boolean;
@@ -9,7 +8,6 @@ type ConfirmModalProps = {
   description: string;
   confirmLabel?: string;
   cancelLabel?: string;
-  variant?: "default" | "danger";
   loading?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
@@ -21,7 +19,6 @@ export function ConfirmModal({
   description,
   confirmLabel = "Confirm",
   cancelLabel = "Cancel",
-  variant = "default",
   loading = false,
   onConfirm,
   onCancel,
@@ -81,12 +78,7 @@ export function ConfirmModal({
             type="button"
             onClick={onConfirm}
             disabled={loading}
-            className={cn(
-              "h-11 rounded-lg px-6 text-sm font-bold text-white transition disabled:cursor-not-allowed disabled:opacity-60",
-              variant === "danger"
-                ? "bg-[#c1121f] shadow-[0_12px_24px_-16px_rgba(193,18,31,0.85)] hover:bg-[#a50f1a]"
-                : "bg-[#c1121f] shadow-[0_12px_24px_-16px_rgba(193,18,31,0.85)] hover:bg-[#a50f1a]"
-            )}
+            className="h-11 rounded-lg bg-[#c1121f] px-6 text-sm font-bold text-white shadow-[0_12px_24px_-16px_rgba(193,18,31,0.85)] transition hover:bg-[#a50f1a] disabled:cursor-not-allowed disabled:opacity-60"
           >
             {loading ? "Memproses..." : confirmLabel}
           </button>

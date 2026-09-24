@@ -26,7 +26,6 @@ export type TripFormStaticDefaults = {
   publish_end: string;
 };
 
-
 export type TripFormControlledState = {
   category: TripCategory;
   scheduleType: ScheduleType;
@@ -152,6 +151,5 @@ export function mapTripToForm(trip: TripPackage): {
       publish_start: publishStart,
       publish_end: publishEnd,
     },
-
   };
 }

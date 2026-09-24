@@ -117,7 +117,6 @@ type AuthBroadcast = {
   expires_at: number;
 };
 
-// adoptBroadcastToken applies a token that another tab just refreshed, without
 function adoptBroadcastToken(accessToken: string, expiresAt: number) {
   if (typeof window === "undefined") {
     return;
@@ -139,8 +138,7 @@ function getAuthChannel(): BroadcastChannel | null {
   if (!authChannel) {
     authChannel = new BroadcastChannel(AUTH_CHANNEL_NAME);
     authChannel.onmessage = (event: MessageEvent<AuthBroadcast>) => {
-      // Strict validation of cross-tab token messages. BroadcastChannel is
-      // Validate cross-tab token messages
+      // BroadcastChannel payloads are untrusted; reject malformed messages.
       const data = event.data;
       if (!data || typeof data !== "object") {
         return;
@@ -161,7 +159,6 @@ function getAuthChannel(): BroadcastChannel | null {
   return authChannel;
 }
 
-// broadcastTokenRefreshed notifies other tabs that this tab just rotated the
 function broadcastTokenRefreshed(accessToken: string) {
   const channel = getAuthChannel();
   if (!channel) {
@@ -185,19 +182,8 @@ export function getToken() {
   return localStorage.getItem(ACCESS_TOKEN_KEY) ?? "";
 }
 
-export function getUserRole(): BackofficeRole {
-  if (typeof window === "undefined") {
-    return "";
-  }
-  return localStorage.getItem(USER_ROLE_KEY) ?? "";
-}
-
 export function isBackofficeRole(role: string) {
   return role === "admin" || role === "operator";
-}
-
-export function isAdminRole(role: string) {
-  return role === "admin";
 }
 
 function getTokenExpiresAt() {
@@ -341,7 +327,6 @@ export function startAuthRefreshScheduler() {
   }
   refreshSchedulerStarted = true;
   scheduleProactiveRefresh();
-  // Initialize cross-tab channel for token broadcasts
   getAuthChannel();
 
   visibilityHandler = () => {

@@ -23,7 +23,6 @@ import { invalidateTripsCache } from "../list/use-trips-list";
 import { usePackageReferences } from "./use-package-references";
 
 const EMPTY_DEFAULTS: TripFormStaticDefaults = {
-
   title: "",
   location: "",
   summary: "",
@@ -40,7 +39,6 @@ const EMPTY_DEFAULTS: TripFormStaticDefaults = {
   publish_start: "",
   publish_end: "",
 };
-
 
 function applyControlledState(
   controlled: ReturnType<typeof mapTripToForm>["controlled"],
@@ -107,8 +105,6 @@ export function useTripForm() {
   const [formKey, setFormKey] = useState(editId ?? "new");
   const submitStatus = useRef<SubmitStatus>("draft");
   const references = usePackageReferences(loadedTrip?.references, formKey, editId);
-
-
 
   useEffect(() => {
     if (!getToken()) {
@@ -416,8 +412,6 @@ export function useTripForm() {
       references: references.selected
         .map((item) => item.id)
         .filter((id) => id !== editId),
-
-
       itineraries: itineraries
         .map((item, index) => ({
           day: index + 1,
@@ -546,6 +540,5 @@ export function useTripForm() {
     references,
   };
 }
-
 
 export type UseTripFormReturn = ReturnType<typeof useTripForm>;
