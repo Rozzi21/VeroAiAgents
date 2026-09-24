@@ -211,7 +211,6 @@ export function useTripsList() {
         description:
           "Paket yang dihapus tidak dapat dikembalikan. Apakah Anda yakin ingin melanjutkan?",
         confirmLabel: "Delete",
-        variant: "danger" as const,
       };
     }
 
@@ -219,7 +218,6 @@ export function useTripsList() {
       title: "Ubah Status Paket?",
       description: `Apakah Anda yakin ingin mengubah status paket ini menjadi ${formatTripStatus(confirmAction.targetStatus)}?`,
       confirmLabel: "Confirm",
-      variant: "default" as const,
     };
   }, [confirmAction]);
 

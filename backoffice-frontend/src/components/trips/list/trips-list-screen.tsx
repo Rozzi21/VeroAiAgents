@@ -87,7 +87,6 @@ export function TripsListScreen() {
           description={list.confirmModalContent.description}
           confirmLabel={list.confirmModalContent.confirmLabel}
           cancelLabel="Cancel"
-          variant={list.confirmModalContent.variant}
           loading={list.pendingTripId === list.confirmAction.trip.id}
           onConfirm={list.executeConfirmedAction}
           onCancel={list.cancelConfirm}

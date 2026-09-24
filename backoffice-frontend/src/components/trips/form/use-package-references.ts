@@ -40,7 +40,6 @@ export function usePackageReferences(
   formKey: string,
   excludeTripId?: string | null
 ) {
-
   const [selected, setSelected] = useState<PackageReference[]>([]);
   const [query, setQuery] = useState("");
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -59,7 +58,6 @@ export function usePackageReferences(
   useEffect(() => {
     excludeRef.current = excludeTripId ?? null;
   }, [excludeTripId]);
-
 
   // Resolve initial references (trip IDs from the loaded trip) into
   // {id, title} cards. Non-ID legacy values (plain titles) are dropped.
@@ -121,7 +119,6 @@ export function usePackageReferences(
             (pkg) => !selectedIds.has(pkg.id) && pkg.id !== excludeRef.current
           ),
         });
-
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted || requestId !== requestIdRef.current) {
@@ -167,7 +164,6 @@ export function usePackageReferences(
     setSelected((items) =>
       items.some((item) => item.id === pkg.id) ? items : [...items, pkg]
     );
-
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
       debounceRef.current = null;
@@ -184,7 +180,6 @@ export function usePackageReferences(
 
   const closeDropdown = useCallback(() => setDropdownOpen(false), []);
 
-  // Cancel pending debounce/request on unmount.
   useEffect(() => {
     return () => {
       if (debounceRef.current) {

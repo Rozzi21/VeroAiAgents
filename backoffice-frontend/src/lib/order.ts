@@ -4,10 +4,6 @@ export async function fetchOrders(limit = 200) {
   return apiFetch<BookingOrder[]>(`/api/v1/bookings?limit=${limit}`, {}, true);
 }
 
-export async function fetchOrderDetail(orderId: string) {
-  return apiFetch<BookingOrder>(`/api/v1/bookings/${orderId}`, {}, true);
-}
-
 export async function updateOrderStatus(
   orderId: string,
   status: BookingStatus

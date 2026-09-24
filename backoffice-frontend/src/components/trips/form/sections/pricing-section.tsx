@@ -209,7 +209,6 @@ export function PricingSection({
   return (
     <FormSection title="Pricing & Discount">
       <div className="grid gap-5 md:grid-cols-[1fr_340px]">
-        {/* LEFT: base price, discount checkbox, child price, child discount checkbox */}
         <div className="space-y-5">
           <label className="block">
             <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-[#8a8f9d]">
@@ -248,11 +247,9 @@ export function PricingSection({
           />
         </div>
 
-        {/* RIGHT: discount price + percent (conditionally shown) */}
         <div className="rounded-xl bg-[#f4f7ff] p-5 space-y-4">
           {discountEnabled && (
             <>
-              {/* Discount Price */}
               <label className="block">
                 <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-[#8a8f9d]">
                   Discount Price
@@ -264,7 +261,6 @@ export function PricingSection({
                 />
               </label>
 
-              {/* Discount Percent */}
               <label className="block">
                 <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-[#8a8f9d]">
                   Discount (%)
@@ -291,7 +287,6 @@ export function PricingSection({
 
           {childDiscountEnabled && (
             <>
-              {/* Child Discount Price */}
               <label className="block">
                 <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-[#8a8f9d]">
                   Child Discount Price
@@ -303,7 +298,6 @@ export function PricingSection({
                 />
               </label>
 
-              {/* Child Discount Percent */}
               <label className="block">
                 <span className="mb-2 block text-xs font-bold uppercase tracking-[0.08em] text-[#8a8f9d]">
                   Child Discount (%)
