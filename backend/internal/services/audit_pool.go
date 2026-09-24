@@ -66,9 +66,9 @@ const (
 	auditDrainTimeout = 10 * time.Second
 )
 
-// AuditPool is the existing bounded worker pool for best-effort chat background
-// jobs: MCP audit persistence plus memory-summary refresh. Bounding worker count
-// and channel buffer prevents goroutine/DB-connection floods.
+// AuditPool is the bounded worker pool for best-effort chat background jobs:
+// MCP audit persistence plus memory-summary refresh. Bounding worker count and
+// channel buffer prevents goroutine/DB-connection floods.
 //
 // Submit is non-blocking: if the buffer is full the job is dropped and logged,
 // so audit pressure never stalls the AI response. Workers use a detached
@@ -139,7 +139,7 @@ func (p *AuditPool) persist(ctx context.Context, job auditJob) {
 		Result:    string(resultJSON),
 		Status:    job.status,
 	}
-	sessionID := job.sessionID // take address of a local copy, not the loop var
+	sessionID := job.sessionID
 	aiLog := models.AILog{
 		SessionID:     &sessionID,
 		Workflow:      "mcp_tool_execution",

@@ -20,8 +20,8 @@ import (
 	"gorm.io/gorm"
 )
 
-// GoogleOAuthService implements "Continue with Google" (18 Agu 2026) as an
-// ADDITIONAL authentication provider. It never bypasses the existing session
+// GoogleOAuthService implements "Continue with Google" as an ADDITIONAL
+// authentication provider. It never bypasses the existing session
 // machinery: on a verified Google identity it resolves/creates the Vero user,
 // then delegates to AuthService.issueSession so the result is a NORMAL Vero
 // session (JWT access+refresh, AuthSession row, rotation/reuse detection,
@@ -182,8 +182,7 @@ func (s *GoogleOAuthService) StartLogin(ctx context.Context, returnTo string, li
 	auth.LogSecurity(auth.EventGoogleLoginStarted, startFields)
 	// Pass the RAW code_verifier: oauth2.S256ChallengeOption derives the S256
 	// challenge internally (S256ChallengeFromVerifier). Pre-hashing here would
-	// double-hash (S256(S256(verifier))) and Google rejects the exchange with
-	// invalid_grant "Invalid code verifier." (BUG: PKCE double-hash, 9 Sep 2026).
+	// double-hash (S256(S256(verifier))) and Google rejects the exchange.
 	return GoogleStartResult{RedirectURL: s.google.AuthCodeURLForRedirect(s.callbackRedirectURI(linkUserID != nil), state, nonce, codeVerifier)}, nil
 }
 
@@ -303,7 +302,7 @@ func googleResolveFailReason(err error) string {
 }
 
 // resolveUser implements the account-resolution policy. Deliberately there is
-// NO automatic email-based merge (account-takeover guard, 19 Agu 2026):
+// NO automatic email-based merge (account-takeover guard):
 //
 //  1. google_sub match (canonical ExternalIdentity) → existing linked account.
 //  2. email match but sub NOT linked → REFUSE to merge. Returning the existing
@@ -358,21 +357,21 @@ func (s *GoogleOAuthService) resolveUser(ctx context.Context, identity auth.Goog
 	// Create user + canonical ExternalIdentity (sub→user) atomically. The
 	// identity mapping — not email — is the source of truth for future logins.
 	if err := s.repo.CreateUserWithGoogleIdentity(ctx, &newUser, identity.Subject, identity.Email, identity.Picture); err != nil {
-		// TOCTOU window (P1-H1): steps 1-2 above are reads, this is the write,
-		// and a parallel Google callback or POST /auth/register for the same
-		// email can commit in between. The fallback may therefore only
-		// re-resolve through the SAME key the primary lookup used — the Google
-		// sub, enforced by UNIQUE(provider, provider_user_id).
+		// TOCTOU window: steps 1-2 above are reads, this is the write, and a
+		// parallel Google callback or POST /auth/register for the same email can
+		// commit in between. The fallback may therefore only re-resolve through
+		// the SAME key the primary lookup used — the Google sub, enforced by
+		// UNIQUE(provider, provider_user_id).
 		if existing, findErr := s.repo.FindUserByGoogleSub(ctx, identity.Subject); findErr == nil {
 			return existing, nil
 		}
 		// Sub still unlinked ⇒ the create lost on users.email UNIQUE against an
-		// account that is NOT this Google identity. Resolving by email here
-		// (the old behaviour) handed the caller a session on that account,
-		// bypassing the anti-merge guard at step 2 — and the guest-order claim
-		// that runs right after the callback then moved the CALLER's guest order
-		// into it. Return the identical decision the pre-create guard makes, so
-		// the outcome never depends on who won the race.
+		// account that is NOT this Google identity. Resolving by email here would
+		// hand the caller a session on that account, bypassing the anti-merge
+		// guard at step 2 — and the guest-order claim that runs right after the
+		// callback would then move the CALLER's guest order into it. Return the
+		// identical decision the pre-create guard makes, so the outcome never
+		// depends on who won the race.
 		if _, findErr := s.repo.FindUserByEmail(ctx, identity.Email); findErr == nil {
 			auth.LogSecurity(auth.EventGoogleLinkRequired, map[string]any{
 				"ip":         meta.IP,

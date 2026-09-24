@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"log/slog"
-
 	"errors"
-	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -23,6 +21,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/routes"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
+	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
 
 func main() {
@@ -31,7 +30,6 @@ func main() {
 		log.Fatalf("invalid configuration: %v", err)
 	}
 
-	// Initialize structured logging with slog and inject context handler
 	var logHandler slog.Handler
 	if cfg.AppEnv == "production" {
 		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})
@@ -115,16 +113,15 @@ func main() {
 	log.Println("server stopped gracefully")
 }
 
-// startChatSessionCleanup is the MVP adapter for the cleanup use case. The
-// service method is scheduler-agnostic, so a future cron/systemd/Kubernetes
-// job can invoke the same operation without moving SQL into the scheduler.
+// startChatSessionCleanup invokes the cleanup use case on an hourly ticker.
+// The service method is scheduler-agnostic, so a future cron/systemd/Kubernetes
+// job can invoke the same operation.
 func startChatSessionCleanup(s *services.Services) {
 	interval := time.Hour
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			// Cleanup runs on background ticker with timeout to avoid hanging connections
 			runCtx, cancelRun := context.WithTimeout(context.Background(), 30*time.Second)
 			deleted, err := s.AI.CleanupExpiredChatSessions(runCtx, time.Now())
 			cancelRun()

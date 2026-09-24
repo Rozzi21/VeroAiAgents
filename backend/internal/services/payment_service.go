@@ -21,16 +21,12 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/repositories"
 )
 
-// PaymentService depends on the PaymentRepository interface for booking lookup,
-// payment persistence and atomic status update
 type PaymentService struct {
 	repo PaymentRepository
 	bus  *events.Bus
 	cfg  config.Config
 }
 
-// PaymentRepository is the repository contract used by PaymentService
-// Composed from domain interfaces in repositories/interfaces.go
 type PaymentRepository interface {
 	repositories.PaymentRepository
 	FindBooking(ctx context.Context, id uuid.UUID) (models.Booking, error)
@@ -61,7 +57,6 @@ func (s *PaymentService) Create(ctx context.Context, req dto.PaymentCreateReques
 	if err != nil {
 		return models.Payment{}, ErrBookingNotFoundForPayment
 	}
-	// Payment statuses are typed constants in the models package.
 	payment := models.Payment{
 		BookingID:     req.BookingID,
 		PaymentMethod: req.PaymentMethod,
@@ -125,7 +120,7 @@ func (s *PaymentService) Webhook(ctx context.Context, req dto.PaymentWebhookRequ
 		return payment, err
 	}
 
-	// Validate the reported amount against the stored payment if present.
+	// The webhook-reported amount must match the stored payment.
 	if req.Amount != nil && *req.Amount != payment.Amount {
 		return models.Payment{}, ErrPaymentAmountMismatch
 	}
@@ -207,7 +202,6 @@ func (s *PaymentService) triggerN8N(_ context.Context, eventName string, payload
 	if err != nil {
 		return
 	}
-	// Derive a cancelable context with timeout from detached background.
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.N8NWebhook, bytes.NewReader(body))

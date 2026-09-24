@@ -65,7 +65,7 @@ type Config struct {
 	N8NWebhook         string
 	CORSAllowedOrigins []string
 
-	// GoogleOAuth* configure "Continue with Google" (18 Agu 2026). Disabled by
+	// GoogleOAuth* configure "Continue with Google". Disabled by
 	// default; enabling requires client id + secret (+ redirect URI registered
 	// in Google Cloud Console). FrontendURL is the origin used for the final
 	// post-login redirect and the return_to allowlist — never taken from the
@@ -139,8 +139,8 @@ func Load() Config {
 		GoogleClientID:     strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
 		GoogleClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_SECRET")),
 		// GOOGLE_REDIRECT_URI is the canonical OAuth2 name. GOOGLE_REDIRECT_URL
-		// is accepted as an alias fallback for operator convenience (23 Agu
-		// 2026); URI wins when both are set.
+		// is accepted as an alias fallback for operator convenience; URI wins
+		// when both are set.
 		GoogleRedirectURI:      getEnvFirst([]string{"GOOGLE_REDIRECT_URI", "GOOGLE_REDIRECT_URL"}, "http://localhost:8081/api/v1/auth/google/callback"),
 		GoogleOAuthFrontendURL: getEnv("GOOGLE_OAUTH_FRONTEND_URL", "http://localhost:3000"),
 	}
@@ -183,7 +183,7 @@ func deriveGoogleLinkRedirectURI(loginURI string) string {
 // SameSite=Strict, and a Strict guest cookie is not sent on the cross-site
 // top-level navigation Google's OAuth callback performs. The guest order then
 // never reaches the account: no error, no log, no way to diagnose it from the
-// outside (GO-P2-6, docs/GUEST_ORDER_AUDIT.md).
+// outside (see docs/GUEST_ORDER_AUDIT.md).
 var cookieSameSiteValues = []string{"Strict", "Lax", "None"}
 
 // validateCookieSameSite rejects any value outside cookieSameSiteValues,

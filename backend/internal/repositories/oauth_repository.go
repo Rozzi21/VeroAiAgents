@@ -9,7 +9,7 @@ import (
 	"gorm.io/gorm"
 )
 
-// OAuth state + Google account-link persistence (Google OAuth, 18 Agu 2026).
+// OAuth state + Google account-link persistence.
 
 func (r *Repository) CreateOAuthState(ctx context.Context, state *models.OAuthState) error {
 	return r.DB.WithContext(ctx).Create(state).Error
@@ -18,9 +18,9 @@ func (r *Repository) CreateOAuthState(ctx context.Context, state *models.OAuthSt
 // ConsumeOAuthState atomically marks a state row as consumed in a single
 // UPDATE, returning the row only when THIS caller won the consume race
 // (rowsAffected == 1). A lost race (0 rows) means the state is unknown,
-// already consumed, or expired — the caller must reject the callback. This is
-// the same single-winner pattern as AuthSession RotateSession (BUG-1) and is
-// what makes the OAuth `state` parameter non-replayable.
+// already consumed, or expired — the caller must reject the callback. This is the
+// same single-winner pattern as AuthSession RotateSession and is what makes
+// the OAuth `state` parameter non-replayable.
 func (r *Repository) ConsumeOAuthState(ctx context.Context, stateHash string) (models.OAuthState, bool, error) {
 	now := time.Now()
 	result := r.DB.WithContext(ctx).Model(&models.OAuthState{}).
@@ -103,7 +103,8 @@ func (r *Repository) LinkUserGoogleSub(ctx context.Context, userID string, sub s
 		if err := tx.Create(&ident).Error; err != nil {
 			return err
 		}
-		// Mirror into users.google_sub (single-column update, never Save — DB-2).
+		// Mirror into users.google_sub with a single-column Update — never Save,
+		// which would full-overwrite the row from a partial in-memory struct.
 		return tx.Model(&models.User{}).
 			Where("id = ?", userID).
 			Update("google_sub", sub).Error

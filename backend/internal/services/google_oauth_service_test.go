@@ -189,27 +189,7 @@ func (m *mockOAuthRepo) RevokeAllActiveSessionsByUser(_ context.Context, userID 
 	}
 	return nil
 }
-func (m *mockOAuthRepo) IsSessionRevoked(_ context.Context, jti string) (bool, error) {
-	for _, s := range m.sessions {
-		if s.TokenJTI == jti {
-			return s.RevokedAt != nil, nil
-		}
-	}
-	return false, nil
-}
 func (m *mockOAuthRepo) RevokeSessionByJTIIfExists(_ context.Context, jti string) error {
-	return m.RevokeSessionByJTI(context.Background(), jti)
-}
-func (m *mockOAuthRepo) CountActiveSessionsByJTI(_ context.Context, jti string) (int64, error) {
-	var n int64
-	for _, s := range m.sessions {
-		if s.TokenJTI == jti && s.RevokedAt == nil {
-			n++
-		}
-	}
-	return n, nil
-}
-func (m *mockOAuthRepo) RevokeSessionByJTIAllowMissing(_ context.Context, jti string) error {
 	return m.RevokeSessionByJTI(context.Background(), jti)
 }
 
@@ -281,7 +261,7 @@ func TestStartLogin_PersistsHashedStateOnly(t *testing.T) {
 
 // The link flow must start Google with its OWN redirect URI
 // (/google/link/callback) so the route stays distinct end-to-end; the login
-// flow keeps the configured callback. (Route split, 24 Agu 2026.)
+// flow keeps the configured callback.
 func TestStartLogin_LinkFlowUsesLinkRedirectURI(t *testing.T) {
 	repo := newMockOAuthRepo()
 	cfg := testCfg()
@@ -662,7 +642,7 @@ func TestGoogleSession_EquivalentToPasswordLogin(t *testing.T) {
 }
 
 // TestGoogleAuditEvents_SafePayloadsOnly locks the audit-trail contract
-// (27 Agu 2026): the Google flow emits google_login_started / _failed with
+// The Google flow emits google_login_started / _failed with
 // safe identifiers (provider, flow, success, reason, request meta) and NEVER
 // leaks flow secrets — authorization code, raw state, nonce, or PKCE verifier.
 func TestGoogleAuditEvents_SafePayloadsOnly(t *testing.T) {

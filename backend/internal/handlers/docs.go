@@ -79,7 +79,7 @@ func (h *Handler) OpenAPI(c *gin.Context) {
 			// Requires an Idempotency-Key header (16..200 chars) for safe retries.
 			"/api/v1/orders":      gin.H{"post": op("Orders", "Create pending order for manual backoffice processing (guest: one order, requires Idempotency-Key header)", false)},
 			"/api/v1/orders/{id}": gin.H{"get": op("Orders", "Get a guest order by id (guest cookie ownership required)", false)},
-			// Explicit claim retry (GO-P1-3). Needs BOTH the Bearer access
+			// Explicit claim retry. Needs BOTH the Bearer access
 			// token (which account) and the vero_guest_session cookie (which
 			// guest order). Takes no request body: an order id or a matching
 			// email would not be accepted as proof. 200 with

@@ -10,17 +10,6 @@ import (
 	"golang.org/x/oauth2"
 )
 
-// built on Google-endorsed libraries — NO hand-rolled JWT/JWKS/cryptography:
-//
-//   - golang.org/x/oauth2      → the Authorization Code exchange (token endpoint).
-//   - github.com/coreos/go-oidc → OpenID Connect id_token verification. The
-//     Verifier validates the RS256 signature against Google's JWKS (fetched from
-//     the OIDC discovery document, cached + rotated by the library), the issuer,
-//     the audience (our client ID), and expiry.
-//
-// The provider is pinned to Google's issuer, so arbitrary OIDC providers are
-// rejected — only Google-issued id_tokens are accepted.
-
 const googleIssuer = "https://accounts.google.com"
 
 // googleScope is the minimal OIDC scope set: identity + email + display name.
@@ -48,7 +37,17 @@ type GoogleIdentity struct {
 	Picture string
 }
 
-// GoogleClient wraps the OIDC provider + verifier + oauth2 config.
+// GoogleClient wraps the OIDC provider + verifier + oauth2 config. It is built
+// on Google-endorsed libraries — NO hand-rolled JWT/JWKS/cryptography:
+//
+//   - golang.org/x/oauth2      → the Authorization Code exchange (token endpoint).
+//   - github.com/coreos/go-oidc → OpenID Connect id_token verification. The
+//     Verifier validates the RS256 signature against Google's JWKS (fetched from
+//     the OIDC discovery document, cached + rotated by the library), the issuer,
+//     the audience (our client ID), and expiry.
+//
+// The provider is pinned to Google's issuer, so arbitrary OIDC providers are
+// rejected — only Google-issued id_tokens are accepted.
 type GoogleClient struct {
 	oauthConfig oauth2.Config
 	verifier    *oidc.IDTokenVerifier
@@ -77,12 +76,6 @@ func newGoogleClientWithProvider(provider *oidc.Provider, clientID, clientSecret
 	// Verify signature (JWKS from discovery), issuer, audience=clientID, expiry.
 	verifier := provider.Verifier(&oidc.Config{ClientID: clientID})
 	return &GoogleClient{oauthConfig: oauthConfig, verifier: verifier}
-}
-
-// AuthCodeURL builds the Google consent-screen redirect for the client's
-// configured redirect URI. See AuthCodeURLForRedirect.
-func (g *GoogleClient) AuthCodeURL(state, nonce, codeVerifier string) string {
-	return g.AuthCodeURLForRedirect(g.oauthConfig.RedirectURL, state, nonce, codeVerifier)
 }
 
 func (g *GoogleClient) AuthCodeURLForRedirect(redirectURI, state, nonce, codeVerifier string) string {

@@ -24,10 +24,9 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-// NOTE (SEC, 23 Agu 2026): there is intentionally NO RefreshRequest DTO. The
-// refresh token travels ONLY in the HttpOnly cookie (Path=/api/v1/auth);
-// accepting it in a JSON body would let JavaScript handle it and widen the
-// XSS-exfiltration surface. Keep it that way.
+// There is intentionally NO RefreshRequest DTO. The refresh token travels
+// ONLY in the HttpOnly cookie (Path=/api/v1/auth); accepting it in a JSON body
+// would let JavaScript handle it and widen the XSS-exfiltration surface.
 
 type AuthResponse struct {
 	AccessToken string `json:"access_token"`
@@ -49,8 +48,8 @@ type ChatRequest struct {
 
 // SelectPackageRequest is the body of POST /api/v1/chat/select-package — the
 // deterministic "Select Package" action of a Travel Package recommendation
-// card (B-GENUI-3). It runs the same select_package tool logic the LLM uses;
-// the frontend never mutates selected_trip_id locally.
+// card. It runs the same select_package tool logic the LLM uses; the frontend
+// never mutates selected_trip_id locally.
 type SelectPackageRequest struct {
 	TripID uuid.UUID `json:"trip_id" binding:"required"`
 }

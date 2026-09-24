@@ -15,9 +15,9 @@ import (
 
 const chatStreamWriteDeadline = 10 * time.Second
 
-// PERF-1 (3 Agu 2026): streaming chat over Server-Sent Events.
-// Each `delta` carries a text fragment and terminal `done` carries full
-// ChatResult. Response remains SSE rather than standard JSON envelope.
+// streamChat answers over Server-Sent Events: each `delta` carries a text
+// fragment and the terminal `done` carries the full ChatResult. The response
+// stays SSE rather than the standard JSON envelope.
 
 func (h *Handler) streamChat(c *gin.Context, chatCtx services.ChatContext, req dto.ChatRequest, setCookie func()) {
 	c.Header("Content-Type", "text/event-stream")

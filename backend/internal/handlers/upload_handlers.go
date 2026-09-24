@@ -15,7 +15,6 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/utils"
 )
 
-// maxUploadBytes caps a single media upload
 const maxUploadBytes = 5 << 20 // 5 MiB
 
 func (h *Handler) UploadTripMedia(c *gin.Context) {
@@ -25,7 +24,6 @@ func (h *Handler) UploadTripMedia(c *gin.Context) {
 		return
 	}
 
-	// Enforce a size limit before touching disk
 	if file.Size <= 0 || file.Size > maxUploadBytes {
 		utils.BadRequest(c, "File too large", gin.H{"max_bytes": maxUploadBytes, "size": file.Size})
 		return

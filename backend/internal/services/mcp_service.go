@@ -82,7 +82,6 @@ func (s *MCPService) Execute(ctx context.Context, sessionID uuid.UUID, userID *u
 	case mcp.ToolCreateBooking, mcp.ToolCreateOrder:
 		result = s.executeCreateBooking(ctx, sessionID, userID, payload)
 
-	// AIW-5: detail / pricing / availability tools.
 	case mcp.ToolGetTripDetail:
 		result = s.executeGetTripDetail(ctx, payload)
 	case mcp.ToolCalculateTripPrice:
@@ -224,32 +223,28 @@ func (s *MCPService) executeSearchTrips(ctx context.Context, sessionID uuid.UUID
 
 	results := make([]map[string]interface{}, 0, len(scored))
 	for _, trip := range scored {
-		// AIW-2: Limit fields returned to LLM to prevent context window bloat.
-		// AIW-1: Sanitize content strings to prevent indirect prompt injection.
+		// Sanitize free-text against indirect prompt injection and limit
+		// fields returned to the LLM to prevent context bloat.
 		sanitizedSummary := sanitizePromptInjection(trip.Summary)
 		var sanitizedHighlights []string
 		for _, h := range trip.Highlights {
 			sanitizedHighlights = append(sanitizedHighlights, sanitizePromptInjection(h))
 		}
 
-		// AIW-5: expose safe, relevant pricing so the LLM can answer discount /
-		// child-price questions grounded in backend data (source of truth).
-		// Prices reuse the same effective-price helpers as the booking flow, so
-		// the catalog card quote never contradicts the charged total. `price` is
-		// kept (effective adult price) for backward compatibility with the
-		// frontend recommendation cards; the new fields add the full picture.
+		// Effective prices reuse the booking helpers so the catalog card quote
+		// never contradicts the charged total. `price` (effective adult price)
+		// stays for frontend recommendation-card compatibility.
 		pb := priceBreakdown(trip, 1, 0)
 		results = append(results, map[string]interface{}{
-			"id":          trip.ID.String(),
-			"slug":        sanitizePromptInjection(trip.Slug),
-			"title":       sanitizePromptInjection(trip.Title),
-			"destination": sanitizePromptInjection(trip.Destination),
-			"location":    sanitizePromptInjection(trip.Location),
-			"category":    sanitizePromptInjection(trip.Category),
-			"duration":    sanitizePromptInjection(trip.Duration),
-			"summary":     limitString(sanitizedSummary, 150),
-			"price":       firstNonZero(trip.BasePrice, trip.EstimatedPrice),
-			// New pricing fields (effective adult price honors discount).
+			"id":                     trip.ID.String(),
+			"slug":                   sanitizePromptInjection(trip.Slug),
+			"title":                  sanitizePromptInjection(trip.Title),
+			"destination":            sanitizePromptInjection(trip.Destination),
+			"location":               sanitizePromptInjection(trip.Location),
+			"category":               sanitizePromptInjection(trip.Category),
+			"duration":               sanitizePromptInjection(trip.Duration),
+			"summary":                limitString(sanitizedSummary, 150),
+			"price":                  firstNonZero(trip.BasePrice, trip.EstimatedPrice),
 			"adult_price":            pb.AdultNormalPrice,
 			"adult_effective_price":  pb.AdultUnitPrice,
 			"child_price":            trip.ChildPrice,
@@ -331,7 +326,7 @@ func (s *MCPService) executeCollectOrderDetail(toolName string, payload map[stri
 	}}
 }
 
-// resolveAITrip is a shared lookup for the AI-facing read tools (AIW-5). It
+// resolveAITrip is a shared lookup for the AI-facing read tools. It
 // parses trip_id from the payload and loads the trip (with itineraries
 // preloaded by the repository). Returns a user/AI-safe error message when the
 // id is malformed or the trip does not exist — never a raw DB error.
@@ -349,7 +344,7 @@ func (s *MCPService) resolveAITrip(ctx context.Context, payload map[string]inter
 }
 
 // sanitizeStringSlice applies prompt-injection sanitization to a slice of
-// free-text catalog strings before they are sent to the LLM (AIW-1).
+// free-text catalog strings before they are sent to the LLM.
 func sanitizeStringSlice(items []string) []string {
 	if len(items) == 0 {
 		return nil
@@ -361,11 +356,11 @@ func sanitizeStringSlice(items []string) []string {
 	return out
 }
 
-// executeGetTripDetail returns the full, AI-safe detail of ONE package (AIW-5).
+// executeGetTripDetail returns the full, AI-safe detail of ONE package.
 // It deliberately exposes only fields the AI needs to answer detail questions —
 // no internal DB bookkeeping (CreatedAt/UpdatedAt/DeletedAt, soft-delete, raw
-// publish scheduling internals). All free-text is sanitized (AIW-1) and prices
-// reuse the booking pricing helpers so the AI never contradicts the backend.
+// publish scheduling internals). All free-text is sanitized and prices reuse the
+// booking pricing helpers so the AI never contradicts the backend.
 func (s *MCPService) executeGetTripDetail(ctx context.Context, payload map[string]interface{}) ToolResult {
 	trip, tripID, errMsg := s.resolveAITrip(ctx, payload)
 	if errMsg != "" {
@@ -437,7 +432,7 @@ func (s *MCPService) executeGetTripDetail(ctx context.Context, payload map[strin
 }
 
 // executeCalculateTripPrice returns the authoritative price quote for a given
-// pax mix (AIW-5). The LLM must never compute a total itself; it calls this and
+// pax mix. The LLM must never compute a total itself; it calls this and
 // reports breakdown.Total. Because priceBreakdown is the same helper used by
 // BookingService.Create, the quoted total equals the total charged at booking.
 func (s *MCPService) executeCalculateTripPrice(ctx context.Context, payload map[string]interface{}) ToolResult {
@@ -559,7 +554,7 @@ func (s *MCPService) executeCheckTripAvailability(ctx context.Context, payload m
 }
 
 // orderMarkerPrefix tags the system ChatMessage written after a successful
-// create_booking so the order can be found again for THIS session (AIW-8). The
+// create_booking so the order can be found again for THIS session. The
 // bookings table has no session_id column, so the linkage is stored as a
 // marker message on the chat session (chat_messages.session_id already exists
 // and is indexed) — no schema change required.
@@ -577,7 +572,7 @@ type orderMarker struct {
 	ContactName   string  `json:"contact_name,omitempty"`
 }
 
-// findSessionOrder scans recent chat messages for an order marker (AIW-8).
+// findSessionOrder scans recent chat messages for an order marker.
 // Returns nil when no order has been created in this session yet.
 func (s *MCPService) findSessionOrder(ctx context.Context, sessionID uuid.UUID) *orderMarker {
 	msgs, err := s.repo.ListRecentChatMessages(ctx, sessionID, 200)
@@ -598,7 +593,7 @@ func (s *MCPService) findSessionOrder(ctx context.Context, sessionID uuid.UUID) 
 }
 
 // executeCheckOrderStatus reports whether an order already exists in THIS chat
-// session (AIW-8). Session-scoped: it never touches other sessions' orders.
+// session. It never touches other sessions' orders.
 // Lets the AI answer "is my order ready / what's my order id" from backend
 // truth instead of guessing, and feeds create_booking's duplicate guard.
 func (s *MCPService) executeCheckOrderStatus(ctx context.Context, sessionID uuid.UUID) ToolResult {
@@ -654,18 +649,13 @@ func scoreTrips(query string, packages []models.Trip) []models.Trip {
 		scored = append(scored, scoredTrip{trip: trip, score: score})
 	}
 
-	// PERF-2: gunakan sort.SliceStable (O(N log N)) alih-alih Bubble Sort O(N^2).
-	// Stabil agar urutan asli dari DB dipertahankan saat score seri (tie-break deterministik).
+	// Stable sort keeps the original DB order on score ties (deterministic tie-break).
 	sort.SliceStable(scored, func(i, j int) bool {
 		return scored[i].score > scored[j].score
 	})
 
-	// Return up to 3 packages, prioritizing those with a positive score.
-	// Unlike the previous break-on-zero behaviour, packages with score 0 are
-	// still included (after the matching ones) so customers see every
-	// available option when the catalog is small. The stable sort keeps
-	// deterministic DB order among equal scores.
-	// min() is the Go 1.21+ built-in (the local duplicate helper was removed).
+	// Return up to 3 packages; zero-score packages stay included (after the
+	// matching ones) so customers see every option when the catalog is small.
 	result := make([]models.Trip, 0, min(3, len(scored)))
 	for _, item := range scored {
 		result = append(result, item.trip)
@@ -705,7 +695,7 @@ func (s *MCPService) mock(toolName string, _ map[string]any) ToolResult {
 func (s *MCPService) executeCreateBooking(ctx context.Context, sessionID uuid.UUID, userID *uuid.UUID, payload map[string]interface{}) ToolResult {
 	log.Printf("[mcp] create_booking called")
 
-	// AIW-8 duplicate-order guard: if an order already exists for THIS session,
+	// Duplicate-order guard: if an order already exists for THIS session,
 	// refuse to create a second one and return the existing order instead. This
 	// prevents double orders when the user re-confirms ("lanjut") after a
 	// successful create_booking.
@@ -748,7 +738,6 @@ func (s *MCPService) executeCreateBooking(ctx context.Context, sessionID uuid.UU
 	}
 
 	log.Printf("[mcp] create_booking saving trip_id=%s adult_pax=%d child_pax=%d contact_email=%q contact_phone=%q travel_date=%q", req.TripID, req.AdultPax, req.ChildPax, req.ContactEmail, req.ContactPhone, req.TravelDate)
-	// BUG-9: Validate that travel_date parses successfully before booking.
 	parsedDate := parseDate(req.TravelDate)
 	if parsedDate == nil {
 		log.Printf("[mcp] create_booking failed invalid_date travel_date=%q", req.TravelDate)
@@ -790,9 +779,8 @@ func (s *MCPService) executeCreateBooking(ctx context.Context, sessionID uuid.UU
 			}}
 		}
 		if errors.Is(err, ErrBookingContactRequired) {
-			// GO-P0-1: a guest order must carry a contact that can anchor the
-			// one-order entitlement. Tell the LLM what to fix instead of letting
-			// it retry the same unusable payload.
+			// A guest order must carry a contact that can anchor the one-order
+			// entitlement; tell the LLM what to fix.
 			return ToolResult{Tool: mcp.ToolCreateBooking, Status: models.ToolResultStatusFailed, Data: map[string]interface{}{
 				"success": false, "error": "contact_email or contact_phone must be usable: an email containing @, or a phone number containing digits",
 			}}
@@ -801,7 +789,7 @@ func (s *MCPService) executeCreateBooking(ctx context.Context, sessionID uuid.UU
 	}
 	log.Printf("[mcp] create_booking saved booking_id=%s status=%s payment_status=%s total=%.2f", booking.ID, booking.BookingStatus, booking.PaymentStatus, booking.TotalPrice)
 
-	// AIW-8: persist an order marker on the chat session so check_order_status
+	// Persist an order marker on the chat session so check_order_status
 	// and the duplicate guard can find this order later. Best-effort: a marker
 	// write failure does not fail the already-created booking. The marker stores
 	// only non-PII identifiers + total (contact name at most); email/phone are

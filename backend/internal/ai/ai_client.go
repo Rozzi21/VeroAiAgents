@@ -352,14 +352,6 @@ func extractString(m map[string]interface{}, key string) (string, string) {
 	return "", ""
 }
 
-func (c *Client) GenerateStream(ctx context.Context, req CompletionRequest, onDelta func(text string)) (CompletionResponse, error) {
-	return c.GenerateStreamEvents(ctx, req, func(event StreamEvent) {
-		if event.Type == StreamEventTextDelta && onDelta != nil {
-			onDelta(event.Text)
-		}
-	})
-}
-
 // GenerateStreamEvents consumes OpenAI-compatible SSE events inline. It emits
 // each real text delta before reading the next provider event and emits only a
 // classification signal for tool-call fragments; incomplete tool arguments
@@ -462,7 +454,6 @@ func (c *Client) GenerateStreamEvents(ctx context.Context, req CompletionRequest
 
 		line = strings.TrimRight(line, "\r\n")
 		if line == "" {
-			// End of one SSE event. Continue to read the next event.
 			continue
 		}
 		if !strings.HasPrefix(line, "data:") {
@@ -556,7 +547,6 @@ func (c *Client) GenerateStreamEvents(ctx context.Context, req CompletionRequest
 	}
 	result = out
 	if len(out.ToolCalls) == 0 && out.Text == "" {
-
 		if reasoningText.Len() > 0 {
 			out.Text = reasoningText.String()
 		} else {

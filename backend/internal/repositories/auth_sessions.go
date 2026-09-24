@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/models"
-	"gorm.io/gorm"
 )
 
 func (r *Repository) CreateAuthSession(ctx context.Context, userID uuid.UUID, tokenJTI string, expiresAt time.Time) error {
@@ -67,15 +66,6 @@ func (r *Repository) RevokeAllActiveSessionsByUser(ctx context.Context, userID u
 		Update("revoked_at", time.Now()).Error
 }
 
-func (r *Repository) IsSessionRevoked(ctx context.Context, tokenJTI string) (bool, error) {
-	var session models.AuthSession
-	err := r.DB.WithContext(ctx).Where("token_jti = ?", tokenJTI).First(&session).Error
-	if err != nil {
-		return false, err
-	}
-	return session.RevokedAt != nil, nil
-}
-
 func (r *Repository) RevokeSessionByJTIIfExists(ctx context.Context, tokenJTI string) error {
 	result := r.DB.WithContext(ctx).Model(&models.AuthSession{}).
 		Where("token_jti = ? AND revoked_at IS NULL", tokenJTI).
@@ -84,21 +74,4 @@ func (r *Repository) RevokeSessionByJTIIfExists(ctx context.Context, tokenJTI st
 		return result.Error
 	}
 	return nil
-}
-
-func (r *Repository) CountActiveSessionsByJTI(ctx context.Context, tokenJTI string) (int64, error) {
-	var count int64
-	err := r.DB.WithContext(ctx).Model(&models.AuthSession{}).
-		Where("token_jti = ? AND revoked_at IS NULL AND expires_at > ?", tokenJTI, time.Now()).
-		Count(&count).Error
-	return count, err
-}
-
-// EnsureRevokeIsIdempotent allows logout on already-revoked sessions without error.
-func (r *Repository) RevokeSessionByJTIAllowMissing(ctx context.Context, tokenJTI string) error {
-	err := r.RevokeSessionByJTI(ctx, tokenJTI)
-	if err == gorm.ErrRecordNotFound {
-		return nil
-	}
-	return err
 }

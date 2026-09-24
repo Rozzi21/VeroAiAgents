@@ -12,7 +12,7 @@ import (
 	"github.com/rozzi/vero-ai-travel-agents/backend/internal/services"
 )
 
-// Google OAuth handler tests (29 Agu 2026). The Google service is enabled with
+// Google OAuth handler tests. The Google service is enabled with
 // an OFFLINE client (no discovery, no network, no real credentials); the
 // tested guard paths return before any token exchange.
 

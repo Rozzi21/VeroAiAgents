@@ -243,12 +243,6 @@ func StartStage(ctx context.Context, name string) func(string) {
 	}
 }
 
-func RecordStageSinceRequest(ctx context.Context, name, status string) {
-	if trace := FromContext(ctx); trace != nil {
-		trace.emit(Event{Name: name, Status: status, Duration: time.Since(trace.start), SinceRequest: time.Since(trace.start)})
-	}
-}
-
 func RecordDuration(ctx context.Context, name, status string, duration time.Duration) {
 	if trace := FromContext(ctx); trace != nil {
 		trace.emit(Event{Name: name, Status: status, Duration: duration, SinceRequest: time.Since(trace.start)})

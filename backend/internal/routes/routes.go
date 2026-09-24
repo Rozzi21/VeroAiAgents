@@ -26,7 +26,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 		// OptionalAuth: a valid Bearer access token upgrades chat to an authenticated caller.
 		api.POST("/chat", middlewares.PublicWriteRateLimit(), middlewares.RequestBodyLimit(64<<10), middlewares.OptionalAuth(s.JWT), h.GuestChat)
 		api.GET("/chat/history", h.GuestHistory)
-		// B-GENUI-3: explicit "Select Package" action of a recommendation card.
+		// Explicit "Select Package" action of a recommendation card.
 		// Runs the existing select_package tool logic; same auth contract as
 		// /chat (guest cookie + optional Bearer upgrade). Selection is not
 		// booking — no order is created here.
@@ -87,7 +87,7 @@ func Register(router *gin.Engine, h *handlers.Handler, s *services.Services) {
 			protected.DELETE("/trips/:id", middlewares.Role(models.RoleOperator, models.RoleAdmin), h.DeleteTrip)
 
 			protected.POST("/bookings", h.CreateBooking)
-			// Explicit, idempotent retry for the guest-order claim (GO-P1-3).
+			// Explicit, idempotent retry for the guest-order claim.
 			// The claim hooks in Register/Login/GoogleCallback are best-effort
 			// and can be skipped silently (guest cookie not sent on the
 			// cross-site Google callback, transient DB failure), which strands

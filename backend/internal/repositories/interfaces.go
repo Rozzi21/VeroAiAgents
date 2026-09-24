@@ -29,10 +29,7 @@ type AuthSessionRepository interface {
 	RevokeSessionByJTI(ctx context.Context, tokenJTI string) error
 	RotateSession(ctx context.Context, tokenJTI string) (rotated bool, err error)
 	RevokeAllActiveSessionsByUser(ctx context.Context, userID uuid.UUID) error
-	IsSessionRevoked(ctx context.Context, tokenJTI string) (bool, error)
 	RevokeSessionByJTIIfExists(ctx context.Context, tokenJTI string) error
-	CountActiveSessionsByJTI(ctx context.Context, tokenJTI string) (int64, error)
-	RevokeSessionByJTIAllowMissing(ctx context.Context, tokenJTI string) error
 }
 
 // OAuthRepository — Google OAuth state + account-link persistence.
@@ -76,13 +73,11 @@ type TripRepository interface {
 
 // BookingRepository — booking persistence + atomic status transitions.
 type BookingRepository interface {
-	FindBookingBySession(ctx context.Context, sessionID uuid.UUID) (models.Booking, error)
 	CreateBooking(ctx context.Context, booking *models.Booking) error
 	ListBookings(ctx context.Context, query RepositoryFilter) ([]models.Booking, error)
 	RecentBookings(ctx context.Context, limit int) ([]models.Booking, error)
 	FindBooking(ctx context.Context, id uuid.UUID) (models.Booking, error)
 	FindBookingForUser(ctx context.Context, id, userID uuid.UUID) (models.Booking, error)
-	UpdateBooking(ctx context.Context, booking *models.Booking) error
 	UpdateBookingStatusAtomic(ctx context.Context, id uuid.UUID, fromStatus, toStatus string) (bool, error)
 }
 
@@ -90,9 +85,9 @@ type GuestRepository interface {
 	CreateGuestSession(ctx context.Context, session *models.GuestSession) error
 	FindGuestSessionByTokenHash(ctx context.Context, hash string) (models.GuestSession, error)
 	FindGuestSession(ctx context.Context, id uuid.UUID) (models.GuestSession, error)
-	// BindChatSessionGuest replaced UpdateChatSessionGuest (GO-P2-7): the
-	// chat→guest binding is an authorization input for guest order ownership,
-	// so it is a single-winner conditional UPDATE, never a blind overwrite.
+	// BindChatSessionGuest: the chat→guest binding is an authorization input
+	// for guest order ownership, so it is a single-winner conditional UPDATE,
+	// never a blind overwrite.
 	BindChatSessionGuest(ctx context.Context, chatID, guestID uuid.UUID) (bool, error)
 	ClaimGuestOrder(ctx context.Context, guestID, userID uuid.UUID) (GuestOrderClaim, error)
 }
@@ -105,12 +100,12 @@ type BookingTransactionRepository interface {
 	LockGuestSession(ctx context.Context, id uuid.UUID) (models.GuestSession, error)
 	ConsumeGuestOrder(ctx context.Context, guestID, bookingID uuid.UUID) error
 	FindBookingByIdempotency(ctx context.Context, ownerID uuid.UUID, guest bool, hash string) (models.Booking, error)
-	// ListClaimedGuestSessionIDs supports the claim-crossing idempotency check
-	// (GO-P2-4): an Idempotency-Key first used as a guest must not create a
-	// second order after the guest order was claimed by the account.
+	// ListClaimedGuestSessionIDs supports the claim-crossing idempotency check:
+	// an Idempotency-Key first used as a guest must not create a second order
+	// after the guest order was claimed by the account.
 	ListClaimedGuestSessionIDs(ctx context.Context, userID uuid.UUID, limit int) ([]uuid.UUID, error)
-	// GO-P0-1: contact-anchored entitlement, the second (cookie-independent)
-	// half of the one-order-per-guest rule. Both methods must run inside the
+	// Contact-anchored entitlement, the second (cookie-independent) half of
+	// the one-order-per-guest rule. Both methods must run inside the
 	// same booking transaction as CreateBooking/ConsumeGuestOrder.
 	FindGuestOrderEntitlement(ctx context.Context, contactKeys []string) (models.GuestOrderEntitlement, error)
 	ConsumeGuestOrderEntitlements(ctx context.Context, entitlements []models.GuestOrderEntitlement) error
